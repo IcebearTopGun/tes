@@ -1,32 +1,31 @@
 import { ReactNode } from "react";
 import { useLocation, Link } from "wouter";
-import { 
-  LayoutDashboard, 
-  BookOpen, 
-  Users, 
-  Settings, 
-  LogOut, 
-  Bell, 
+import {
+  LayoutDashboard,
+  BookOpen,
+  Users,
+  LogOut,
+  Bell,
   Search,
   User,
-  GraduationCap
+  GraduationCap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 export function DashboardLayout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
-  const { user, logout } = useAuth();
+  const { user, role, logout } = useAuth();
 
   const navItems = [
-    { name: "Overview", href: user?.role === "teacher" ? "/teacher-dashboard" : "/student-dashboard", icon: LayoutDashboard },
+    { name: "Overview", href: role === "teacher" ? "/teacher-dashboard" : "/student-dashboard", icon: LayoutDashboard },
     { name: "Analytics", href: "#", icon: GraduationCap },
     { name: "Resources", href: "#", icon: BookOpen },
     { name: "Community", href: "#", icon: Users },
@@ -49,23 +48,25 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
           {navItems.map((item) => {
             const isActive = location === item.href;
             return (
-              <Link key={item.name} href={item.href}>
-                <a className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
-                  isActive 
-                    ? "bg-primary text-primary-foreground shadow-premium" 
+              <Link
+                key={item.name}
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                  isActive
+                    ? "bg-primary text-primary-foreground shadow-premium"
                     : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                }`}>
-                  <item.icon className="h-4 w-4" />
-                  {item.name}
-                </a>
+                }`}
+              >
+                <item.icon className="h-4 w-4" />
+                {item.name}
               </Link>
             );
           })}
         </nav>
 
         <div className="p-4 border-t border-border/40">
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             className="w-full justify-start gap-3 text-muted-foreground hover:text-destructive rounded-xl"
             onClick={() => logout()}
           >
@@ -82,9 +83,9 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-4 flex-1">
             <div className="relative max-w-md w-full hidden sm:block">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <input 
-                type="text" 
-                placeholder="Search analytics..." 
+              <input
+                type="text"
+                placeholder="Search analytics..."
                 className="w-full bg-muted/50 border-none rounded-xl py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary/20 transition-all"
               />
             </div>
@@ -93,23 +94,23 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-4">
             <Button size="icon" variant="ghost" className="rounded-xl text-muted-foreground relative">
               <Bell className="h-5 w-5" />
-              <span className="absolute top-2 right-2 h-2 w-2 bg-destructive rounded-full border-2 border-background"></span>
+              <span className="absolute top-2 right-2 h-2 w-2 bg-destructive rounded-full border-2 border-background" />
             </Button>
-            
+
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="p-0 h-9 w-9 rounded-xl overflow-hidden ring-offset-background transition-all hover:ring-2 hover:ring-primary/20">
                   <Avatar className="h-9 w-9 rounded-xl">
                     <AvatarFallback className="bg-primary/10 text-primary font-bold">
-                      {user?.user?.name?.[0]}
+                      {(user as any)?.name?.[0] ?? "?"}
                     </AvatarFallback>
                   </Avatar>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 rounded-xl shadow-premium">
                 <div className="p-4 border-b border-border/40 mb-2">
-                  <p className="text-sm font-bold truncate">{user?.user?.name}</p>
-                  <p className="text-xs text-muted-foreground truncate uppercase tracking-widest mt-0.5">{user?.role}</p>
+                  <p className="text-sm font-bold truncate">{(user as any)?.name}</p>
+                  <p className="text-xs text-muted-foreground truncate uppercase tracking-widest mt-0.5">{role}</p>
                 </div>
                 <DropdownMenuItem className="rounded-lg gap-2">
                   <User className="h-4 w-4" /> Profile

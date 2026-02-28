@@ -18,6 +18,7 @@ export interface IStorage {
   createExam(exam: InsertExam): Promise<Exam>;
   getExamsByTeacher(teacherId: number): Promise<Exam[]>;
 
+  getAnswerSheetsByExam(examId: number): Promise<any[]>;
   createAnswerSheet(sheet: any): Promise<any>;
   getAnswerSheet(id: number): Promise<any>;
   getExam(id: number): Promise<Exam | undefined>;
@@ -74,6 +75,10 @@ export class DatabaseStorage implements IStorage {
 
   async getExamsByTeacher(teacherId: number): Promise<Exam[]> {
     return await db.select().from(exams).where(eq(exams.teacherId, teacherId));
+  }
+
+  async getAnswerSheetsByExam(examId: number): Promise<any[]> {
+    return await db.select().from(answerSheets).where(eq(answerSheets.examId, examId));
   }
 
   async createAnswerSheet(sheet: any): Promise<any> {

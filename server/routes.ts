@@ -235,6 +235,28 @@ export async function registerRoutes(
     res.json(exams);
   });
 
+  app.get("/api/exams/:id/answer-sheets", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    try {
+      const examId = parseInt(req.params.id);
+      const exam = await storage.getExam(examId);
+      if (!exam || exam.teacherId !== req.user.id) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      const sheets = await storage.getAnswerSheetsByExam(examId);
+      // Attach evaluation for each sheet
+      const sheetsWithEval = await Promise.all(sheets.map(async (s) => {
+        const evaluation = await storage.getEvaluationByAnswerSheetId(s.id);
+        return { ...s, evaluation: evaluation || null };
+      }));
+      res.json(sheetsWithEval);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load answer sheets" });
+    }
+  });
+
   app.post(api.exams.processAnswerSheet.path, authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") {
       return res.status(401).json({ message: "Unauthorized" });
