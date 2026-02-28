@@ -410,9 +410,11 @@ export async function registerRoutes(
         console.log("[EVAL] Using stored modelAnswerText.");
       }
 
-      const markingSchemeText = exam.markingSchemeUrl
-        ? await extractDocumentText(exam.markingSchemeUrl, "marking scheme")
-        : "";
+      let markingSchemeText = exam.markingSchemeText?.trim() || "";
+      if (!markingSchemeText && exam.markingSchemeUrl) {
+        console.log("[EVAL] No markingSchemeText stored, extracting from uploaded file...");
+        markingSchemeText = await extractDocumentText(exam.markingSchemeUrl, "marking scheme");
+      }
 
       const ocrData = (() => {
         try { return JSON.parse(sheet.ocrOutput); } catch { return { answers: [] }; }

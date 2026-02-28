@@ -28,9 +28,9 @@ export async function createExam(payload: {
   subject: string;
   className: string;
   totalMarks: number;
-  questionPaperUrl?: string;
-  modelAnswerUrl?: string;
-  markingSchemeUrl?: string;
+  questionText?: string;
+  modelAnswerText?: string;
+  markingSchemeText?: string;
 }) {
   const res = await fetch(`${BASE}/api/exams`, {
     method: "POST",

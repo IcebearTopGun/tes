@@ -77,11 +77,6 @@ interface OcrResult {
   answers: Array<{ question_number: number; answer_text: string }>;
 }
 
-interface UploadedFile {
-  name: string;
-  dataUrl: string;
-}
-
 const EXAMPLE_QUESTIONS = [
   "Which students need improvement?",
   "Who scored highest in the last exam?",
@@ -96,62 +91,6 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-}
-
-function FileUploadButton({
-  label,
-  accept,
-  value,
-  onChange,
-}: {
-  label: string;
-  accept?: string;
-  value: UploadedFile | null;
-  onChange: (file: UploadedFile | null) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const dataUrl = await readFileAsDataUrl(file);
-    onChange({ name: file.name, dataUrl });
-    e.target.value = "";
-  };
-
-  return (
-    <div>
-      <input
-        type="file"
-        accept={accept || "image/*,application/pdf"}
-        className="hidden"
-        ref={inputRef}
-        onChange={handleChange}
-      />
-      {value ? (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-sm">
-          <FileCheck className="h-4 w-4 text-emerald-600 shrink-0" />
-          <span className="text-emerald-700 font-medium truncate flex-1">{value.name}</span>
-          <button
-            type="button"
-            onClick={() => onChange(null)}
-            className="text-emerald-500 hover:text-emerald-700"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-xl border border-dashed border-border hover:border-primary/40 hover:bg-primary/5 text-muted-foreground hover:text-primary transition-all text-sm"
-        >
-          <Upload className="h-4 w-4 shrink-0" />
-          {label}
-        </button>
-      )}
-    </div>
-  );
 }
 
 function DropZone({
@@ -240,10 +179,6 @@ export default function TeacherDashboard() {
   const [isOcrDialogOpen, setIsOcrDialogOpen] = useState(false);
   const [selectedExamId, setSelectedExamId] = useState<string>("");
 
-  // File upload state for exam creation
-  const [questionPaperFile, setQuestionPaperFile] = useState<UploadedFile | null>(null);
-  const [modelAnswerFile, setModelAnswerFile] = useState<UploadedFile | null>(null);
-  const [markingSchemeFile, setMarkingSchemeFile] = useState<UploadedFile | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
@@ -361,10 +296,9 @@ export default function TeacherDashboard() {
       insertExamSchema.extend({
         totalMarks: z.coerce.number().min(1, "Must be at least 1"),
         teacherId: z.number().optional(),
-        questionPaperUrl: z.string().optional(),
-        modelAnswerUrl: z.string().optional(),
-        markingSchemeUrl: z.string().optional(),
+        questionText: z.string().optional(),
         modelAnswerText: z.string().optional(),
+        markingSchemeText: z.string().optional(),
       })
     ),
     defaultValues: {
@@ -372,10 +306,9 @@ export default function TeacherDashboard() {
       className: "",
       examName: "",
       totalMarks: 0,
-      questionPaperUrl: "",
-      modelAnswerUrl: "",
-      markingSchemeUrl: "",
+      questionText: "",
       modelAnswerText: "",
+      markingSchemeText: "",
     },
   });
 
@@ -383,17 +316,14 @@ export default function TeacherDashboard() {
     try {
       await apiRequest("POST", api.exams.create.path, {
         ...values,
-        questionPaperUrl: questionPaperFile?.dataUrl || values.questionPaperUrl || null,
-        modelAnswerUrl: modelAnswerFile?.dataUrl || values.modelAnswerUrl || null,
-        markingSchemeUrl: markingSchemeFile?.dataUrl || values.markingSchemeUrl || null,
+        questionText: values.questionText || null,
+        modelAnswerText: values.modelAnswerText || null,
+        markingSchemeText: values.markingSchemeText || null,
       });
       queryClient.invalidateQueries({ queryKey: [api.exams.list.path] });
       toast({ title: "Exam created", description: "Your exam has been saved." });
       setIsDialogOpen(false);
       form.reset();
-      setQuestionPaperFile(null);
-      setModelAnswerFile(null);
-      setMarkingSchemeFile(null);
     } catch {
       toast({ title: "Error", description: "Failed to create exam", variant: "destructive" });
     }
@@ -488,40 +418,47 @@ export default function TeacherDashboard() {
                     </FormItem>
                   )} />
 
-                  <div className="space-y-3">
-                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Upload Documents</p>
-                    <FileUploadButton
-                      label="Upload Question Paper (PDF / Image)"
-                      value={questionPaperFile}
-                      onChange={setQuestionPaperFile}
-                    />
-                    <FileUploadButton
-                      label="Upload Model Answer (PDF / Image)"
-                      value={modelAnswerFile}
-                      onChange={setModelAnswerFile}
-                    />
-                    <FileUploadButton
-                      label="Upload Marking Scheme (PDF / Image)"
-                      value={markingSchemeFile}
-                      onChange={setMarkingSchemeFile}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      These documents help the AI evaluate answers accurately.
-                    </p>
-                  </div>
+                  <FormField control={form.control} name="questionText" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Questions</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder={"Q1 (10 marks): Explain photosynthesis.\nQ2 (10 marks): State Newton's First Law."}
+                          className="rounded-xl min-h-[90px] text-sm"
+                          data-testid="input-question-text"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
 
                   <FormField control={form.control} name="modelAnswerText" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Model Answer Key <span className="text-muted-foreground font-normal">(recommended)</span></FormLabel>
+                      <FormLabel>Model Answer Key</FormLabel>
                       <FormControl>
                         <Textarea
-                          placeholder={"Q1: The capital of France is Paris.\nQ2: Photosynthesis converts sunlight into glucose using CO₂ and water..."}
-                          className="rounded-xl min-h-[100px] text-sm"
+                          placeholder={"Q1: Photosynthesis is the process by which plants use sunlight, CO₂, and water to produce glucose and oxygen.\nQ2: An object at rest stays at rest unless acted on by a net external force."}
+                          className="rounded-xl min-h-[90px] text-sm"
                           data-testid="input-model-answer-text"
                           {...field}
                         />
                       </FormControl>
-                      <p className="text-xs text-muted-foreground">Type the expected answers. This is used directly by the AI for accurate evaluation.</p>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
+                  <FormField control={form.control} name="markingSchemeText" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Marking Scheme <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder={"Award full marks for complete accurate answers.\nPartial marks for partially correct answers.\n1 mark per key concept mentioned."}
+                          className="rounded-xl min-h-[70px] text-sm"
+                          data-testid="input-marking-scheme-text"
+                          {...field}
+                        />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -649,16 +586,16 @@ export default function TeacherDashboard() {
                           <TableCell className="text-muted-foreground">{exam.totalMarks}</TableCell>
                           <TableCell>
                             <div className="flex gap-1">
-                              {exam.questionPaperUrl && (
-                                <Badge variant="secondary" className="text-[10px] rounded px-1.5 py-0.5 border-none">QP</Badge>
+                              {exam.questionText && (
+                                <Badge variant="secondary" className="text-[10px] rounded px-1.5 py-0.5 border-none">Q</Badge>
                               )}
-                              {exam.modelAnswerUrl && (
+                              {exam.modelAnswerText && (
                                 <Badge variant="secondary" className="text-[10px] rounded px-1.5 py-0.5 border-none bg-emerald-100 text-emerald-700">MA</Badge>
                               )}
-                              {exam.markingSchemeUrl && (
+                              {exam.markingSchemeText && (
                                 <Badge variant="secondary" className="text-[10px] rounded px-1.5 py-0.5 border-none bg-violet-100 text-violet-700">MS</Badge>
                               )}
-                              {!exam.questionPaperUrl && !exam.modelAnswerUrl && !exam.markingSchemeUrl && (
+                              {!exam.questionText && !exam.modelAnswerText && !exam.markingSchemeText && (
                                 <span className="text-xs text-muted-foreground/50">—</span>
                               )}
                             </div>

@@ -6,7 +6,7 @@
  * Requires:  Server running at http://localhost:5000
  */
 
-import { generateAnswerSheet, generateModelAnswerSheet } from "./generate-sheet";
+import { generateAnswerSheet } from "./generate-sheet";
 import {
   loginTeacher,
   createExam,
@@ -252,8 +252,13 @@ async function main() {
   }
 
   section("2. Exam Setup");
-  const modelAnswerImage = generateModelAnswerSheet(MODEL_ANSWERS);
-  console.log(`  ${INFO} Generated model answer image (${Math.round(modelAnswerImage.length / 1024)}KB)`);
+  const modelAnswerText = MODEL_ANSWERS.map(
+    (q) => `Q${q.qNum} (${q.marks} marks): ${q.text}`
+  ).join("\n\n");
+  const questionText = MODEL_ANSWERS.map(
+    (q) => `Q${q.qNum} (${q.marks} marks): [Science question ${q.qNum}]`
+  ).join("\n");
+  console.log(`  ${INFO} Model answer text prepared (${modelAnswerText.length} chars)`);
 
   let examId: number;
   try {
@@ -262,8 +267,9 @@ async function main() {
       subject: "Science",
       className: "Grade 10A",
       totalMarks: 100,
-      modelAnswerUrl: modelAnswerImage,
-      markingSchemeUrl: modelAnswerImage,
+      questionText,
+      modelAnswerText,
+      markingSchemeText: "Award marks proportionally based on key concepts covered. Full marks for complete accurate answers. Partial marks for partially correct answers.",
     });
     examId = exam.id;
     assert(typeof examId === "number" && examId > 0, `Exam created (id=${examId})`);
