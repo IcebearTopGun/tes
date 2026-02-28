@@ -10,10 +10,12 @@ import OpenAI from "openai";
 const JWT_SECRET = process.env.SESSION_SECRET || "super-secret-key";
 
 function getOpenAIClient() {
-  return new OpenAI({
-    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
-    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  });
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL || undefined;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is not set. Please add it to your environment secrets.");
+  }
+  return new OpenAI({ apiKey, baseURL });
 }
 
 async function seedDatabase() {
@@ -262,22 +264,31 @@ export async function registerRoutes(
       return res.status(401).json({ message: "Unauthorized" });
     }
     
-    const examId = parseInt(req.params.id);
+    const examId = parseInt(req.params.id as string);
     const { imageBase64 } = req.body;
 
+    if (!imageBase64) {
+      console.error("[OCR] Missing imageBase64 in request body");
+      return res.status(400).json({ message: "Missing imageBase64 in request body" });
+    }
+
+    console.log(`[OCR] Starting OCR for exam ${examId}, image size: ${imageBase64.length} chars`);
+
     try {
+      console.log("[OCR] Calling OpenAI GPT-4o vision...");
       const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o",
         messages: [
           {
             role: "user",
             content: [
-              { type: "text", text: "Extract student information and answers from this handwritten answer sheet. Return ONLY valid JSON with fields: admission_number, student_name, and answers (an array of {question_number: number, answer_text: string})." },
+              {
+                type: "text",
+                text: "Extract student information and answers from this handwritten answer sheet. Return ONLY valid JSON with fields: admission_number (string), student_name (string), and answers (array of {question_number: number, answer_text: string}). If you cannot read the admission number or name, use 'UNKNOWN'."
+              },
               {
                 type: "image_url",
-                image_url: {
-                  url: imageBase64,
-                },
+                image_url: { url: imageBase64 },
               },
             ],
           },
@@ -285,27 +296,30 @@ export async function registerRoutes(
         response_format: { type: "json_object" }
       });
 
-      const ocrData = JSON.parse(response.choices[0].message.content || "{}");
-      
-      // Attempt to map to student
+      const rawContent = response.choices[0].message.content || "{}";
+      console.log("[OCR] Raw OpenAI response:", rawContent.substring(0, 300));
+
+      const ocrData = JSON.parse(rawContent);
+      console.log(`[OCR] Parsed data — student: ${ocrData.student_name}, admission: ${ocrData.admission_number}, answers: ${ocrData.answers?.length ?? 0}`);
+
       const student = await storage.getStudentByAdmissionNumber(ocrData.admission_number);
-      
+      console.log(`[OCR] Student lookup for "${ocrData.admission_number}": ${student ? `found id=${student.id}` : "not found, will save without link"}`);
+
       const sheet = await storage.createAnswerSheet({
         examId,
         studentId: student?.id || null,
-        admissionNumber: ocrData.admission_number,
-        studentName: ocrData.student_name,
+        admissionNumber: ocrData.admission_number || "UNKNOWN",
+        studentName: ocrData.student_name || "UNKNOWN",
         ocrOutput: JSON.stringify(ocrData),
         status: "processed"
       });
 
-      res.json({
-        id: sheet.id,
-        ...ocrData
-      });
-    } catch (err) {
-      console.error("OCR Error:", err);
-      res.status(500).json({ message: "Failed to process answer sheet" });
+      console.log(`[OCR] Answer sheet saved with id=${sheet.id}`);
+      res.json({ id: sheet.id, ...ocrData });
+    } catch (err: any) {
+      console.error("[OCR] Error:", err?.message || err);
+      if (err?.status) console.error("[OCR] OpenAI status:", err.status, err?.error);
+      res.status(500).json({ message: "Failed to process answer sheet", detail: err?.message });
     }
   });
 
@@ -314,17 +328,23 @@ export async function registerRoutes(
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const answerSheetId = parseInt(req.params.id);
+    const answerSheetId = parseInt(req.params.id as string);
+    console.log(`[EVAL] Starting evaluation for answer sheet id=${answerSheetId}`);
     try {
       const sheet = await storage.getAnswerSheet(answerSheetId);
       if (!sheet) {
+        console.error(`[EVAL] Answer sheet ${answerSheetId} not found`);
         return res.status(404).json({ message: "Answer sheet not found" });
       }
+      console.log(`[EVAL] Sheet found: student=${sheet.studentName}, examId=${sheet.examId}`);
 
       const exam = await storage.getExam(sheet.examId);
       if (!exam) {
+        console.error(`[EVAL] Exam ${sheet.examId} not found`);
         return res.status(404).json({ message: "Exam not found" });
       }
+      console.log(`[EVAL] Exam found: ${exam.examName} (${exam.subject}), totalMarks=${exam.totalMarks}`);
+      console.log(`[EVAL] Has model answer: ${!!exam.modelAnswerUrl}, has marking scheme: ${!!exam.markingSchemeUrl}`);
 
       const prompt = `
         Evaluate this student's answer sheet based on the teacher's model answers and marking scheme.
@@ -355,14 +375,18 @@ export async function registerRoutes(
         }
       `;
 
+      console.log("[EVAL] Calling OpenAI GPT-4o for evaluation...");
       const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" }
       });
 
-      const evalData = JSON.parse(response.choices[0].message.content || "{}");
-      
+      const rawEval = response.choices[0].message.content || "{}";
+      console.log("[EVAL] Raw OpenAI response:", rawEval.substring(0, 300));
+      const evalData = JSON.parse(rawEval);
+      console.log(`[EVAL] Parsed eval — student: ${evalData.student_name}, total_marks: ${evalData.total_marks}, questions: ${evalData.questions?.length ?? 0}`);
+
       const evaluation = await storage.createEvaluation({
         answerSheetId,
         studentName: evalData.student_name,
@@ -373,9 +397,10 @@ export async function registerRoutes(
       });
 
       res.json(evaluation);
-    } catch (err) {
-      console.error("Evaluation Error:", err);
-      res.status(500).json({ message: "Failed to evaluate answer sheet" });
+    } catch (err: any) {
+      console.error("[EVAL] Error:", err?.message || err);
+      if (err?.status) console.error("[EVAL] OpenAI status:", err.status, err?.error);
+      res.status(500).json({ message: "Failed to evaluate answer sheet", detail: err?.message });
     }
   });
 
