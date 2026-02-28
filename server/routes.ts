@@ -394,12 +394,23 @@ Return ONLY valid JSON (no extra text) with this exact structure:
   "overall_feedback": "<2-3 sentence summary of performance>"
 }`;
 
+      const isImageDataUrl = (url: string) => {
+        const m = url?.match(/^data:([^;]+);base64,/);
+        return !!m && m[1].startsWith("image/");
+      };
+
       const imageContent: Array<{ type: "image_url"; image_url: { url: string } }> = [];
-      if (exam.modelAnswerUrl) {
+      if (exam.modelAnswerUrl && isImageDataUrl(exam.modelAnswerUrl)) {
         imageContent.push({ type: "image_url", image_url: { url: exam.modelAnswerUrl } });
       }
-      if (exam.markingSchemeUrl && exam.markingSchemeUrl !== exam.modelAnswerUrl) {
+      if (exam.markingSchemeUrl && exam.markingSchemeUrl !== exam.modelAnswerUrl && isImageDataUrl(exam.markingSchemeUrl)) {
         imageContent.push({ type: "image_url", image_url: { url: exam.markingSchemeUrl } });
+      }
+
+      if (imageContent.length === 0) {
+        console.log("[EVAL] No image references available (model answer may be a PDF). Evaluating from OCR text only.");
+      } else {
+        console.log(`[EVAL] Attaching ${imageContent.length} image(s) to vision call.`);
       }
 
       console.log("[EVAL] Calling OpenAI GPT-4o for evaluation...");
