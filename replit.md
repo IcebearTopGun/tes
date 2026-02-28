@@ -1,6 +1,6 @@
-# School Exam Evaluator (ScholarFlow)
+# EduSync — School Exam Evaluation Platform
 
-A full-stack web application for teachers and students to manage exams, process answer sheets using AI (OCR), and track performance.
+A full-stack web application for teachers and students to manage exams, process answer sheets using AI (OCR + GPT-4o), grade homework, and track performance with analytics.
 
 ## Architecture
 

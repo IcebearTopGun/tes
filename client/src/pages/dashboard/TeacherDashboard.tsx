@@ -183,6 +183,7 @@ export default function TeacherDashboard() {
   const [hwModelSolution, setHwModelSolution] = useState("");
   const [hwDueDate, setHwDueDate] = useState("");
   const [isCreatingHw, setIsCreatingHw] = useState(false);
+  const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
 
   const { data: examsList, isLoading: isLoadingExams } = useQuery<Exam[]>({
     queryKey: [api.exams.list.path],
@@ -215,8 +216,13 @@ export default function TeacherDashboard() {
 
   const { data: teacherHomework, refetch: refetchTeacherHw } = useQuery<any[]>({
     queryKey: ["/api/teacher/homework"],
-    queryFn: () => fetchWithAuth("/api/teacher/homework").then(r => r.json ? r.json() : r),
+    queryFn: () => fetchWithAuth("/api/teacher/homework").then(r => r.json()),
     enabled: activeSection === "homework",
+  });
+
+  const { data: teacherOptions } = useQuery<{ subjects: string[]; classes: string[]; sections: string[] }>({
+    queryKey: ["/api/teacher/options"],
+    queryFn: () => fetchWithAuth("/api/teacher/options").then(r => r.json()),
   });
 
   const createHomework = useMutation({
@@ -394,42 +400,26 @@ export default function TeacherDashboard() {
   });
 
   const maxBarHeight = 100;
-  const barsData = classAverages.length > 0 ? classAverages.map((ca, i) => ({
+  const barsData = classAverages.map((ca, i) => ({
     label: ca.subject.slice(0, 4),
     pct: ca.totalMarks > 0 ? Math.round(ca.avgMarks / ca.totalMarks * 100) : 0,
     height: ca.totalMarks > 0 ? Math.round((ca.avgMarks / ca.totalMarks) * maxBarHeight) : 10,
     color: BAR_COLORS[i % BAR_COLORS.length],
-  })) : [
-    { label: "Math", pct: 64, height: 64, color: BAR_COLORS[0] },
-    { label: "Bio",  pct: 80, height: 80, color: BAR_COLORS[1] },
-    { label: "Chem", pct: 50, height: 50, color: BAR_COLORS[2] },
-    { label: "Phys", pct: 72, height: 72, color: BAR_COLORS[3] },
-    { label: "Eng",  pct: 60, height: 60, color: BAR_COLORS[4] },
-  ];
+  }));
 
-  const topStudents = studentPerformance.length > 0
-    ? studentPerformance.slice(0, 4).map((s, i) => ({
-        rank: i + 1,
-        initials: getInitials(s.studentName),
-        name: s.studentName,
-        pct: s.pct,
+  const topStudents = studentPerformance.slice(0, 4).map((s, i) => ({
+    rank: i + 1,
+    initials: getInitials(s.studentName),
+    name: s.studentName,
+    pct: s.pct,
+  }));
+
+  const trendPoints: { x: number; y: number }[] = improvementTrends.length >= 2
+    ? improvementTrends.slice(-5).map((t, i, arr) => ({
+        x: Math.round((i / (arr.length - 1)) * 320),
+        y: Math.round(82 - (t.avgPct / 100) * 72),
       }))
-    : [
-        { rank: 1, initials: "PR", name: "Priya Rao", pct: 82 },
-        { rank: 2, initials: "RM", name: "Rohan Mehta", pct: 76 },
-        { rank: 3, initials: "AK", name: "Alex Kim", pct: 64 },
-        { rank: 4, initials: "SG", name: "Sara Gupta", pct: 51 },
-      ];
-
-  const trendPoints: { x: number; y: number }[] = [];
-  if (improvementTrends.length >= 2) {
-    improvementTrends.slice(-5).forEach((t, i, arr) => {
-      trendPoints.push({ x: Math.round((i / (arr.length - 1)) * 320), y: Math.round(82 - (t.avgPct / 100) * 72) });
-    });
-  } else {
-    trendPoints.push({ x: 0, y: 70 }, { x: 90, y: 43 }, { x: 180, y: 33 }, { x: 280, y: 13 }, { x: 320, y: 10 });
-  }
-  const trendPath = `M${trendPoints.map(p => `${p.x},${p.y}`).join(" C")}`;
+    : [];
   const trendLine = trendPoints.length > 1
     ? `M${trendPoints[0].x},${trendPoints[0].y}` + trendPoints.slice(1).map(p => ` L${p.x},${p.y}`).join("")
     : "";
@@ -634,16 +624,12 @@ export default function TeacherDashboard() {
                   <span className="sf-chart-badge sf-cb-live">Live</span>
                 </div>
                 <div className="sf-bar-chart">
-                  {barsData.map((b, i) => (
+                  {barsData.length > 0 ? barsData.map((b, i) => (
                     <div key={i} className="sf-bar-col">
-                      <div
-                        className="sf-bar"
-                        style={{ height: `${b.height}px`, background: b.color.bg, border: b.color.border || undefined }}
-                        data-v={`${b.pct}%`}
-                      />
+                      <div className="sf-bar" style={{ height: `${b.height}px`, background: b.color.bg, border: b.color.border || undefined }} data-v={`${b.pct}%`} />
                       <div className="sf-blbl">{b.label}</div>
                     </div>
-                  ))}
+                  )) : <div style={{ width: "100%", textAlign: "center", fontSize: 12, color: "var(--mid)", padding: "32px 0" }}>No evaluation data yet</div>}
                 </div>
               </div>
 
@@ -657,9 +643,10 @@ export default function TeacherDashboard() {
                       <div className="sf-chart-desc">Score percentage per student</div>
                     </div>
                   </div>
-                  <span className="sf-chart-badge sf-cb-sample">{studentPerformance.length > 0 ? "Live" : "Sample"}</span>
+                  <span className="sf-chart-badge sf-cb-live">Live</span>
                 </div>
                 <div>
+                  {topStudents.length === 0 && <div style={{ textAlign: "center", fontSize: 12, color: "var(--mid)", padding: "32px 0" }}>No evaluation data yet</div>}
                   {topStudents.map((s, i) => (
                     <div key={i} className="sf-student-row">
                       <div className="sf-s-rank">{s.rank}</div>
@@ -700,7 +687,7 @@ export default function TeacherDashboard() {
                       />
                     ))}
                     <text x="50" y="46" textAnchor="middle" fontFamily="Fraunces,serif" fontSize="15" fontWeight="700" fill="var(--ink)">
-                      {avgPerformance > 0 ? `${avgPerformance}%` : "58%"}
+                      {avgPerformance > 0 ? `${avgPerformance}%` : "–"}
                     </text>
                     <text x="50" y="58" textAnchor="middle" fontFamily="DM Sans,sans-serif" fontSize="9" fill="var(--mid)">class avg</text>
                   </svg>
@@ -745,11 +732,9 @@ export default function TeacherDashboard() {
                     ))}
                   </svg>
                 </div>
+                {trendPoints.length === 0 && <div style={{ textAlign: "center", fontSize: 12, color: "var(--mid)", padding: "12px 0" }}>No trend data yet — needs 2+ evaluated exams</div>}
                 <div className="sf-trend-labels">
-                  {improvementTrends.length >= 2
-                    ? improvementTrends.slice(-5).map((t, i) => <span key={i} className="sf-trend-lbl">{t.examName?.split("-").slice(-1)[0] || `E${i + 1}`}</span>)
-                    : ["Unit 1", "Mid-term", "Unit 2", "Final", "Now"].map(l => <span key={l} className="sf-trend-lbl">{l}</span>)
-                  }
+                  {improvementTrends.slice(-5).map((t, i) => <span key={i} className="sf-trend-lbl">{t.examName?.split(" ").slice(-1)[0] || `E${i + 1}`}</span>)}
                 </div>
               </div>
             </div>
@@ -868,15 +853,26 @@ export default function TeacherDashboard() {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                     <div>
                       <label className="sf-fld-lbl">Subject *</label>
-                      <Input placeholder="e.g. Mathematics" value={hwSubject} onChange={e => setHwSubject(e.target.value)} data-testid="input-hw-subject" />
+                      <select className="sf-fsel" style={{ width: "100%" }} value={hwSubject} onChange={e => setHwSubject(e.target.value)} data-testid="select-hw-subject">
+                        <option value="">Select subject…</option>
+                        {(teacherOptions?.subjects || ["Mathematics", "Science", "English", "Social Studies", "Hindi"]).map(s => <option key={s} value={s}>{s}</option>)}
+                        <option value="_custom">Other…</option>
+                      </select>
+                      {hwSubject === "_custom" && <Input placeholder="Enter subject" className="rounded-xl mt-1" onChange={e => setHwSubject(e.target.value)} data-testid="input-hw-subject-custom" />}
                     </div>
                     <div>
                       <label className="sf-fld-lbl">Class *</label>
-                      <Input placeholder="e.g. 10" value={hwClass} onChange={e => setHwClass(e.target.value)} data-testid="input-hw-class" />
+                      <select className="sf-fsel" style={{ width: "100%" }} value={hwClass} onChange={e => setHwClass(e.target.value)} data-testid="select-hw-class">
+                        <option value="">Select class…</option>
+                        {(teacherOptions?.classes || ["8", "9", "10", "11", "12"]).map(c => <option key={c} value={c}>Class {c}</option>)}
+                      </select>
                     </div>
                     <div>
                       <label className="sf-fld-lbl">Section</label>
-                      <Input placeholder="e.g. A" value={hwSection} onChange={e => setHwSection(e.target.value)} data-testid="input-hw-section" />
+                      <select className="sf-fsel" style={{ width: "100%" }} value={hwSection} onChange={e => setHwSection(e.target.value)} data-testid="select-hw-section">
+                        <option value="">All sections</option>
+                        {(teacherOptions?.sections || ["A", "B", "C", "D"]).map(s => <option key={s} value={s}>Section {s}</option>)}
+                      </select>
                     </div>
                     <div>
                       <label className="sf-fld-lbl">Due Date *</label>
@@ -904,94 +900,124 @@ export default function TeacherDashboard() {
           </div>
         )}
 
-        {/* ── EXAMS TAB ── */}
+        {/* ── EXAMS TAB — Repository View ── */}
         {activeSection === "exams" && (
           <div className="sf-panel">
-            <div className="sf-panel-title">Exam Management</div>
-            <div className="sf-panel-sub">Select an exam to upload and evaluate answer sheets</div>
+            <div className="sf-panel-title">Exam Repository</div>
+            <div className="sf-panel-sub">All your exams — expand any card to view the model answer and upload student scripts</div>
             {isLoadingExams ? (
               <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
             ) : examsList && examsList.length > 0 ? (
-              <>
-                <div style={{ marginBottom: 16 }}>
-                  <select
-                    className="sf-fsel"
-                    style={{ width: "100%", marginBottom: 16 }}
-                    value={selectedExamId}
-                    onChange={e => setSelectedExamId(e.target.value)}
-                  >
-                    <option value="">— Select an exam —</option>
-                    {examsList.map((e: any) => <option key={e.id} value={e.id}>{e.examName || `${e.subject} Exam`} ({e.totalMarks} marks)</option>)}
-                  </select>
-                </div>
-                {selectedExamId && (
-                  <>
-                    <div style={{ marginBottom: 16 }}>
-                      <DropZone onFile={handleAnswerSheetUpload} isProcessing={processingId !== null} />
-                    </div>
-                    {/* Bulk upload */}
-                    <div style={{ marginBottom: 24 }}>
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-                        <Button variant="outline" size="sm" className="rounded-xl gap-2" onClick={() => bulkInputRef.current?.click()}>
-                          <Upload className="h-3 w-3" /> Add bulk images
-                        </Button>
-                        <input ref={bulkInputRef} type="file" accept="image/*" multiple className="hidden"
-                          onChange={e => { const files = Array.from(e.target.files || []); setBulkFiles(prev => [...prev, ...files]); e.target.value = ""; }} />
-                        {bulkFiles.length > 0 && (
-                          <Button size="sm" className="rounded-xl gap-2" disabled={isBulkUploading} onClick={handleBulkUpload}>
-                            {isBulkUploading ? <><Loader2 className="h-3 w-3 animate-spin" /> Processing…</> : `Upload ${bulkFiles.length} images`}
-                          </Button>
-                        )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {examsList.map((exam: any) => {
+                  const isExpanded = expandedExamId === exam.id;
+                  const isThisExam = selectedExamId === String(exam.id);
+                  const subjectIcon = exam.subject?.toLowerCase().includes("math") ? "📐" : exam.subject?.toLowerCase().includes("sci") ? "🔬" : exam.subject?.toLowerCase().includes("eng") ? "📖" : exam.subject?.toLowerCase().includes("phys") ? "⚛️" : exam.subject?.toLowerCase().includes("chem") ? "⚗️" : exam.subject?.toLowerCase().includes("bio") ? "🧬" : "📝";
+                  const evaluated = (exam.sheetsEvaluated || 0) > 0;
+                  return (
+                    <div key={exam.id} style={{ border: "1.5px solid var(--rule)", borderRadius: 16, overflow: "hidden", background: isExpanded ? "var(--pane)" : "var(--card)" }}>
+                      {/* Card header — always visible */}
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", cursor: "pointer" }}
+                        onClick={() => {
+                          const next = isExpanded ? null : exam.id;
+                          setExpandedExamId(next);
+                          if (next) setSelectedExamId(String(exam.id));
+                        }}
+                        data-testid={`exam-card-${exam.id}`}
+                      >
+                        <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", flexShrink: 0 }}>{subjectIcon}</div>
+                        <div className="sf-exam-info" style={{ flex: 1 }}>
+                          <div className="sf-exam-name">{exam.examName || `${exam.subject} Exam`}</div>
+                          <div className="sf-exam-meta">
+                            Class {exam.className} · {exam.totalMarks} marks · {new Date(exam.createdAt || Date.now()).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {exam.sheetsEvaluated || 0} evaluated
+                          </div>
+                        </div>
+                        <span className={`sf-exam-status ${evaluated ? "sf-es-done" : "sf-es-draft"}`}>{evaluated ? "Evaluated" : "Pending"}</span>
+                        <span style={{ fontSize: 16, color: "var(--mid)", marginLeft: 4 }}>{isExpanded ? "▲" : "▼"}</span>
                       </div>
-                      {bulkFiles.length > 0 && <p style={{ fontSize: 12, color: "var(--mid)" }}>{bulkFiles.length} file(s) selected: {bulkFiles.map(f => f.name).join(", ")}</p>}
-                    </div>
-                    {/* Answer sheets list */}
-                    {answerSheets && answerSheets.length > 0 && (
-                      <div>
-                        <div className="sf-panel-title" style={{ fontSize: 14, marginBottom: 8 }}>Individual Answer Sheets</div>
-                        {answerSheets.map((sheet: any) => (
-                          <div key={sheet.id} className="sf-exam-item" style={{ cursor: "default" }}>
-                            <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", fontSize: 12 }}>{getInitials(sheet.studentName || sheet.admissionNumber)}</div>
-                            <div className="sf-exam-info">
-                              <div className="sf-exam-name">{sheet.studentName || sheet.admissionNumber}</div>
-                              <div className="sf-exam-meta">Status: {sheet.status} · {sheet.admissionNumber}</div>
+
+                      {/* Expanded body */}
+                      {isExpanded && (
+                        <div style={{ padding: "0 18px 20px", borderTop: "1px solid var(--rule)" }}>
+                          {/* Model Answer */}
+                          <div style={{ marginTop: 16, marginBottom: 16 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Model Answer</div>
+                            <div style={{ fontSize: 13, color: "var(--ink)", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, padding: "12px 14px", whiteSpace: "pre-wrap", lineHeight: 1.7, maxHeight: 160, overflowY: "auto" }}>
+                              {exam.modelAnswerText || "No model answer provided."}
                             </div>
-                            {sheet.status === "evaluated" ? (
-                              <span className="sf-exam-status sf-es-done">Evaluated · {sheet.totalMarks}/{sheet.maxMarks}</span>
-                            ) : (
-                              <Button size="sm" className="rounded-xl gap-1" disabled={evaluatingId === sheet.id} onClick={() => handleEvaluate(sheet.id)}>
-                                {evaluatingId === sheet.id ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <><Star className="h-3 w-3" /> Evaluate</>}
+                          </div>
+
+                          {/* Upload area */}
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Upload Answer Sheets</div>
+                          <DropZone onFile={handleAnswerSheetUpload} isProcessing={processingId !== null} />
+
+                          {/* Bulk upload */}
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
+                            <Button variant="outline" size="sm" className="rounded-xl gap-2" onClick={() => bulkInputRef.current?.click()} data-testid={`button-bulk-upload-${exam.id}`}>
+                              <Upload className="h-3 w-3" /> Add bulk images
+                            </Button>
+                            <input ref={bulkInputRef} type="file" accept="image/*" multiple className="hidden"
+                              onChange={e => { const files = Array.from(e.target.files || []); setBulkFiles(prev => [...prev, ...files]); e.target.value = ""; }} />
+                            {bulkFiles.length > 0 && (
+                              <Button size="sm" className="rounded-xl gap-2" disabled={isBulkUploading} onClick={handleBulkUpload} data-testid={`button-bulk-submit-${exam.id}`}>
+                                {isBulkUploading ? <><Loader2 className="h-3 w-3 animate-spin" /> Processing…</> : `Upload ${bulkFiles.length} images`}
                               </Button>
                             )}
                           </div>
-                        ))}
-                      </div>
-                    )}
-                    {/* Merged scripts */}
-                    {mergedScripts && mergedScripts.length > 0 && (
-                      <div style={{ marginTop: 16 }}>
-                        <div className="sf-panel-title" style={{ fontSize: 14, marginBottom: 8 }}>Bulk Merged Scripts</div>
-                        {mergedScripts.map((ms: any) => (
-                          <div key={ms.id} className="sf-exam-item" style={{ cursor: "default" }}>
-                            <div className="sf-exam-subj" style={{ background: "var(--blue-bg)", fontSize: 12 }}>{getInitials(ms.studentName || ms.admissionNumber)}</div>
-                            <div className="sf-exam-info">
-                              <div className="sf-exam-name">{ms.studentName || ms.admissionNumber}</div>
-                              <div className="sf-exam-meta">{ms.totalPages} pages · {ms.status}</div>
+                          {bulkFiles.length > 0 && <p style={{ fontSize: 12, color: "var(--mid)", marginTop: 6 }}>{bulkFiles.length} file(s): {bulkFiles.map(f => f.name).join(", ")}</p>}
+
+                          {/* Answer sheets for this exam */}
+                          {isThisExam && answerSheets && answerSheets.length > 0 && (
+                            <div style={{ marginTop: 16 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Submitted Sheets</div>
+                              {answerSheets.map((sheet: any) => (
+                                <div key={sheet.id} className="sf-exam-item" style={{ cursor: "default" }}>
+                                  <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", fontSize: 12 }}>{getInitials(sheet.studentName || sheet.admissionNumber)}</div>
+                                  <div className="sf-exam-info">
+                                    <div className="sf-exam-name">{sheet.studentName || sheet.admissionNumber}</div>
+                                    <div className="sf-exam-meta">{sheet.admissionNumber} · {sheet.status}</div>
+                                  </div>
+                                  {sheet.status === "evaluated" ? (
+                                    <span className="sf-exam-status sf-es-done">{sheet.totalMarks}/{sheet.maxMarks}</span>
+                                  ) : (
+                                    <Button size="sm" className="rounded-xl gap-1" disabled={evaluatingId === sheet.id} onClick={() => handleEvaluate(sheet.id)} data-testid={`button-evaluate-${sheet.id}`}>
+                                      {evaluatingId === sheet.id ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <><Star className="h-3 w-3" /> Evaluate</>}
+                                    </Button>
+                                  )}
+                                </div>
+                              ))}
                             </div>
-                            {ms.status === "evaluated" ? (
-                              <span className="sf-exam-status sf-es-done">Evaluated · {ms.totalMarks}/{ms.maxMarks}</span>
-                            ) : (
-                              <Button size="sm" className="rounded-xl gap-1" disabled={bulkEvaluatingId === ms.id} onClick={() => handleBulkEvaluate(ms.id)}>
-                                {bulkEvaluatingId === ms.id ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <><Star className="h-3 w-3" /> Evaluate</>}
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </>
+                          )}
+
+                          {/* Merged bulk scripts */}
+                          {isThisExam && mergedScripts && mergedScripts.length > 0 && (
+                            <div style={{ marginTop: 14 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Bulk Scripts</div>
+                              {mergedScripts.map((ms: any) => (
+                                <div key={ms.id} className="sf-exam-item" style={{ cursor: "default" }}>
+                                  <div className="sf-exam-subj" style={{ background: "var(--blue-bg)", fontSize: 12 }}>{getInitials(ms.studentName || ms.admissionNumber)}</div>
+                                  <div className="sf-exam-info">
+                                    <div className="sf-exam-name">{ms.studentName || ms.admissionNumber}</div>
+                                    <div className="sf-exam-meta">{ms.totalPages} pages · {ms.status}</div>
+                                  </div>
+                                  {ms.status === "evaluated" ? (
+                                    <span className="sf-exam-status sf-es-done">{ms.totalMarks}/{ms.maxMarks}</span>
+                                  ) : (
+                                    <Button size="sm" className="rounded-xl gap-1" disabled={bulkEvaluatingId === ms.id} onClick={() => handleBulkEvaluate(ms.id)} data-testid={`button-bulk-evaluate-${ms.id}`}>
+                                      {bulkEvaluatingId === ms.id ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <><Star className="h-3 w-3" /> Evaluate</>}
+                                    </Button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <div className="sf-empty"><div className="sf-empty-icon">📝</div>No exams yet. Create your first exam using the button above.</div>
             )}
@@ -1044,10 +1070,30 @@ export default function TeacherDashboard() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5 pt-2">
               <div className="grid grid-cols-2 gap-4">
                 <FormField control={form.control} name="subject" render={({ field }) => (
-                  <FormItem><FormLabel>Subject</FormLabel><FormControl><Input placeholder="Mathematics" {...field} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
+                  <FormItem>
+                    <FormLabel>Subject</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl><SelectTrigger className="rounded-xl" data-testid="select-exam-subject"><SelectValue placeholder="Select subject…" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        {(teacherOptions?.subjects || ["Mathematics", "Science", "English", "Social Studies", "Hindi"]).map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                        <SelectItem value="_custom">Other (type below)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {field.value === "_custom" && <Input placeholder="Enter subject name" className="rounded-xl mt-1" onChange={e => field.onChange(e.target.value)} data-testid="input-exam-subject-custom" />}
+                    <FormMessage />
+                  </FormItem>
                 )} />
                 <FormField control={form.control} name="className" render={({ field }) => (
-                  <FormItem><FormLabel>Class</FormLabel><FormControl><Input placeholder="10-A" {...field} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
+                  <FormItem>
+                    <FormLabel>Class</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl><SelectTrigger className="rounded-xl" data-testid="select-exam-class"><SelectValue placeholder="Select class…" /></SelectTrigger></FormControl>
+                      <SelectContent>
+                        {(teacherOptions?.classes || ["8", "9", "10", "11", "12"]).map(c => <SelectItem key={c} value={c}>Class {c}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
                 )} />
               </div>
               <FormField control={form.control} name="category" render={({ field }) => (

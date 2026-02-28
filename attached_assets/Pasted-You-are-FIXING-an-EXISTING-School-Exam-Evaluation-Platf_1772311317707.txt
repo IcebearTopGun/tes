@@ -1,0 +1,254 @@
+You are FIXING an EXISTING School Exam Evaluation Platform.
+
+THIS IS A DEBUG + DATA BINDING TASK.
+
+====================================================
+CRITICAL RULE — DO NOT MODIFY UI DESIGN
+====================================================
+
+UI layouts already work and must remain identical.
+
+YOU MUST NOT:
+
+- redesign pages
+- recreate components
+- change CSS
+- move layout elements
+- regenerate dashboard UI
+
+ONLY fix:
+
+✔ infinite buffering
+✔ API data fetching
+✔ dropdown population
+✔ database aggregation
+✔ removal of mock/static data
+
+
+====================================================
+PROBLEM 1 — HOMEWORK & ASSIGNMENT PAGE BUFFERING
+====================================================
+
+Student Homework page
+and Teacher Homework Assignments page
+keep loading forever.
+
+ROOT CAUSE:
+
+Frontend is waiting for API response
+that either:
+
+- never resolves
+- returns empty promise
+- incorrect endpoint
+- missing teacher/class filter
+
+
+----------------------------------------------------
+FIX REQUIRED
+----------------------------------------------------
+
+1. Verify API endpoints:
+
+GET /api/homework
+GET /api/homework/teacher
+
+2. Ensure backend returns:
+
+{
+  success: true,
+  data: [...]
+}
+
+3. NEVER return unresolved promises.
+
+4. Add timeout-safe handling:
+
+If no homework exists → return empty array.
+
+DO NOT keep loader active.
+
+Frontend must stop buffering when:
+
+data === []
+
+
+====================================================
+PROBLEM 2 — DROPDOWNS FOR CLASS / SECTION / SUBJECT
+====================================================
+
+Currently forms use manual text input.
+
+REPLACE INPUT BEHAVIOR ONLY
+(not UI styling).
+
+
+----------------------------------------------------
+HOMEWORK ASSIGN MODAL
+----------------------------------------------------
+
+Replace:
+
+Subject input
+Class input
+Section input
+
+WITH dropdowns populated from database.
+
+
+Dropdown Sources:
+
+Subjects → subjects table
+Classes → classes table
+Sections → sections table
+
+
+Example Flow:
+
+Teacher login →
+Fetch assigned classes →
+Populate dropdown dynamically.
+
+
+----------------------------------------------------
+CREATE EXAM MODAL
+----------------------------------------------------
+
+Create Exam must also use dropdowns:
+
+Subject Dropdown
+Class Dropdown
+Section Dropdown
+
+Teacher must ONLY see:
+
+assigned subjects
+assigned classes
+
+
+====================================================
+PROBLEM 3 — DASHBOARD SHOWING STATIC DATA
+====================================================
+
+Dashboard currently shows:
+
+Total Students = 32
+
+This is STATIC / MOCK DATA.
+
+REMOVE ALL HARDCODED VALUES.
+
+
+----------------------------------------------------
+CORRECT LOGIC
+----------------------------------------------------
+
+Dashboard metrics MUST be calculated from DB.
+
+When teacher selects class:
+
+Total Students =
+COUNT(*) FROM students
+WHERE class = selected_class
+AND section = selected_section
+
+
+Sheets Evaluated =
+COUNT(evaluations)
+
+
+Pending Students =
+total_students - submissions
+
+
+Average Performance =
+AVG(marks)
+
+
+====================================================
+PROBLEM 4 — TEACHER CONTEXT FILTERING
+====================================================
+
+Dashboard must load data ONLY for:
+
+teacher_assigned_classes
+teacher_assigned_subjects
+
+Use teacher_id from auth session.
+
+
+====================================================
+PROBLEM 5 — LOADING STATE FIX
+====================================================
+
+Frontend must follow rule:
+
+loading = true
+→ API call
+→ success OR empty result
+→ loading = false
+
+NEVER depend on:
+
+data.length > 0
+
+
+Empty state must display:
+
+"No homework assigned yet"
+
+
+====================================================
+BACKEND REQUIREMENTS
+====================================================
+
+Ensure queries exist:
+
+GET /api/classes
+GET /api/sections
+GET /api/subjects
+GET /api/dashboard/stats
+
+
+Dashboard response example:
+
+{
+ totalStudents: number,
+ evaluatedSheets: number,
+ pendingStudents: number,
+ avgPerformance: number
+}
+
+
+====================================================
+STRICT IMPLEMENTATION RULE
+====================================================
+
+Allowed:
+
+✔ API fixes
+✔ DB aggregation queries
+✔ dropdown population
+✔ loading state correction
+
+NOT allowed:
+
+✗ UI redesign
+✗ component restructuring
+✗ CSS edits
+✗ dashboard regeneration
+
+
+====================================================
+FINAL ACCEPTANCE CONDITIONS
+====================================================
+
+✓ Homework page stops buffering
+✓ Teacher assignments load correctly
+✓ Dropdowns show class/section/subject
+✓ Create Exam uses dropdowns
+✓ Dashboard numbers come from database
+✓ No static values remain
+✓ Teacher sees only assigned classes
+✓ Loader disappears when no data
+✓ UI visually unchanged

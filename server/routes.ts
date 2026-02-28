@@ -66,27 +66,125 @@ async function extractDocumentText(dataUrl: string, label: string): Promise<stri
 }
 
 async function seedDatabase() {
-  const existingTeacher = await storage.getTeacherByEmployeeId("T001");
-  if (!existingTeacher) {
-    const hashedPassword = await bcrypt.hash("password123", 10);
-    await storage.createTeacher({
+  const hashedPassword = await bcrypt.hash("password123", 10);
+
+  // Ensure teacher exists
+  let teacher = await storage.getTeacherByEmployeeId("T001");
+  if (!teacher) {
+    teacher = await storage.createTeacher({
       employeeId: "T001",
-      name: "John Doe",
-      email: "john.doe@school.edu",
-      password: hashedPassword
+      name: "Ramesh Sharma",
+      email: "ramesh.sharma@school.edu",
+      password: hashedPassword,
     });
   }
 
-  const existingStudent = await storage.getStudentByAdmissionNumber("S001");
-  if (!existingStudent) {
-    const hashedPassword = await bcrypt.hash("password123", 10);
-    await storage.createStudent({
-      admissionNumber: "S001",
-      name: "Jane Smith",
-      studentClass: "10",
-      section: "A",
-      password: hashedPassword
+  // Seed students (skip if already exists)
+  const seedStudents = [
+    { admissionNumber: "S001", name: "Jane Smith", studentClass: "10", section: "A" },
+    { admissionNumber: "S002", name: "Arjun Mehta", studentClass: "10", section: "A" },
+    { admissionNumber: "S003", name: "Priya Rao", studentClass: "10", section: "A" },
+    { admissionNumber: "S004", name: "Rahul Kumar", studentClass: "10", section: "A" },
+    { admissionNumber: "S005", name: "Ananya Patel", studentClass: "10", section: "B" },
+    { admissionNumber: "S006", name: "Kavya Reddy", studentClass: "10", section: "B" },
+    { admissionNumber: "S007", name: "Siddharth Nair", studentClass: "10", section: "B" },
+    { admissionNumber: "S008", name: "Rohan Gupta", studentClass: "11", section: "A" },
+    { admissionNumber: "S009", name: "Deepa Singh", studentClass: "11", section: "A" },
+    { admissionNumber: "S010", name: "Karthik Reddy", studentClass: "11", section: "A" },
+  ];
+  for (const s of seedStudents) {
+    const existing = await storage.getStudentByAdmissionNumber(s.admissionNumber);
+    if (!existing) {
+      await storage.createStudent({ ...s, password: hashedPassword });
+    }
+  }
+
+  // Seed exams + evaluations only if teacher has none
+  const existingExams = await storage.getExamsByTeacher(teacher.id);
+  if (existingExams.length === 0) {
+    const mathExam = await storage.createExam({
+      teacherId: teacher.id,
+      subject: "Mathematics",
+      className: "10",
+      examName: "Mathematics Unit Test — Class 10",
+      category: "unit_test",
+      totalMarks: 50,
+      questionText: "Q1 (5 marks): Solve: 2x + 3 = 7.\nQ2 (10 marks): Find the area of a circle with radius 7 cm.\nQ3 (10 marks): Factorize: x² + 5x + 6.\nQ4 (15 marks): Solve the quadratic equation: x² – 5x + 6 = 0.\nQ5 (10 marks): Simplify: (a + b)² – (a – b)².",
+      modelAnswerText: "Q1: x = 2.\nQ2: Area = 154 cm².\nQ3: (x + 2)(x + 3).\nQ4: x = 2 or x = 3.\nQ5: 4ab.",
     });
+
+    const scienceExam = await storage.createExam({
+      teacherId: teacher.id,
+      subject: "Science",
+      className: "10",
+      examName: "Science Mid Term — Class 10",
+      category: "mid_term",
+      totalMarks: 100,
+      questionText: "Q1 (10 marks): Define photosynthesis and write its equation.\nQ2 (20 marks): Explain Newton's three laws of motion with examples.\nQ3 (15 marks): What is the periodic table? How are elements arranged?\nQ4 (25 marks): Describe the water cycle with a labelled diagram.\nQ5 (30 marks): Distinguish between acids and bases. Give 5 examples each.",
+      modelAnswerText: "Q1: Process by which plants make food using sunlight, CO₂ and water. Equation: 6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂.\nQ2: Law 1 – Inertia; Law 2 – F = ma; Law 3 – Every action has an equal and opposite reaction.\nQ3: Arrangement of elements by increasing atomic number in periods and groups.\nQ4: Evaporation → Condensation → Precipitation → Collection.\nQ5: Acids: HCl, H₂SO₄, HNO₃, CH₃COOH, H₃PO₄. Bases: NaOH, KOH, Ca(OH)₂, NH₃, Mg(OH)₂.",
+    });
+
+    const englishExam = await storage.createExam({
+      teacherId: teacher.id,
+      subject: "English",
+      className: "11",
+      examName: "English Class Test — Class 11",
+      category: "class_test",
+      totalMarks: 25,
+      questionText: "Q1 (10 marks): Write a descriptive paragraph on the importance of nature.\nQ2 (10 marks): Fill in the blanks with correct verb forms.\nQ3 (5 marks): Identify parts of speech in the given sentences.",
+      modelAnswerText: "Q1: Nature is the foundation of all life. A well-written paragraph touching on ecosystem, biodiversity, sustainability, and human wellbeing expected.\nQ2: am, is, are, was, were, has, have, had, will, would.\nQ3: Noun, pronoun, verb, adjective, adverb, preposition, conjunction, interjection.",
+    });
+
+    // Seed evaluations via answer sheets
+    const evalSeeds = [
+      { exam: mathExam, admissionNumber: "S001", name: "Jane Smith", marks: 38 },
+      { exam: mathExam, admissionNumber: "S002", name: "Arjun Mehta", marks: 45 },
+      { exam: mathExam, admissionNumber: "S003", name: "Priya Rao", marks: 41 },
+      { exam: mathExam, admissionNumber: "S004", name: "Rahul Kumar", marks: 30 },
+      { exam: mathExam, admissionNumber: "S005", name: "Ananya Patel", marks: 35 },
+      { exam: scienceExam, admissionNumber: "S001", name: "Jane Smith", marks: 78 },
+      { exam: scienceExam, admissionNumber: "S002", name: "Arjun Mehta", marks: 88 },
+      { exam: scienceExam, admissionNumber: "S003", name: "Priya Rao", marks: 92 },
+      { exam: scienceExam, admissionNumber: "S004", name: "Rahul Kumar", marks: 65 },
+      { exam: scienceExam, admissionNumber: "S005", name: "Ananya Patel", marks: 72 },
+      { exam: scienceExam, admissionNumber: "S006", name: "Kavya Reddy", marks: 58 },
+      { exam: englishExam, admissionNumber: "S008", name: "Rohan Gupta", marks: 18 },
+      { exam: englishExam, admissionNumber: "S009", name: "Deepa Singh", marks: 22 },
+      { exam: englishExam, admissionNumber: "S010", name: "Karthik Reddy", marks: 15 },
+    ];
+
+    for (const d of evalSeeds) {
+      const sheet = await storage.createAnswerSheet({
+        examId: d.exam.id,
+        studentId: null,
+        admissionNumber: d.admissionNumber,
+        studentName: d.name,
+        ocrOutput: JSON.stringify({ admission_number: d.admissionNumber, student_name: d.name, answers: [] }),
+        status: "evaluated",
+      });
+      await storage.createEvaluation({
+        answerSheetId: sheet.id,
+        studentName: d.name,
+        admissionNumber: d.admissionNumber,
+        totalMarks: d.marks,
+        questions: JSON.stringify([
+          { question_number: 1, chapter: "General", marks_awarded: Math.round(d.marks * 0.4), max_marks: Math.round(d.exam.totalMarks * 0.4), deviation_reason: "Satisfactory answer", improvement_suggestion: "Review key concepts" },
+          { question_number: 2, chapter: "General", marks_awarded: Math.round(d.marks * 0.3), max_marks: Math.round(d.exam.totalMarks * 0.3), deviation_reason: "Partially correct", improvement_suggestion: "Practice more examples" },
+          { question_number: 3, chapter: "General", marks_awarded: Math.round(d.marks * 0.3), max_marks: Math.round(d.exam.totalMarks * 0.3), deviation_reason: "Good understanding", improvement_suggestion: "Work on depth of explanation" },
+        ]),
+        overallFeedback: `Good effort. Scored ${d.marks}/${d.exam.totalMarks} marks. Keep practising to improve further.`,
+      });
+    }
+
+    // Seed homework
+    const today = new Date();
+    const in7 = new Date(today.getTime() + 7 * 86400000).toISOString().split("T")[0];
+    const in3 = new Date(today.getTime() + 3 * 86400000).toISOString().split("T")[0];
+    const yesterday = new Date(today.getTime() - 86400000).toISOString().split("T")[0];
+
+    await storage.createHomework({ teacherId: teacher.id, subject: "Mathematics", className: "10", section: "A", description: "Solve exercises 1–20 from Chapter 4: Quadratic Equations. Show all working steps.", modelSolutionText: "Detailed solutions using factorisation, completing the square, and the quadratic formula.", dueDate: in7 });
+    await storage.createHomework({ teacherId: teacher.id, subject: "Science", className: "10", section: "A", description: "Prepare a labelled diagram of the human digestive system and describe the function of each organ.", modelSolutionText: "Diagram should include: mouth, oesophagus, stomach, small intestine, large intestine, rectum, liver, pancreas, and gallbladder with correct labels and functions.", dueDate: in3 });
+    await storage.createHomework({ teacherId: teacher.id, subject: "Mathematics", className: "10", section: "B", description: "Practice problems on linear equations — worksheet attached. Attempt all 15 questions.", modelSolutionText: "Solutions to all 15 linear equation problems from the worksheet.", dueDate: yesterday });
   }
 }
 
@@ -1432,6 +1530,80 @@ Generate 5 practice questions that target the student's specific gaps. Vary ques
       res.json(logs);
     } catch (err) {
       res.status(500).json({ message: "Failed to load deviation logs" });
+    }
+  });
+
+  // ─── TEACHER HOMEWORK ALIASES ─────────────────────────────────────────────
+  // Frontend calls /api/teacher/homework — map to existing /api/homework logic
+
+  app.get("/api/teacher/homework", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const hws = await storage.getHomeworkByTeacher(req.user.id);
+      res.json(hws);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load homework" });
+    }
+  });
+
+  app.post("/api/teacher/homework", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const { subject, studentClass, section, description, modelSolution, dueDate } = req.body;
+      const hw = await storage.createHomework({
+        teacherId: req.user.id,
+        subject,
+        className: studentClass || req.body.className || "",
+        section: section || "",
+        description,
+        modelSolutionText: modelSolution || req.body.modelSolutionText || null,
+        dueDate,
+      });
+      res.status(201).json(hw);
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to create homework", detail: err?.message });
+    }
+  });
+
+  // ─── TEACHER OPTIONS (subjects, classes, sections for dropdowns) ───────────
+
+  app.get("/api/teacher/options", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const teacherExams = await storage.getExamsByTeacher(req.user.id);
+      const teacherHw = await storage.getHomeworkByTeacher(req.user.id);
+
+      const subjectsFromExams = teacherExams.map(e => e.subject);
+      const subjectsFromHw = teacherHw.map(h => h.subject);
+      const classesFromExams = teacherExams.map(e => e.className);
+      const classesFromHw = teacherHw.map(h => h.className);
+
+      const allSubjects = [...new Set([...subjectsFromExams, ...subjectsFromHw])].sort();
+      const allClasses = [...new Set([...classesFromExams, ...classesFromHw])].sort();
+
+      const DEFAULT_SUBJECTS = ["Mathematics", "Science", "English", "Social Studies", "Hindi", "Physics", "Chemistry", "Biology", "History", "Geography"];
+      const DEFAULT_CLASSES = ["8", "9", "10", "11", "12"];
+      const SECTIONS = ["A", "B", "C", "D"];
+
+      res.json({
+        subjects: allSubjects.length > 0 ? allSubjects : DEFAULT_SUBJECTS,
+        classes: allClasses.length > 0 ? allClasses : DEFAULT_CLASSES,
+        sections: SECTIONS,
+      });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load options" });
+    }
+  });
+
+  // ─── DASHBOARD STATS (real DB counts) ────────────────────────────────────
+
+  app.get("/api/dashboard/stats", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const stats = await storage.getTeacherStats(req.user.id);
+      res.json(stats);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load stats" });
     }
   });
 
