@@ -1963,5 +1963,64 @@ Return ONLY a valid JSON array. Each element: {"questionNumber": <number>, "exam
     }
   });
 
+  // ─── ADMIN EARLY WARNING ────────────────────────────────────────────────────
+  app.get("/api/admin/early-warning", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { computeEarlyWarnings } = await import("./services/teacherDataScope");
+      const teachers = await storage.getAllTeachers();
+      const warningsMap = new Map<string, any>();
+      for (const teacher of teachers) {
+        const warnings = await computeEarlyWarnings(teacher.id);
+        for (const w of warnings) {
+          if (!warningsMap.has(w.admissionNumber) || w.riskScore > warningsMap.get(w.admissionNumber).riskScore) {
+            warningsMap.set(w.admissionNumber, w);
+          }
+        }
+      }
+      const allWarnings = Array.from(warningsMap.values());
+      const byClass: Record<string, any[]> = {};
+      for (const w of allWarnings) {
+        const key = w.studentClass;
+        if (!byClass[key]) byClass[key] = [];
+        byClass[key].push(w);
+      }
+      const result = Object.entries(byClass).sort(([a], [b]) => a.localeCompare(b)).map(([cls, students]) => ({
+        class: cls,
+        students: students.sort((a, b) => b.riskScore - a.riskScore).slice(0, 2),
+      }));
+      res.json(result);
+    } catch (err) {
+      console.error("[admin-early-warning] Error:", err);
+      res.status(500).json({ message: "Failed to compute admin early warnings" });
+    }
+  });
+
+  // ─── ADMIN QUESTION QUALITY ──────────────────────────────────────────────────
+  app.get("/api/admin/question-quality", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { computeQuestionQuality } = await import("./services/teacherDataScope");
+      const teachers = await storage.getAllTeachers();
+      const result: any[] = [];
+      for (const teacher of teachers) {
+        const qq = await computeQuestionQuality(teacher.id);
+        for (const q of qq) {
+          result.push({
+            ...q,
+            teacherName: teacher.name,
+            teacherId: teacher.id,
+            flag: q.avgPct < 30 ? "Teaching Gap" : "Question Clarity",
+            flagReason: "Identified from student performance patterns.",
+          });
+        }
+      }
+      res.json(result);
+    } catch (err) {
+      console.error("[admin-question-quality] Error:", err);
+      res.status(500).json({ message: "Failed to compute admin question quality" });
+    }
+  });
+
   return httpServer;
 }

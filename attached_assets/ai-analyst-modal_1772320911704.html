@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Analyst Modal</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #eceae3;
+    --surface: #f5f3ee;
+    --card-bg: #dddaf5;
+    --card-mid: #e8e6f8;
+    --navy: #1a1a2e;
+    --navy-soft: #2d2d4a;
+    --text-muted: #6b6b85;
+    --text-label: #8888a8;
+    --green: #2d9e6e;
+    --orange: #d4820a;
+    --accent: #4a4a7a;
+    --border: rgba(26,26,46,0.1);
+    --shadow: 0 8px 40px rgba(26,26,46,0.12);
+  }
+
+  body {
+    background: var(--bg);
+    font-family: 'DM Sans', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  /* Simulated blurred dashboard behind */
+  .backdrop {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    z-index: 0;
+  }
+
+  /* Overlay */
+  .overlay {
+    position: fixed; inset: 0;
+    background: rgba(26,26,46,0.18);
+    backdrop-filter: blur(4px);
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  /* Modal */
+  .modal {
+    background: var(--surface);
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    width: 100%;
+    max-width: 420px;
+    overflow: hidden;
+    z-index: 20;
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* Top bar — matches dashboard header strip */
+  .modal-topbar {
+    background: var(--navy);
+    padding: 14px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .modal-topbar .label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase;
+  }
+
+  .modal-topbar .close-btn {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.1);
+    border: none; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.6);
+    font-size: 14px;
+    transition: background 0.2s;
+  }
+  .modal-topbar .close-btn:hover { background: rgba(255,255,255,0.2); }
+
+  /* Hero section */
+  .modal-hero {
+    background: var(--card-bg);
+    padding: 28px 28px 24px;
+    text-align: center;
+  }
+
+  .icon-wrap {
+    width: 60px; height: 60px;
+    border-radius: 16px;
+    background: var(--surface);
+    margin: 0 auto 16px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 12px rgba(26,26,46,0.1);
+  }
+
+  .icon-wrap svg {
+    width: 26px; height: 26px;
+    stroke: var(--navy);
+  }
+
+  .modal-hero h2 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 22px;
+    color: var(--navy);
+    margin-bottom: 8px;
+    line-height: 1.2;
+  }
+
+  .modal-hero p {
+    font-size: 13.5px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    max-width: 280px;
+    margin: 0 auto;
+  }
+
+  /* Pills row */
+  .pills-row {
+    background: var(--card-bg);
+    padding: 0 28px 20px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .pill {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: rgba(26,26,46,0.08);
+    color: var(--accent);
+  }
+
+  /* Questions section */
+  .modal-body {
+    padding: 20px 24px 24px;
+  }
+
+  .section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-label);
+    margin-bottom: 12px;
+  }
+
+  .questions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .question-btn {
+    background: #fff;
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    padding: 13px 16px;
+    text-align: left;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13.5px;
+    font-weight: 400;
+    color: var(--navy);
+    cursor: pointer;
+    transition: all 0.18s ease;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    line-height: 1.4;
+  }
+
+  .question-btn::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--card-bg);
+    border: 1.5px solid var(--accent);
+    flex-shrink: 0;
+    transition: background 0.18s;
+  }
+
+  .question-btn:hover {
+    background: var(--card-mid);
+    border-color: rgba(74,74,122,0.3);
+    transform: translateX(2px);
+  }
+
+  .question-btn:hover::before {
+    background: var(--accent);
+  }
+
+  /* CTA button */
+  .cta-btn {
+    width: 100%;
+    background: var(--navy);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    padding: 15px 20px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    letter-spacing: 0.01em;
+    transition: all 0.2s ease;
+  }
+
+  .cta-btn:hover {
+    background: var(--navy-soft);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(26,26,46,0.25);
+  }
+
+  .cta-btn svg {
+    width: 16px; height: 16px;
+    stroke: currentColor;
+  }
+</style>
+</head>
+<body>
+
+<div class="backdrop"></div>
+
+<div class="overlay">
+  <div class="modal">
+
+    <!-- Top bar -->
+    <div class="modal-topbar">
+      <span class="label">⏱ AI Analyst</span>
+      <button class="close-btn" aria-label="Close">✕</button>
+    </div>
+
+    <!-- Hero -->
+    <div class="modal-hero">
+      <div class="icon-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
+          <polyline points="16 7 22 7 22 13"/>
+        </svg>
+      </div>
+      <h2>School-Wide Analysis</h2>
+      <p>Ask any question about school performance, teacher effectiveness, or student trends.</p>
+    </div>
+
+    <!-- Pills -->
+    <div class="pills-row">
+      <span class="pill">Performance</span>
+      <span class="pill">Teachers</span>
+      <span class="pill">Students</span>
+      <span class="pill">Trends</span>
+    </div>
+
+    <!-- Body -->
+    <div class="modal-body">
+      <div class="section-label">Example Questions</div>
+
+      <div class="questions-list">
+        <button class="question-btn">Which class needs academic intervention?</button>
+        <button class="question-btn">Who is the most effective teacher this term?</button>
+        <button class="question-btn">Which subject shows the weakest school performance?</button>
+        <button class="question-btn">How is homework completion trending across classes?</button>
+        <button class="question-btn">Which students are at risk of underperformance?</button>
+      </div>
+
+      <button class="cta-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Start New Analysis
+      </button>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

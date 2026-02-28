@@ -1,336 +1,373 @@
 import { Link } from "wouter";
-import { motion, useInView } from "framer-motion";
-import { useRef, useEffect, useState } from "react";
-import {
-  BookOpen, Zap, Shield, TrendingUp, Brain, Users, GraduationCap,
-  ArrowRight, ChevronRight, Star
-} from "lucide-react";
+import { useState, useRef, useEffect } from "react";
 
-function useCounter(target: number, duration = 1800, start = false) {
-  const [count, setCount] = useState(0);
-  useEffect(() => {
-    if (!start) return;
-    let startTime: number | null = null;
-    const step = (timestamp: number) => {
-      if (!startTime) startTime = timestamp;
-      const progress = Math.min((timestamp - startTime) / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setCount(Math.floor(eased * target));
-      if (progress < 1) requestAnimationFrame(step);
-    };
-    requestAnimationFrame(step);
-  }, [target, duration, start]);
-  return count;
-}
-
-function StatCounter({ value, suffix, label }: { value: number; suffix: string; label: string }) {
-  const ref = useRef(null);
-  const inView = useInView(ref, { once: true });
-  const count = useCounter(value, 1600, inView);
-  return (
-    <div ref={ref} style={{ textAlign: "center" }}>
-      <div style={{ fontSize: "clamp(2.5rem, 5vw, 4rem)", fontWeight: 900, fontFamily: "Outfit, sans-serif", lineHeight: 1, background: "linear-gradient(135deg, #fff 40%, rgba(255,255,255,0.5))", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
-        {count.toLocaleString()}{suffix}
-      </div>
-      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)", marginTop: 6, fontWeight: 500, letterSpacing: "0.05em", textTransform: "uppercase" }}>{label}</div>
-    </div>
-  );
-}
+const C = {
+  cream: "#F5F0E8",
+  pinkLight: "#FADADD",
+  pinkMid: "#F7A8B8",
+  pinkHot: "#E8437A",
+  lavender: "#EAE4F7",
+  lavenderMid: "#C4B5E8",
+  purpleDark: "#3D1F6E",
+  textDark: "#1A0A2E",
+  textMid: "#5A4070",
+  white: "#FFFFFF",
+};
 
 const FEATURES = [
-  { icon: Brain, accent: "#818cf8", bg: "rgba(129,140,248,0.12)", title: "AI-Powered OCR Grading", desc: "GPT-4o reads handwritten answer sheets with human-level accuracy. No manual data entry." },
-  { icon: TrendingUp, accent: "#34d399", bg: "rgba(52,211,153,0.12)", title: "Real-Time Analytics", desc: "Class averages, student rankings, chapter-weakness maps — all computed from actual exam data." },
-  { icon: Zap, accent: "#fb923c", bg: "rgba(251,146,60,0.12)", title: "Early Warning System", desc: "Automatically flags students showing score decline or low homework engagement before they fall behind." },
-  { icon: Star, accent: "#facc15", bg: "rgba(250,204,21,0.12)", title: "Question Quality AI", desc: "Identifies whether poor performance signals a teaching gap or an unclear question. Fix both faster." },
-  { icon: Shield, accent: "#60a5fa", bg: "rgba(96,165,250,0.12)", title: "7-Layer Privacy Guard", desc: "PII detection, tokenisation, and role-based unmasking ensure student data never leaks into AI prompts." },
-  { icon: Users, accent: "#c084fc", bg: "rgba(192,132,252,0.12)", title: "Role-Based Dashboards", desc: "Teachers, class teachers, students, and admins each see exactly what they need — nothing more." },
+  { variant: "pink", iconBg: "pink", icon: "🤖", title: "Conversational AI for Everyone", desc: "Parents ask \"Where does my child stand?\" Teachers ask \"How is my class doing?\" Admins ask \"Which classes are giving the best results?\" — each role gets answers from their own data." },
+  { variant: "lavender", iconBg: "purple", icon: "📄", title: "AI Checking & Chapter Intelligence", desc: "Answer sheets are evaluated automatically — saving teachers hours weekly. The AI maps every score to the exact chapter and concept, so you know precisely where each student needs to focus." },
+  { variant: "white", iconBg: "pink", icon: "⚠️", title: "Early Warning System", desc: "Identifies at-risk students before it's too late — tracking declining marks, homework gaps, and ranking falls. Every student gets a risk score, weak subject list, and engagement level." },
+  { variant: "lavender", iconBg: "green", icon: "📊", title: "Assessment, Homework & Performance", desc: "Every submission, score, and engagement signal is captured automatically. Live dashboards give teachers, students, and admins a distraction-free view of KPIs and evaluation history." },
+  { variant: "pink", iconBg: "pink", icon: "🏫", title: "Admin School Intelligence", desc: "Principals and admins get a full school-level view — class rankings, teacher effectiveness trends, bottom 2 performers per class, question quality scores, and department signals." },
+  { variant: "white", iconBg: "green", icon: "👨‍👩‍👧", title: "Student & Parent Visibility", desc: "Students see their rank, subject-wise progress, and chapter gaps in real time. Parents can ask where their child stands and track homework consistency — without waiting for a meeting." },
 ];
 
-function DashboardMockup() {
-  const bars = [78, 55, 91, 44, 67, 82];
-  const barColors = ["#818cf8", "#34d399", "#f97316", "#818cf8", "#34d399", "#f97316"];
-  const students = [
-    { name: "Aarav S.", pct: 91, color: "#34d399" },
-    { name: "Priya N.", pct: 80, color: "#818cf8" },
-    { name: "Rahul G.", pct: 67, color: "#fb923c" },
-    { name: "Meera K.", pct: 44, color: "#f87171" },
-  ];
+const FEATURE_CARD_BG: Record<string, string> = {
+  pink: C.pinkLight,
+  lavender: C.lavender,
+  white: C.white,
+};
+const FEATURE_ICON_BG: Record<string, string> = {
+  pink: "rgba(232,67,122,0.12)",
+  purple: "rgba(61,31,110,0.10)",
+  green: "rgba(34,197,94,0.10)",
+};
+
+type ChatRole = "user" | "ai";
+interface ChatMsg { role: ChatRole; text: string; pills?: { l: string; v?: string; b?: string; t?: string }[] }
+
+function lpReply(text: string, role: "parent" | "teacher" | "admin"): { text: string; pills: any[] } {
+  const t = text.toLowerCase();
+  if (role === "parent") {
+    if (t.includes("homework")) return { text: "Aryan submitted 18/20 assignments this month (90%) — above class avg.", pills: [{ l: "On time", v: "18/20", b: "90%", t: "up" }, { l: "Late (both Math)", b: "2 assignments", t: "wn" }] };
+    if (t.includes("weak") || t.includes("subject")) return { text: "Two subjects need attention:", pills: [{ l: "Math", b: "61%", t: "wn" }, { l: "Chemistry", b: "57%", t: "dn" }] };
+    if (t.includes("attend")) return { text: "Aryan's attendance is 91% this month — above the 85% threshold.", pills: [{ l: "Present", v: "19/21 days", b: "91%", t: "up" }] };
+    return { text: "Aryan is performing well overall. Rank 8/34 in Grade 9B. Would you like a subject breakdown?", pills: [] };
+  }
+  if (role === "teacher") {
+    if (t.includes("homework") || t.includes("gap")) return { text: "Homework submission rate this week:", pills: [{ l: "Submitted on time", v: "22/30", b: "73%", t: "up" }, { l: "Missing submissions", v: "8 students", b: "⚠", t: "wn" }] };
+    if (t.includes("top") || t.includes("performer")) return { text: "Top 3 performers this month:", pills: [{ l: "Priya Sharma", b: "92%", t: "up" }, { l: "Aditya Nair", b: "88%", t: "up" }, { l: "Meena Roy", b: "85%", t: "up" }] };
+    if (t.includes("subject") || t.includes("breakdown")) return { text: "Class subject averages:", pills: [{ l: "Math", v: "67%", b: "↓ -4%", t: "dn" }, { l: "English", v: "74%", b: "↑", t: "up" }] };
+    return { text: "Grade 9B overall is at 67% — down 4% from last month. 3 students flagged as at-risk.", pills: [] };
+  }
+  // admin
+  if (t.includes("teacher") || t.includes("effective")) return { text: "Most effective teacher this term:", pills: [{ l: "Mrs. Joshi — English", b: "Best", t: "up" }, { l: "Class avg improvement", v: "+12%", b: "↑", t: "up" }] };
+  if (t.includes("subject") || t.includes("weak")) return { text: "Weakest subject school-wide:", pills: [{ l: "Mathematics", v: "58% avg", b: "⚠ Attention", t: "dn" }, { l: "3 classes below 55%", b: "Risk", t: "dn" }] };
+  if (t.includes("homework") || t.includes("completion")) return { text: "Homework completion trend across school:", pills: [{ l: "This week", v: "79%", b: "↑ +8%", t: "up" }, { l: "Lowest: Grade 9C", v: "41%", b: "↓", t: "dn" }] };
+  return { text: "School avg is 68% — up 3% from last month. 16 students at risk across all classes.", pills: [] };
+}
+
+function ChatShowcase({ chatId, role, placeholder, darkBg }: { chatId: string; role: "parent" | "teacher" | "admin"; placeholder: string; darkBg?: boolean }) {
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [input, setInput] = useState("");
+  const [typing, setTyping] = useState(false);
+  const chatRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight; }, [messages, typing]);
+
+  const send = (text: string) => {
+    if (!text.trim()) return;
+    setInput("");
+    setMessages(m => [...m, { role: "user", text }]);
+    setTyping(true);
+    setTimeout(() => {
+      setTyping(false);
+      const reply = lpReply(text, role);
+      setMessages(m => [...m, { role: "ai", text: reply.text, pills: reply.pills }]);
+    }, 1100);
+  };
+
+  const bg = darkBg ? "rgba(0,0,0,0.2)" : "#F8F7FD";
+  const bubbleAiBg = darkBg ? "rgba(255,255,255,0.1)" : "white";
+  const bubbleAiBorder = darkBg ? "rgba(255,255,255,0.14)" : "#E0DCF0";
+  const bubbleAiColor = darkBg ? "rgba(255,255,255,0.9)" : "#1C1640";
+  const pillBg = darkBg ? "rgba(255,255,255,0.09)" : "#EAE7F5";
+  const pillLabelColor = darkBg ? "rgba(255,255,255,0.5)" : "#4A4270";
+  const pillValColor = darkBg ? "white" : "#1C1640";
+  const chipBg = darkBg ? "rgba(255,255,255,0.08)" : "white";
+  const chipBorder = darkBg ? "rgba(255,255,255,0.14)" : "#E0DCF0";
+  const chipColor = darkBg ? "rgba(255,255,255,0.65)" : "#4A4270";
+  const inputBg = darkBg ? "rgba(255,255,255,0.09)" : "white";
+  const inputBorder = darkBg ? "rgba(255,255,255,0.18)" : "#E0DCF0";
+  const inputColor = darkBg ? "white" : "#1C1640";
+  const cardHeaderBg = darkBg ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.5)";
+  const cardHeaderBorder = darkBg ? "rgba(255,255,255,0.1)" : "rgba(224,220,240,0.8)";
+  const cardBg = darkBg ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.78)";
+  const cardBorder = darkBg ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.95)";
+
+  const BADGE_STYLES: Record<string, any> = {
+    up: { background: "#ECFDF5", color: "#059669" },
+    dn: { background: "#FEF2F2", color: "#DC2626" },
+    wn: { background: "#FFFBEB", color: "#D97706" },
+  };
+
+  const CHIPS: Record<string, string[]> = {
+    parent: ["Homework consistency?", "Weak subjects?", "Attendance this month?"],
+    teacher: ["Show homework gaps", "Top performers?", "Subject breakdown"],
+    admin: ["Who is most effective?", "Weakest subject?", "Homework trends"],
+  };
+  const TITLES: Record<string, string> = {
+    parent: "EduAnalytics AI — Parent View",
+    teacher: "EduAnalytics AI — Teacher View",
+    admin: "School Intelligence — Admin View",
+  };
+
   return (
-    <div style={{ background: "rgba(255,255,255,0.03)", border: "1.5px solid rgba(255,255,255,0.08)", borderRadius: 20, padding: "20px", backdropFilter: "blur(20px)", width: "100%", maxWidth: 420 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.9)", fontFamily: "Outfit, sans-serif" }}>Class Analytics</div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>Mathematics · Class 10-A</div>
+    <div style={{ background: cardBg, backdropFilter: "blur(18px)", borderRadius: 16, border: `1px solid ${cardBorder}`, boxShadow: darkBg ? "none" : "0 8px 40px rgba(61,44,141,0.10), 0 2px 6px rgba(0,0,0,0.04)", overflow: "hidden" }}>
+      <div style={{ padding: "13px 18px", borderBottom: `1px solid ${cardHeaderBorder}`, display: "flex", alignItems: "center", gap: 10, background: cardHeaderBg }}>
+        <div style={{ display: "flex", gap: 5 }}>
+          {["#FF6058", "#FFBD2E", "#28CA41"].map(c => <div key={c} style={{ width: 8, height: 8, borderRadius: "50%", background: c }} />)}
         </div>
-        <span style={{ fontSize: 10, fontWeight: 700, background: "rgba(52,211,153,0.15)", color: "#34d399", padding: "3px 8px", borderRadius: 20, border: "1px solid rgba(52,211,153,0.3)", letterSpacing: "0.04em" }}>LIVE</span>
+        <div style={{ fontSize: "0.72rem", fontWeight: 600, color: darkBg ? "rgba(255,255,255,0.35)" : "#8A82B0", letterSpacing: "0.04em" }}>{TITLES[role]}</div>
       </div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        {[{ label: "Evaluated", val: "24" }, { label: "Avg Score", val: "74%" }, { label: "At Risk", val: "3" }].map((s) => (
-          <div key={s.label} style={{ flex: 1, background: "rgba(255,255,255,0.04)", borderRadius: 10, padding: "8px 0", textAlign: "center", border: "1px solid rgba(255,255,255,0.06)" }}>
-            <div style={{ fontSize: 16, fontWeight: 800, color: "white", fontFamily: "Outfit, sans-serif", lineHeight: 1 }}>{s.val}</div>
-            <div style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", marginTop: 3, textTransform: "uppercase", letterSpacing: "0.05em" }}>{s.label}</div>
+      <div ref={chatRef} style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12, minHeight: 260, maxHeight: 260, overflowY: "auto", background: bg }}>
+        {messages.map((msg, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-end", flexDirection: msg.role === "user" ? "row-reverse" : "row" }}>
+            <div style={{ width: 26, height: 26, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.67rem", fontWeight: 700, background: msg.role === "user" ? "#5B4FCF" : "#3D2C8D", color: "white", flexShrink: 0 }}>
+              {msg.role === "user" ? role === "parent" ? "PR" : role === "teacher" ? "TC" : "AD" : "✦"}
+            </div>
+            <div style={{ maxWidth: "78%", padding: "9px 13px", borderRadius: 10, fontSize: "0.8rem", lineHeight: 1.55, ...(msg.role === "user" ? { background: "#5B4FCF", color: "white", borderBottomRightRadius: 3 } : { background: bubbleAiBg, color: bubbleAiColor, border: `1px solid ${bubbleAiBorder}`, borderBottomLeftRadius: 3, boxShadow: darkBg ? "none" : "0 1px 4px rgba(0,0,0,0.05)" }) }}>
+              {msg.text}
+              {(msg.pills || []).map((p, j) => (
+                <div key={j} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 7, padding: "6px 9px", background: pillBg, borderRadius: 6, fontSize: "0.74rem" }}>
+                  <span style={{ color: pillLabelColor }}>{p.l}</span>
+                  {p.v && <span style={{ fontWeight: 600, color: pillValColor }}>{p.v}</span>}
+                  {p.b && <span style={{ fontSize: "0.67rem", fontWeight: 600, padding: "2px 6px", borderRadius: 4, ...BADGE_STYLES[p.t || "wn"] }}>{p.b}</span>}
+                </div>
+              ))}
+            </div>
           </div>
         ))}
-      </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 60, marginBottom: 12, padding: "0 4px" }}>
-        {bars.map((h, i) => (
-          <div key={i} style={{ flex: 1, background: barColors[i], borderRadius: "4px 4px 0 0", height: `${h}%`, opacity: 0.85 }} />
-        ))}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {students.map((s) => (
-          <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ width: 24, height: 24, borderRadius: "50%", background: `${s.color}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: s.color, flexShrink: 0 }}>
-              {s.name[0]}
+        {typing && (
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ width: 26, height: 26, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", background: "#3D2C8D", color: "white", fontSize: "0.67rem", fontWeight: 700, flexShrink: 0 }}>✦</div>
+            <div style={{ background: darkBg ? "rgba(255,255,255,0.1)" : "white", border: `1px solid ${bubbleAiBorder}`, borderRadius: "10px 10px 10px 3px", padding: "9px 13px", display: "flex", gap: 4, alignItems: "center" }}>
+              {[0, 0.18, 0.36].map((d, i) => <div key={i} style={{ width: 5, height: 5, borderRadius: "50%", background: "#C4B5E8", animation: `bounce 1.1s ${d}s infinite` }} />)}
             </div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.65)", flex: 1, whiteSpace: "nowrap" }}>{s.name}</div>
-            <div style={{ flex: 2, background: "rgba(255,255,255,0.06)", borderRadius: 4, height: 5, overflow: "hidden" }}>
-              <div style={{ width: `${s.pct}%`, height: "100%", background: s.color, borderRadius: 4 }} />
-            </div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: s.color, width: 28, textAlign: "right", flexShrink: 0 }}>{s.pct}%</div>
           </div>
+        )}
+      </div>
+      <div style={{ padding: "9px 14px", display: "flex", gap: 6, flexWrap: "wrap", borderTop: `1px solid ${chipBorder}`, background: darkBg ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.35)" }}>
+        {CHIPS[role].map(chip => (
+          <button key={chip} onClick={() => send(chip)} style={{ padding: "4px 10px", borderRadius: 5, border: `1px solid ${chipBorder}`, background: chipBg, fontSize: "0.7rem", color: chipColor, cursor: "pointer", fontFamily: "DM Sans, sans-serif", transition: "all 0.18s" }}>
+            {chip}
+          </button>
         ))}
       </div>
-      <div style={{ marginTop: 12, padding: "8px 10px", background: "rgba(129,140,248,0.12)", borderRadius: 10, border: "1px solid rgba(129,140,248,0.25)", display: "flex", alignItems: "flex-start", gap: 8 }}>
-        <Brain size={13} style={{ color: "#818cf8", flexShrink: 0, marginTop: 1 }} />
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", lineHeight: 1.5 }}>
-          <b style={{ color: "#818cf8" }}>AI Insight:</b> Q3 shows a class-wide teaching gap in quadratic equations. Consider a revision session.
-        </div>
+      <div style={{ padding: "11px 14px", borderTop: `1px solid ${chipBorder}`, display: "flex", gap: 8, alignItems: "center", background: darkBg ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.5)" }}>
+        <input
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") send(input); }}
+          placeholder={placeholder}
+          style={{ flex: 1, border: `1px solid ${inputBorder}`, borderRadius: 7, padding: "7px 11px", fontSize: "0.78rem", fontFamily: "DM Sans, sans-serif", background: inputBg, color: inputColor, outline: "none" }}
+        />
+        <button onClick={() => send(input)} style={{ width: 30, height: 30, borderRadius: 7, background: "#3D2C8D", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: "0.82rem", flexShrink: 0 }}>↑</button>
       </div>
     </div>
   );
 }
 
 export default function Home() {
-  const featuresRef = useRef(null);
-  const statsRef = useRef(null);
-  const statsInView = useInView(statsRef, { once: true });
-
-  const BG = "#05060f";
-  const ACCENT = "#818cf8";
-  const ORANGE = "#f97316";
-
   return (
-    <div style={{ background: BG, minHeight: "100vh", color: "white", fontFamily: "DM Sans, sans-serif", overflowX: "hidden" }}>
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap');
+        .lp-root *, .lp-root *::before, .lp-root *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        .lp-root { font-family: 'DM Sans', sans-serif; background: ${C.cream}; color: ${C.textDark}; overflow-x: hidden; }
+        .lp-nav-link { text-decoration: none; font-size: 0.9rem; font-weight: 500; color: ${C.textMid}; transition: color 0.2s; }
+        .lp-nav-link:hover { color: ${C.purpleDark}; }
+        .lp-btn-outline { padding: 9px 22px; border: 1.5px solid ${C.purpleDark}; border-radius: 50px; background: transparent; color: ${C.purpleDark}; font-size: 0.875rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.2s; }
+        .lp-btn-outline:hover { background: ${C.purpleDark}; color: white; }
+        .lp-btn-primary { padding: 10px 24px; border: none; border-radius: 50px; background: ${C.purpleDark}; color: white; font-size: 0.875rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.22s; }
+        .lp-btn-primary:hover { background: ${C.pinkHot}; transform: translateY(-1px); }
+        .lp-btn-hero { padding: 14px 32px; border-radius: 50px; background: ${C.purpleDark}; color: white; border: none; font-size: 1rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.22s; box-shadow: 0 8px 30px rgba(61,31,110,0.25); }
+        .lp-btn-hero:hover { background: ${C.pinkHot}; transform: translateY(-2px); box-shadow: 0 12px 40px rgba(232,67,122,0.3); }
+        .lp-btn-hero-sec { padding: 14px 32px; border-radius: 50px; background: transparent; color: ${C.textMid}; border: 1.5px solid rgba(90,64,112,0.3); font-size: 1rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.22s; }
+        .lp-btn-hero-sec:hover { border-color: ${C.purpleDark}; color: ${C.purpleDark}; }
+        .lp-feature-card { border-radius: 20px; padding: 36px; transition: transform 0.25s, box-shadow 0.25s; cursor: default; }
+        .lp-feature-card:hover { transform: translateY(-4px); box-shadow: 0 20px 60px rgba(0,0,0,0.08); }
+        .lp-testimonial-card { border-radius: 20px; padding: 36px; }
+        .lp-read-more { display: inline-flex; align-items: center; gap: 6px; margin-top: 16px; font-size: 0.85rem; font-weight: 500; text-decoration: none; color: ${C.pinkHot}; border-bottom: 1px solid ${C.pinkHot}; padding-bottom: 2px; transition: gap 0.2s; }
+        .lp-read-more:hover { gap: 10px; }
+        .lp-read-more-hot { color: white; border-color: white; }
+        .lp-sc-chip:hover { border-color: ${C.lavenderMid}; background: #EAE7F5; color: #5B4FCF; }
+        .lp-hero-badge::before { content: ''; width: 6px; height: 6px; background: ${C.pinkHot}; border-radius: 50%; animation: lp-pulse 2s infinite; }
+        @keyframes lp-pulse { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:0.5; transform:scale(1.4); } }
+        @keyframes bounce { 0%,60%,100% { transform:translateY(0); background:#C4B5E8; } 30% { transform:translateY(-4px); background:#5B4FCF; } }
+        @keyframes lp-fadeUp { from { opacity:0; transform:translateY(30px); } to { opacity:1; transform:translateY(0); } }
+        .lp-hero-content { animation: lp-fadeUp 0.8s ease both; }
+        .lp-cta-btn { padding: 14px 32px; border-radius: 50px; background: ${C.pinkHot}; color: white; border: none; font-size: 1rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.22s; box-shadow: 0 8px 40px rgba(232,67,122,0.3); }
+        .lp-cta-btn:hover { background: ${C.purpleDark}; color: white; transform: translateY(-1px); }
+        .lp-sc-eyebrow { display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #5B4FCF; margin-bottom: 18px; }
+        .dark-sc .lp-sc-eyebrow { color: #A78BFA; }
+      `}</style>
+      <div className="lp-root">
 
-      {/* ── NAV ── */}
-      <nav style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 50, padding: "0 clamp(16px, 5vw, 80px)", height: 64, display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(5,6,15,0.7)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: ACCENT, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 20px ${ACCENT}55` }}>
-            <BookOpen size={16} color="white" />
+        {/* NAV */}
+        <nav style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 60px", background: "rgba(245,240,232,0.88)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(200,180,220,0.25)" }}>
+          <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "1.4rem", color: C.purpleDark, letterSpacing: "-0.02em" }}>
+            Edu<span style={{ color: C.pinkHot }}>Sync</span>
           </div>
-          <span style={{ fontSize: 18, fontWeight: 800, fontFamily: "Outfit, sans-serif", letterSpacing: "-0.01em" }}>EduSync</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Link href="/login">
-            <button style={{ background: "none", border: "none", color: "rgba(255,255,255,0.65)", fontSize: 14, fontWeight: 500, cursor: "pointer", padding: "8px 16px" }}>Log in</button>
-          </Link>
-          <Link href="/signup">
-            <button style={{ background: ACCENT, border: "none", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer", padding: "9px 20px", borderRadius: 10, boxShadow: `0 0 20px ${ACCENT}44`, fontFamily: "Outfit, sans-serif" }}>
-              Get Started
-            </button>
-          </Link>
-        </div>
-      </nav>
+          <ul style={{ display: "flex", gap: 36, listStyle: "none" }}>
+            {["Schools", "Teachers", "Students", "Resources"].map(l => <li key={l}><a href="#" className="lp-nav-link">{l}</a></li>)}
+          </ul>
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <Link href="/login"><button className="lp-btn-outline">Login</button></Link>
+            <Link href="/signup"><button className="lp-btn-primary">Request a Demo</button></Link>
+          </div>
+        </nav>
 
-      {/* ── HERO ── */}
-      <section style={{ minHeight: "100vh", display: "flex", alignItems: "center", padding: "100px clamp(16px, 5vw, 80px) 60px", position: "relative", overflow: "hidden" }}>
-        {/* Glow blobs */}
-        <div style={{ position: "absolute", top: "10%", left: "5%", width: 600, height: 600, borderRadius: "50%", background: `radial-gradient(circle, ${ACCENT}18 0%, transparent 70%)`, pointerEvents: "none" }} />
-        <div style={{ position: "absolute", top: "5%", right: "5%", width: 400, height: 400, borderRadius: "50%", background: "radial-gradient(circle, rgba(251,146,60,0.12) 0%, transparent 70%)", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", bottom: "10%", left: "30%", width: 500, height: 300, borderRadius: "50%", background: "radial-gradient(circle, rgba(52,211,153,0.07) 0%, transparent 70%)", pointerEvents: "none" }} />
-
-        <div style={{ maxWidth: 1200, margin: "0 auto", width: "100%", display: "flex", alignItems: "center", gap: 60, flexWrap: "wrap" }}>
-          {/* Left — text */}
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-            style={{ flex: "1 1 400px", minWidth: 280 }}
-          >
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 7, background: `${ACCENT}18`, border: `1px solid ${ACCENT}35`, padding: "6px 14px", borderRadius: 30, fontSize: 12, fontWeight: 600, color: ACCENT, marginBottom: 28, letterSpacing: "0.04em" }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: ACCENT, display: "inline-block" }} />
-              AI-Powered Exam Evaluation Platform
+        {/* HERO */}
+        <section style={{ minHeight: "100vh", display: "flex", alignItems: "center", padding: "120px 60px 80px", position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: -100, right: -80, width: 600, height: 600, background: `radial-gradient(ellipse, ${C.pinkLight} 0%, transparent 70%)`, borderRadius: "50%", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", bottom: -60, left: "30%", width: 400, height: 400, background: `radial-gradient(ellipse, ${C.lavender} 0%, transparent 70%)`, borderRadius: "50%", pointerEvents: "none" }} />
+          <div className="lp-hero-content" style={{ maxWidth: 680, position: "relative", zIndex: 2 }}>
+            <div className="lp-hero-badge" style={{ display: "inline-flex", alignItems: "center", gap: 8, background: C.pinkLight, color: C.pinkHot, borderRadius: 50, padding: "6px 16px", fontSize: "0.8rem", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 28 }}>
+              AI-Powered School Intelligence
             </div>
-
-            <h1 style={{ fontSize: "clamp(2.6rem, 6vw, 5rem)", fontWeight: 900, fontFamily: "Outfit, sans-serif", lineHeight: 1.05, letterSpacing: "-0.02em", marginBottom: 24 }}>
-              Grade smarter.<br />
-              <span style={{ background: `linear-gradient(135deg, ${ACCENT}, #c084fc)`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Teach better.</span>
+            <h1 style={{ fontFamily: "DM Serif Display, serif", fontSize: "clamp(3rem, 5.5vw, 5rem)", lineHeight: 1.05, letterSpacing: "-0.03em", color: C.textDark, marginBottom: 24 }}>
+              Where Teachers, Students &amp; Schools <em style={{ fontStyle: "italic", color: C.pinkHot }}>Think Smarter.</em>
             </h1>
-
-            <p style={{ fontSize: "clamp(15px, 2vw, 18px)", color: "rgba(255,255,255,0.5)", lineHeight: 1.7, marginBottom: 36, maxWidth: 480 }}>
-              Upload handwritten answer sheets. AI evaluates them in seconds with chapter-level feedback. Spot weak students before they slip through.
+            <p style={{ fontSize: "1.15rem", lineHeight: 1.65, color: C.textMid, maxWidth: 520, marginBottom: 40, fontWeight: 300 }}>
+              EduSync is the AI intelligence layer for your entire school — automated answer checking, early risk detection, chapter-level learning gaps, and real-time performance insights in one calm platform.
             </p>
-
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              <Link href="/signup">
-                <button style={{ display: "flex", alignItems: "center", gap: 8, background: ACCENT, border: "none", color: "white", fontSize: 15, fontWeight: 700, cursor: "pointer", padding: "14px 28px", borderRadius: 12, boxShadow: `0 4px 30px ${ACCENT}55`, fontFamily: "Outfit, sans-serif", transition: "transform 0.15s, box-shadow 0.15s" }}
-                  onMouseEnter={e => { (e.target as HTMLElement).style.transform = "translateY(-2px)"; (e.target as HTMLElement).style.boxShadow = `0 8px 40px ${ACCENT}70`; }}
-                  onMouseLeave={e => { (e.target as HTMLElement).style.transform = ""; (e.target as HTMLElement).style.boxShadow = `0 4px 30px ${ACCENT}55`; }}>
-                  Get Started Free <ArrowRight size={16} />
-                </button>
-              </Link>
-              <Link href="/login">
-                <button style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.05)", border: "1.5px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.75)", fontSize: 15, fontWeight: 600, cursor: "pointer", padding: "14px 28px", borderRadius: 12, fontFamily: "Outfit, sans-serif" }}>
-                  Log into account <ChevronRight size={15} />
-                </button>
-              </Link>
+            <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
+              <Link href="/signup"><button className="lp-btn-hero">Get Started Free →</button></Link>
+              <button className="lp-btn-hero-sec">See how it works</button>
             </div>
+          </div>
+        </section>
 
-            <div style={{ marginTop: 36, display: "flex", alignItems: "center", gap: 16 }}>
-              <div style={{ display: "flex" }}>
-                {["🧑‍🏫", "👩‍🎓", "👨‍🎓", "👩‍🏫"].map((e, i) => (
-                  <div key={i} style={{ width: 32, height: 32, borderRadius: "50%", background: `hsl(${240 + i * 30}, 60%, 35%)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, border: "2px solid #05060f", marginLeft: i > 0 ? -10 : 0 }}>{e}</div>
-                ))}
+        {/* STATS STRIP */}
+        <div style={{ background: C.purpleDark, padding: "40px 60px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 20 }}>
+          {[
+            { num: "10", sup: "×", label: "Faster paper checking" },
+            { num: "87", sup: "%", label: "Early warning accuracy" },
+            { num: "3", sup: "×", label: "Teacher productivity gain" },
+            { num: "12", sup: "k+", label: "Students monitored daily" },
+          ].map(s => (
+            <div key={s.label} style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "2.8rem", color: "white", letterSpacing: "-0.03em" }}>
+                {s.num}<span style={{ color: C.pinkMid }}>{s.sup}</span>
               </div>
-              <div style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>
-                Trusted by <b style={{ color: "rgba(255,255,255,0.8)" }}>500+</b> teachers across India
-              </div>
+              <div style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.6)", marginTop: 4, fontWeight: 400 }}>{s.label}</div>
             </div>
-          </motion.div>
-
-          {/* Right — mockup */}
-          <motion.div
-            initial={{ opacity: 0, y: 40, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.8, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            style={{ flex: "1 1 360px", display: "flex", justifyContent: "center", position: "relative" }}
-          >
-            <div style={{ position: "absolute", inset: -30, background: `radial-gradient(circle at 50% 50%, ${ACCENT}20, transparent 70%)`, pointerEvents: "none" }} />
-            <DashboardMockup />
-          </motion.div>
+          ))}
         </div>
-      </section>
 
-      {/* ── STATS ── */}
-      <section ref={statsRef} style={{ padding: "70px clamp(16px, 5vw, 80px)", borderTop: "1px solid rgba(255,255,255,0.06)", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "40px 24px" }}>
-          <StatCounter value={50000} suffix="+" label="Exams Graded" />
-          <StatCounter value={98} suffix="%" label="AI Accuracy" />
-          <StatCounter value={3} suffix="×" label="Faster Grading" />
-          <StatCounter value={500} suffix="+" label="Teachers" />
-        </div>
-      </section>
-
-      {/* ── FEATURES ── */}
-      <section ref={featuresRef} style={{ padding: "100px clamp(16px, 5vw, 80px)" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
-            style={{ textAlign: "center", marginBottom: 64 }}
-          >
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: ACCENT, textTransform: "uppercase", marginBottom: 14 }}>Platform Features</div>
-            <h2 style={{ fontSize: "clamp(2rem, 4vw, 3.2rem)", fontWeight: 900, fontFamily: "Outfit, sans-serif", letterSpacing: "-0.02em", lineHeight: 1.1, marginBottom: 16 }}>
-              Everything your school needs,<br />
-              <span style={{ color: "rgba(255,255,255,0.35)" }}>built in from day one.</span>
-            </h2>
-            <p style={{ fontSize: 16, color: "rgba(255,255,255,0.4)", maxWidth: 520, margin: "0 auto", lineHeight: 1.7 }}>
-              No stitching together tools. One platform that covers the full cycle from exam creation to student intervention.
-            </p>
-          </motion.div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 20 }}>
-            {FEATURES.map((f, i) => (
-              <motion.div
-                key={f.title}
-                initial={{ opacity: 0, y: 24 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: i * 0.07 }}
-                style={{ background: "rgba(255,255,255,0.03)", border: "1.5px solid rgba(255,255,255,0.07)", borderRadius: 18, padding: "28px 24px", transition: "border-color 0.2s, background 0.2s", cursor: "default" }}
-                whileHover={{ scale: 1.02, transition: { duration: 0.15 } }}
-              >
-                <div style={{ width: 44, height: 44, borderRadius: 12, background: f.bg, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 18, boxShadow: `0 0 16px ${f.accent}22` }}>
-                  <f.icon size={20} color={f.accent} />
-                </div>
-                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: "Outfit, sans-serif", marginBottom: 10, color: "rgba(255,255,255,0.92)" }}>{f.title}</div>
-                <div style={{ fontSize: 14, color: "rgba(255,255,255,0.42)", lineHeight: 1.65 }}>{f.desc}</div>
-              </motion.div>
+        {/* FEATURES */}
+        <section style={{ padding: "100px 60px", background: C.cream }}>
+          <div style={{ fontSize: "0.78rem", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: C.pinkHot, marginBottom: 16 }}>Platform Features</div>
+          <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "clamp(2rem, 3.5vw, 3rem)", letterSpacing: "-0.03em", color: C.textDark, maxWidth: 520, lineHeight: 1.15, marginBottom: 64 }}>
+            Six tools. One platform. Total school intelligence.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 20 }}>
+            {FEATURES.map(f => (
+              <div key={f.title} className="lp-feature-card" style={{ background: FEATURE_CARD_BG[f.variant], border: f.variant === "white" ? "1px solid rgba(200,180,220,0.3)" : "none" }}>
+                <div style={{ width: 48, height: 48, borderRadius: 12, background: FEATURE_ICON_BG[f.iconBg], display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem", marginBottom: 20 }}>{f.icon}</div>
+                <h3 style={{ fontFamily: "DM Serif Display, serif", fontSize: "1.25rem", color: C.textDark, marginBottom: 10, letterSpacing: "-0.02em" }}>{f.title}</h3>
+                <p style={{ fontSize: "0.9rem", lineHeight: 1.6, color: C.textMid, fontWeight: 300 }}>{f.desc}</p>
+              </div>
             ))}
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ── ROLES ── */}
-      <section style={{ padding: "80px clamp(16px, 5vw, 80px)", background: "rgba(255,255,255,0.015)", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.6 }} style={{ textAlign: "center", marginBottom: 56 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: ORANGE, textTransform: "uppercase", marginBottom: 14 }}>Built for Everyone</div>
-            <h2 style={{ fontSize: "clamp(1.8rem, 3.5vw, 2.8rem)", fontWeight: 900, fontFamily: "Outfit, sans-serif", letterSpacing: "-0.02em", lineHeight: 1.15 }}>
-              One platform, every role.
-            </h2>
-          </motion.div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20 }}>
-            {[
-              { icon: GraduationCap, color: ACCENT, bg: `${ACCENT}15`, title: "Teachers", items: ["Create & publish exams", "Bulk upload answer sheets", "AI grading in seconds", "Class + subject analytics"] },
-              { icon: Users, color: "#34d399", bg: "rgba(52,211,153,0.12)", title: "Students", items: ["View AI-written feedback", "Track your performance", "Submit homework photos", "Chat with AI coach"] },
-              { icon: BookOpen, color: ORANGE, bg: "rgba(249,115,22,0.12)", title: "Admins", items: ["School-wide KPIs", "Teacher effectiveness", "Intervention alerts", "Governance dashboard"] },
-            ].map((role, i) => (
-              <motion.div
-                key={role.title}
-                initial={{ opacity: 0, y: 24 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: i * 0.1 }}
-                style={{ background: "rgba(255,255,255,0.03)", border: "1.5px solid rgba(255,255,255,0.07)", borderRadius: 20, padding: "32px 28px" }}
-              >
-                <div style={{ width: 48, height: 48, borderRadius: 14, background: role.bg, display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20 }}>
-                  <role.icon size={22} color={role.color} />
-                </div>
-                <div style={{ fontSize: 20, fontWeight: 800, fontFamily: "Outfit, sans-serif", marginBottom: 16, color: "white" }}>{role.title}</div>
-                <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>
-                  {role.items.map(item => (
-                    <li key={item} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, color: "rgba(255,255,255,0.5)" }}>
-                      <div style={{ width: 5, height: 5, borderRadius: "50%", background: role.color, flexShrink: 0 }} />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </motion.div>
-            ))}
+        {/* TESTIMONIALS */}
+        <section style={{ padding: "100px 60px", background: `linear-gradient(180deg, ${C.cream} 0%, ${C.pinkLight} 100%)` }}>
+          <div style={{ display: "grid", gridTemplateColumns: "280px 1fr 1fr", gap: 20, alignItems: "start" }}>
+            <div>
+              <h2 style={{ fontFamily: "DM Serif Display, serif", fontSize: "2.5rem", color: C.textDark, lineHeight: 1.15, letterSpacing: "-0.03em" }}>What educators are saying</h2>
+            </div>
+            <div className="lp-testimonial-card" style={{ background: C.pinkLight }}>
+              <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "3rem", lineHeight: 0.8, marginBottom: 16, opacity: 0.6, color: C.textDark }}>"</div>
+              <p style={{ fontSize: "0.95rem", lineHeight: 1.65, marginBottom: 20, fontWeight: 300, color: C.textDark }}>The early warning system flagged a student we'd missed for three weeks. We were able to intervene before his grades collapsed. This platform is genuinely life-changing for teachers.</p>
+              <div style={{ fontSize: "0.82rem", fontWeight: 500, color: C.textMid }}>Mrs. Sharma, Class Teacher — Grade 9A</div>
+              <a href="#" className="lp-read-more">Read more →</a>
+            </div>
+            <div className="lp-testimonial-card" style={{ background: C.pinkHot, color: "white" }}>
+              <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "3rem", lineHeight: 0.8, marginBottom: 16, opacity: 0.6 }}>"</div>
+              <p style={{ fontSize: "0.95rem", lineHeight: 1.65, marginBottom: 20, fontWeight: 300, color: "rgba(255,255,255,0.9)" }}>As a principal, I can now ask the AI "which subject needs intervention?" and get an answer rooted in actual data — not a gut feeling. The question quality analysis alone is worth it.</p>
+              <div style={{ fontSize: "0.82rem", fontWeight: 500, color: "rgba(255,255,255,0.7)" }}>Dr. Patel, School Principal</div>
+              <a href="#" className="lp-read-more lp-read-more-hot">Read more →</a>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* ── CTA ── */}
-      <section style={{ padding: "100px clamp(16px, 5vw, 80px)", textAlign: "center", position: "relative", overflow: "hidden" }}>
-        <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: 700, height: 400, borderRadius: "50%", background: `radial-gradient(circle, ${ACCENT}15 0%, transparent 70%)`, pointerEvents: "none" }} />
-        <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.6 }} style={{ position: "relative" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: ACCENT, textTransform: "uppercase", marginBottom: 20 }}>Get Started Today</div>
-          <h2 style={{ fontSize: "clamp(2.2rem, 5vw, 4rem)", fontWeight: 900, fontFamily: "Outfit, sans-serif", letterSpacing: "-0.025em", lineHeight: 1.1, marginBottom: 20, maxWidth: 700, margin: "0 auto 20px" }}>
-            Ready to transform how your school evaluates exams?
+        {/* AI SHOWCASE */}
+        <section style={{ background: "linear-gradient(160deg, #F2F0F8 0%, #EDE9FB 100%)" }}>
+
+          {/* Block 1: Parent — light */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", alignItems: "center", padding: "80px", gap: 80, position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(ellipse, rgba(91,79,207,0.07) 0%, transparent 70%)", top: -80, right: -60, pointerEvents: "none" }} />
+            <div style={{ position: "relative", zIndex: 2 }}>
+              <span className="lp-sc-eyebrow">For Parents &amp; Students</span>
+              <h2 style={{ fontFamily: "DM Serif Display, serif", fontSize: "clamp(1.9rem, 2.8vw, 2.6rem)", lineHeight: 1.12, letterSpacing: "-0.03em", color: "#1C1640", marginBottom: 18 }}>
+                Know exactly where your child stands — <em style={{ fontStyle: "italic", color: "#5B4FCF" }}>and what to do next.</em>
+              </h2>
+              <p style={{ fontSize: "0.95rem", lineHeight: 1.72, color: "#4A4270", fontWeight: 300, maxWidth: 400, marginBottom: 26 }}>Stop waiting for report cards. Ask the AI where your child ranks, which chapter they're struggling with, and what to focus on this week.</p>
+              <a href="#" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.88rem", fontWeight: 500, color: "#5B4FCF", textDecoration: "none", borderBottom: "1px solid #5B4FCF", paddingBottom: 2 }}>Explore more →</a>
+            </div>
+            <div style={{ position: "relative", zIndex: 2 }}>
+              <ChatShowcase chatId="parent" role="parent" placeholder="Ask about your child…" />
+            </div>
+          </div>
+
+          {/* Block 2: Teacher — dark */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", alignItems: "center", padding: "80px", gap: 80, position: "relative", overflow: "hidden", background: "#1C1640" }}>
+            <div style={{ position: "absolute", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(ellipse, rgba(196,181,248,0.08) 0%, transparent 70%)", top: -80, right: -60, pointerEvents: "none" }} />
+            <div style={{ position: "relative", zIndex: 2 }}>
+              <span style={{ display: "inline-block", fontSize: "0.72rem", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#A78BFA", marginBottom: 18 }}>For Teachers</span>
+              <h2 style={{ fontFamily: "DM Serif Display, serif", fontSize: "clamp(1.9rem, 2.8vw, 2.6rem)", lineHeight: 1.12, letterSpacing: "-0.03em", color: "white", marginBottom: 18 }}>
+                Answer <em style={{ fontStyle: "italic", color: "#C4B5F8" }}>"How is my class doing?"</em> — in seconds, not hours.
+              </h2>
+              <p style={{ fontSize: "0.95rem", lineHeight: 1.72, color: "rgba(255,255,255,0.55)", fontWeight: 300, maxWidth: 400, marginBottom: 26 }}>No more manual analysis. Ask which students need attention, see homework rates, and get early warnings before a student falls too far behind.</p>
+              <a href="#" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.88rem", fontWeight: 500, color: "#C4B5F8", textDecoration: "none", borderBottom: "1px solid #C4B5F8", paddingBottom: 2 }}>Explore more →</a>
+            </div>
+            <div style={{ position: "relative", zIndex: 2 }}>
+              <ChatShowcase chatId="teacher" role="teacher" placeholder="Ask about your class…" darkBg />
+            </div>
+          </div>
+
+          {/* Block 3: Admin — light */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", alignItems: "center", padding: "80px", gap: 80, position: "relative", overflow: "hidden" }}>
+            <div style={{ position: "absolute", width: 500, height: 500, borderRadius: "50%", background: "radial-gradient(ellipse, rgba(91,79,207,0.07) 0%, transparent 70%)", top: -80, right: -60, pointerEvents: "none" }} />
+            <div style={{ position: "relative", zIndex: 2 }}>
+              <span className="lp-sc-eyebrow">For Admins &amp; Principals</span>
+              <h2 style={{ fontFamily: "DM Serif Display, serif", fontSize: "clamp(1.9rem, 2.8vw, 2.6rem)", lineHeight: 1.12, letterSpacing: "-0.03em", color: "#1C1640", marginBottom: 18 }}>
+                The entire school, visible in <em style={{ fontStyle: "italic", color: "#5B4FCF" }}>one conversation.</em>
+              </h2>
+              <p style={{ fontSize: "0.95rem", lineHeight: 1.72, color: "#4A4270", fontWeight: 300, maxWidth: 400, marginBottom: 26 }}>Ask which classes are giving the best results, which teachers are improving, and which departments need intervention — grounded in real institutional data.</p>
+              <a href="#" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.88rem", fontWeight: 500, color: "#5B4FCF", textDecoration: "none", borderBottom: "1px solid #5B4FCF", paddingBottom: 2 }}>Explore more →</a>
+            </div>
+            <div style={{ position: "relative", zIndex: 2 }}>
+              <ChatShowcase chatId="admin" role="admin" placeholder="Ask e.g. Which teachers are improving?" />
+            </div>
+          </div>
+        </section>
+
+        {/* CTA */}
+        <section style={{ padding: "100px 60px", background: `linear-gradient(135deg, ${C.pinkLight} 0%, ${C.lavender} 100%)`, textAlign: "center", position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 700, height: 400, background: "radial-gradient(ellipse, rgba(232,67,122,0.12) 0%, transparent 70%)", pointerEvents: "none" }} />
+          <h2 style={{ fontFamily: "DM Serif Display, serif", fontSize: "clamp(2.5rem, 4vw, 3.8rem)", color: C.textDark, letterSpacing: "-0.03em", marginBottom: 20, position: "relative", zIndex: 2 }}>
+            Ready to transform how your school <em style={{ fontStyle: "italic", color: C.pinkHot }}>thinks?</em>
           </h2>
-          <p style={{ fontSize: 16, color: "rgba(255,255,255,0.4)", maxWidth: 480, margin: "0 auto 40px", lineHeight: 1.7 }}>
-            Join hundreds of schools already using EduSync to grade faster, spot struggling students earlier, and improve outcomes.
+          <p style={{ fontSize: "1.05rem", color: C.textMid, marginBottom: 40, position: "relative", zIndex: 2, fontWeight: 300 }}>
+            Join hundreds of schools already using EduSync to grade faster, identify struggling students earlier, and improve academic outcomes.
           </p>
-          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-            <Link href="/signup">
-              <button style={{ display: "flex", alignItems: "center", gap: 8, background: ACCENT, border: "none", color: "white", fontSize: 16, fontWeight: 700, cursor: "pointer", padding: "16px 32px", borderRadius: 12, boxShadow: `0 4px 36px ${ACCENT}60`, fontFamily: "Outfit, sans-serif" }}>
-                Start for Free <ArrowRight size={17} />
-              </button>
-            </Link>
-            <Link href="/login">
-              <button style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.05)", border: "1.5px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.7)", fontSize: 16, fontWeight: 600, cursor: "pointer", padding: "16px 32px", borderRadius: 12, fontFamily: "Outfit, sans-serif" }}>
-                Log in <ChevronRight size={16} />
-              </button>
-            </Link>
-          </div>
-        </motion.div>
-      </section>
+          <Link href="/signup"><button className="lp-cta-btn" style={{ position: "relative", zIndex: 2 }}>Get Started Free →</button></Link>
+        </section>
 
-      {/* ── FOOTER ── */}
-      <footer style={{ borderTop: "1px solid rgba(255,255,255,0.06)", padding: "28px clamp(16px, 5vw, 80px)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 8, background: ACCENT, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <BookOpen size={12} color="white" />
+        {/* FOOTER */}
+        <footer style={{ padding: "40px 60px", background: C.textDark, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "1.2rem", color: "white" }}>
+            Edu<span style={{ color: C.pinkMid }}>Sync</span>
           </div>
-          <span style={{ fontSize: 14, fontWeight: 700, fontFamily: "Outfit, sans-serif" }}>EduSync</span>
-        </div>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>© 2026 EduSync. AI-powered school management.</div>
-      </footer>
-    </div>
+          <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>© 2026 EduSync. Empowering schools through intelligent data.</p>
+        </footer>
+
+      </div>
+    </>
   );
 }

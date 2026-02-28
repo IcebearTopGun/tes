@@ -92,6 +92,20 @@ export default function AdminDashboard() {
     staleTime: 60000,
   });
 
+  const { data: adminEW, isLoading: adminEWLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/early-warning"],
+    queryFn: () => fetchWithAuth("/api/admin/early-warning").then(r => r.json()),
+    enabled: activeSection === "early-warning",
+    staleTime: 60000,
+  });
+
+  const { data: adminQQ, isLoading: adminQQLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/question-quality"],
+    queryFn: () => fetchWithAuth("/api/admin/question-quality").then(r => r.json()),
+    enabled: activeSection === "question-quality",
+    staleTime: 60000,
+  });
+
   const { data: messages, refetch: refetchMessages } = useQuery<any[]>({
     queryKey: ["/api/chat/messages", activeConversationId],
     queryFn: () => fetchWithAuth(`/api/chat/conversations/${activeConversationId}/messages`).then(r => r.json()),
@@ -210,6 +224,19 @@ export default function AdminDashboard() {
               <path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>
             </svg>
             Teachers
+          </button>
+          <button className={`sf-nav-tab${activeSection === "early-warning" ? " on" : ""}`} onClick={() => setActiveSection("early-warning")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            Early Warning
+          </button>
+          <button className={`sf-nav-tab${activeSection === "question-quality" ? " on" : ""}`} onClick={() => setActiveSection("question-quality")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            Question Quality
           </button>
           <button className="sf-nav-tab" onClick={() => setIsProfilePanelOpen(true)}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -667,55 +694,150 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {/* ── EARLY WARNING TAB ── */}
+        {activeSection === "early-warning" && (
+          <div className="sf-panel">
+            <div className="sf-panel-title">Early Warning System — School-Wide</div>
+            <div className="sf-panel-sub">Top 2 at-risk students per class, ranked by risk score (score decline + homework miss rate)</div>
+            {adminEWLoading ? (
+              <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
+            ) : !adminEW || adminEW.length === 0 ? (
+              <div className="sf-empty"><div className="sf-empty-icon">🟢</div>No at-risk students identified across the school. Evaluate more answer sheets to activate this system.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                {adminEW.map((group: any) => (
+                  <div key={group.class}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Class {group.class}</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {group.students.map((w: any, i: number) => {
+                        const riskColor = w.riskLevel === "HIGH" ? "#d94f4f" : w.riskLevel === "MEDIUM" ? "#d08a2b" : "#3a8a5c";
+                        const riskBg = w.riskLevel === "HIGH" ? "#fff0f0" : w.riskLevel === "MEDIUM" ? "#fff8ed" : "#f0faf4";
+                        const riskIcon = w.riskLevel === "HIGH" ? "🔴" : w.riskLevel === "MEDIUM" ? "🟡" : "🟢";
+                        return (
+                          <div key={i} data-testid={`admin-ew-student-${w.admissionNumber}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12, background: riskBg, border: `1.5px solid ${riskColor}22` }}>
+                            <div style={{ width: 38, height: 38, borderRadius: "50%", background: `${riskColor}1a`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: riskColor, flexShrink: 0 }}>
+                              {w.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{w.studentName}</div>
+                              <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>Score: {w.earlierAvgPct}% → {w.recentAvgPct}% &nbsp;·&nbsp; HW: {w.hwSubmitted}/{w.hwTotal} submitted</div>
+                              <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 4 }}>
+                                Trend: <b style={{ color: w.scoreTrend < 0 ? "#d94f4f" : "#3a8a5c" }}>{w.scoreTrend < 0 ? `↓ ${w.scoreTrend.toFixed(1)}%` : `↑ +${w.scoreTrend.toFixed(1)}%`}</b>
+                                &nbsp;·&nbsp; HW miss: <b style={{ color: w.hwMissRate > 50 ? "#d94f4f" : "#3a8a5c" }}>{Math.round(w.hwMissRate)}%</b>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: "right", flexShrink: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: riskColor }}>{riskIcon} {w.riskLevel}</div>
+                              <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>Risk: {w.riskScore}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── QUESTION QUALITY TAB ── */}
+        {activeSection === "question-quality" && (
+          <div className="sf-panel">
+            <div className="sf-panel-title">Question Quality Analysis — School-Wide</div>
+            <div className="sf-panel-sub">Questions with low average scores across all teachers and classes — flagged for review</div>
+            {adminQQLoading ? (
+              <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
+            ) : !adminQQ || adminQQ.length === 0 ? (
+              <div className="sf-empty"><div className="sf-empty-icon">📊</div>No question quality signals detected yet. More evaluations are needed to generate analysis.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {adminQQ.map((q: any, i: number) => (
+                  <div key={i} data-testid={`admin-qq-item-${i}`} style={{ padding: "14px 16px", borderRadius: 12, background: "var(--pane)", border: "1.5px solid var(--rule)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--ink)", marginBottom: 4 }}>
+                          Q{q.questionNo}: {q.subject || q.examName}
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--mid)", marginBottom: 6 }}>
+                          Class {q.className} &nbsp;·&nbsp; {q.teacherName || "Unknown Teacher"} &nbsp;·&nbsp; {q.attemptCount || 0} students evaluated
+                        </div>
+                        <div style={{ fontSize: 12, color: "#d94f4f" }}>{q.flagReason || "Low student performance on this question."}</div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#d94f4f" }}>{(q.avgPct || 0).toFixed(1)}%</div>
+                        <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>avg score</div>
+                        <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, marginTop: 4, background: "#fff0f0", color: "#d94f4f" }}>{q.flag || "Flagged"}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── PROFILE TAB ── */}
         <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
 
-      {/* ── AI CHAT SIDEBAR — exact TeacherDashboard structure ── */}
+      {/* ── AI CHAT SIDEBAR ── */}
       <AnimatePresence>
         {isChatOpen && (
           <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsChatOpen(false)} className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40" />
-            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 20 }} className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-background border-l z-50 flex flex-col shadow-2xl">
-              <div className="p-4 border-b flex items-center justify-between bg-primary text-primary-foreground shrink-0">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5" />
-                  <div><h2 className="font-bold leading-tight">AI Performance Analyst</h2><p className="text-xs text-primary-foreground/70">School-wide intelligence</p></div>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)} className="text-primary-foreground hover:bg-white/10 rounded-xl"><X className="h-5 w-5" /></Button>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsChatOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(26,26,46,0.18)", backdropFilter: "blur(4px)", zIndex: 40 }} />
+            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 20 }} style={{ position: "fixed", right: 0, top: 0, height: "100vh", width: 420, background: "#f5f3ee", zIndex: 50, display: "flex", flexDirection: "column", boxShadow: "0 8px 40px rgba(26,26,46,0.12)" }}>
+              {/* Top bar — navy */}
+              <div style={{ background: "#1a1a2e", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.12em", color: "rgba(255,255,255,0.5)", textTransform: "uppercase" }}>⏱ AI Analyst</span>
+                <button onClick={() => setIsChatOpen(false)} style={{ width: 28, height: 28, borderRadius: "50%", background: "rgba(255,255,255,0.1)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.6)", fontSize: 14 }}>✕</button>
               </div>
-              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+              <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
                 {!activeConversationId ? (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6">
-                    <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center"><TrendingUp className="h-8 w-8 text-primary" /></div>
-                    <div><h3 className="font-bold text-lg">School-Wide Analysis</h3><p className="text-sm text-muted-foreground mt-2 max-w-xs">Ask any question about school performance, teacher effectiveness, or student trends.</p></div>
-                    <div className="w-full space-y-2">
-                      <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider text-left">Example questions</p>
-                      {ADMIN_CHAT_QUESTIONS.map(q => (
-                        <button key={q} onClick={() => { startConversation.mutate(undefined, { onSuccess: () => setTimeout(() => setChatMessage(q), 300) }); }} className="w-full text-left text-sm px-3 py-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary border border-border/40 hover:border-primary/20 transition-all">{q}</button>
+                  <div style={{ flex: 1, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+                    <div style={{ background: "#dddaf5", padding: "28px 28px 24px", textAlign: "center" }}>
+                      <div style={{ width: 60, height: 60, borderRadius: 16, background: "#f5f3ee", margin: "0 auto 16px", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 2px 12px rgba(26,26,46,0.1)" }}>
+                        <TrendingUp style={{ width: 26, height: 26, color: "#1a1a2e" }} />
+                      </div>
+                      <h2 style={{ fontFamily: "DM Serif Display, serif", fontSize: 22, color: "#1a1a2e", marginBottom: 8, lineHeight: 1.2 }}>School-Wide Analysis</h2>
+                      <p style={{ fontSize: 13.5, color: "#6b6b85", lineHeight: 1.55, maxWidth: 280, margin: "0 auto" }}>Ask any question about school performance, teacher effectiveness, or student trends.</p>
+                    </div>
+                    <div style={{ background: "#dddaf5", padding: "0 28px 20px", display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                      {["School", "Teachers", "Students", "Classes"].map(p => (
+                        <span key={p} style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", padding: "4px 10px", borderRadius: 20, background: "rgba(26,26,46,0.08)", color: "#4a4a7a" }}>{p}</span>
                       ))}
                     </div>
-                    <Button onClick={() => startConversation.mutate()} disabled={startConversation.isPending} className="rounded-xl w-full">
-                      {startConversation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />} Start New Analysis
-                    </Button>
+                    <div style={{ padding: "20px 24px 24px" }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "#8888a8", marginBottom: 12 }}>Example Questions</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+                        {ADMIN_CHAT_QUESTIONS.map(q => (
+                          <button key={q} onClick={() => { startConversation.mutate(undefined, { onSuccess: () => setTimeout(() => setChatMessage(q), 300) }); }} style={{ background: "white", border: "1.5px solid rgba(26,26,46,0.1)", borderRadius: 12, padding: "13px 16px", textAlign: "left", fontFamily: "DM Sans, sans-serif", fontSize: 13.5, color: "#1a1a2e", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, lineHeight: 1.4, transition: "all 0.18s" }}>
+                            <span style={{ width: 6, height: 6, borderRadius: "50%", border: "1.5px solid #4a4a7a", background: "#dddaf5", flexShrink: 0 }} />{q}
+                          </button>
+                        ))}
+                      </div>
+                      <button onClick={() => startConversation.mutate()} disabled={startConversation.isPending} style={{ width: "100%", background: "#1a1a2e", color: "white", border: "none", borderRadius: 12, padding: "15px 20px", fontFamily: "DM Sans, sans-serif", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, transition: "all 0.2s" }}>
+                        {startConversation.isPending ? <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} /> : <Plus style={{ width: 16, height: 16 }} />} Start New Analysis
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <>
-                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-                      {(!messages || messages.length === 0) && <div className="text-center py-8 text-muted-foreground text-sm"><MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-30" /><p>Ask a question to get started</p></div>}
+                    <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12, minHeight: 0, background: "#f8f7fd" }}>
+                      {(!messages || messages.length === 0) && <div style={{ textAlign: "center", padding: "32px 0", color: "#8888a8", fontSize: 13 }}>Ask a question to get started</div>}
                       {messages?.map((msg: any) => (
-                        <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                          {msg.role === "assistant" && <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mr-2 mt-1"><TrendingUp className="h-3 w-3 text-primary" /></div>}
-                          <div className={`max-w-[82%] p-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${msg.role === "user" ? "bg-primary text-primary-foreground rounded-tr-none" : "bg-muted rounded-tl-none"}`}>{msg.content}</div>
+                        <div key={msg.id} style={{ display: "flex", justifyContent: msg.role === "user" ? "flex-end" : "flex-start", gap: 8, alignItems: "flex-end" }}>
+                          {msg.role === "assistant" && <div style={{ width: 26, height: 26, borderRadius: 7, background: "#3D2C8D", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>✦</div>}
+                          <div style={{ maxWidth: "80%", padding: "9px 13px", borderRadius: 10, fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap", ...(msg.role === "user" ? { background: "#4a4a7a", color: "white", borderBottomRightRadius: 3 } : { background: "white", color: "#1a1a2e", border: "1px solid #E0DCF0", borderBottomLeftRadius: 3, boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }) }}>{msg.content}</div>
                         </div>
                       ))}
-                      {sendMessage.isPending && <div className="flex justify-start items-center gap-2"><div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0"><TrendingUp className="h-3 w-3 text-primary" /></div><div className="bg-muted p-3 rounded-2xl rounded-tl-none flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /><span className="text-xs text-muted-foreground">Analyzing data…</span></div></div>}
+                      {sendMessage.isPending && <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}><div style={{ width: 26, height: 26, borderRadius: 7, background: "#3D2C8D", color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700 }}>✦</div><div style={{ background: "white", border: "1px solid #E0DCF0", borderRadius: "10px 10px 10px 3px", padding: "9px 13px", fontSize: 13, color: "#8888a8" }}>Analyzing data…</div></div>}
                     </div>
-                    <div className="p-4 border-t bg-muted/30 shrink-0">
-                      <div className="flex items-center gap-2 mb-2"><Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 rounded-lg" onClick={() => setActiveConversationId(null)}><Plus className="h-3 w-3 mr-1" /> New</Button></div>
-                      <form onSubmit={e => { e.preventDefault(); if (chatMessage.trim()) sendMessage.mutate(chatMessage); }} className="flex gap-2">
-                        <Input placeholder="Ask about school performance…" value={chatMessage} onChange={e => setChatMessage(e.target.value)} className="rounded-xl bg-background" disabled={sendMessage.isPending} data-testid="input-chat-message" />
-                        <Button type="submit" size="icon" className="rounded-xl shrink-0" disabled={sendMessage.isPending || !chatMessage.trim()} data-testid="button-send-message"><Send className="h-4 w-4" /></Button>
+                    <div style={{ padding: "12px 16px", borderTop: "1px solid #E0DCF0", background: "rgba(255,255,255,0.5)", flexShrink: 0 }}>
+                      <div style={{ marginBottom: 8 }}><button onClick={() => setActiveConversationId(null)} style={{ fontSize: 12, color: "#8888a8", background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}><Plus style={{ width: 12, height: 12 }} /> New conversation</button></div>
+                      <form onSubmit={e => { e.preventDefault(); if (chatMessage.trim()) sendMessage.mutate(chatMessage); }} style={{ display: "flex", gap: 8 }}>
+                        <input placeholder="Ask about school performance…" value={chatMessage} onChange={e => setChatMessage(e.target.value)} disabled={sendMessage.isPending} style={{ flex: 1, border: "1px solid #E0DCF0", borderRadius: 7, padding: "7px 11px", fontSize: 13, fontFamily: "DM Sans, sans-serif", background: "white", color: "#1a1a2e", outline: "none" }} data-testid="input-chat-message" />
+                        <button type="submit" disabled={sendMessage.isPending || !chatMessage.trim()} style={{ width: 32, height: 32, borderRadius: 7, background: "#1a1a2e", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontSize: 15, flexShrink: 0 }} data-testid="button-send-message">↑</button>
                       </form>
                     </div>
                   </>
@@ -728,10 +850,10 @@ export default function AdminDashboard() {
 
       {/* Floating chat button */}
       {!isChatOpen && (
-        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="fixed bottom-6 right-6 z-40">
-          <Button onClick={() => setIsChatOpen(true)} className="h-14 w-14 rounded-full shadow-2xl hover:scale-110 transition-transform" data-testid="button-float-chat">
-            <MessageSquare className="h-6 w-6" />
-          </Button>
+        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} style={{ position: "fixed", bottom: 24, right: 24, zIndex: 40 }}>
+          <button onClick={() => setIsChatOpen(true)} data-testid="button-float-chat" style={{ width: 56, height: 56, borderRadius: "50%", background: "#1a1a2e", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 30px rgba(26,26,46,0.3)", transition: "transform 0.2s" }}>
+            <MessageSquare style={{ width: 22, height: 22, color: "white" }} />
+          </button>
         </motion.div>
       )}
     </div>
