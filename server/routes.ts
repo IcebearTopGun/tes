@@ -18,6 +18,53 @@ function getOpenAIClient() {
   return new OpenAI({ apiKey, baseURL });
 }
 
+async function extractDocumentText(dataUrl: string, label: string): Promise<string> {
+  const mimeMatch = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
+  if (!mimeMatch) return "";
+  const mimeType = mimeMatch[1];
+  const base64Data = mimeMatch[2];
+
+  if (mimeType === "application/pdf") {
+    console.log(`[EXTRACT] Extracting text from PDF (${label})...`);
+    const buffer = Buffer.from(base64Data, "base64");
+    const content = buffer.toString("latin1");
+    const textParts: string[] = [];
+    const btEtRegex = /BT([\s\S]*?)ET/g;
+    let m;
+    while ((m = btEtRegex.exec(content)) !== null) {
+      const block = m[1];
+      const strMatches = block.match(/\(([^)]*)\)\s*T[jJ]/g) || [];
+      for (const s of strMatches) {
+        const t = s.replace(/\(([^)]*)\)\s*T[jJ]/, "$1").trim();
+        if (t) textParts.push(t);
+      }
+    }
+    const text = textParts.join(" ").replace(/\s+/g, " ").trim();
+    console.log(`[EXTRACT] PDF text extracted: ${text.length} chars`);
+    return text || "(PDF content could not be extracted as text)";
+  }
+
+  if (mimeType.startsWith("image/")) {
+    console.log(`[EXTRACT] Extracting text from image (${label}) via GPT-4o vision...`);
+    const response = await getOpenAIClient().chat.completions.create({
+      model: "gpt-4o",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "Extract ALL text content from this document image exactly as written. Return only the extracted text, no commentary." },
+          { type: "image_url", image_url: { url: dataUrl } }
+        ]
+      }]
+    });
+    const text = response.choices[0].message.content?.trim() || "";
+    console.log(`[EXTRACT] Image text extracted: ${text.length} chars`);
+    return text;
+  }
+
+  console.log(`[EXTRACT] Unsupported format for ${label}: ${mimeType}`);
+  return "";
+}
+
 async function seedDatabase() {
   const existingTeacher = await storage.getTeacherByEmployeeId("T001");
   if (!existingTeacher) {
@@ -355,30 +402,51 @@ export async function registerRoutes(
       console.log(`[EVAL] Exam found: ${exam.examName} (${exam.subject}), totalMarks=${exam.totalMarks}`);
       console.log(`[EVAL] Has model answer: ${!!exam.modelAnswerUrl}, has marking scheme: ${!!exam.markingSchemeUrl}`);
 
-      const textPrompt = `You are an experienced teacher evaluating a student's exam.
+      let modelAnswerText = exam.modelAnswerText?.trim() || "";
+      if (!modelAnswerText && exam.modelAnswerUrl) {
+        console.log("[EVAL] No modelAnswerText stored, extracting from uploaded file...");
+        modelAnswerText = await extractDocumentText(exam.modelAnswerUrl, "model answer");
+      } else if (modelAnswerText) {
+        console.log("[EVAL] Using stored modelAnswerText.");
+      }
 
+      const markingSchemeText = exam.markingSchemeUrl
+        ? await extractDocumentText(exam.markingSchemeUrl, "marking scheme")
+        : "";
+
+      const ocrData = (() => {
+        try { return JSON.parse(sheet.ocrOutput); } catch { return { answers: [] }; }
+      })();
+      const studentAnswers = (ocrData.answers ?? [])
+        .map((a: any) => `Q${a.question_number}: ${a.answer_text}`)
+        .join("\n");
+
+      const evalPrompt = `You are an experienced teacher evaluating a student's exam answer sheet.
+
+=== EXAM DETAILS ===
 Exam: ${exam.examName}
 Subject: ${exam.subject}
 Total Marks Available: ${exam.totalMarks}
 
-The image(s) attached show:
-${exam.modelAnswerUrl ? "- Image 1: The model answer / marking scheme (teacher's reference)" : ""}
-${exam.modelAnswerUrl && exam.markingSchemeUrl && exam.markingSchemeUrl !== exam.modelAnswerUrl ? "- Image 2: Marking scheme" : ""}
+=== MODEL ANSWER ===
+${modelAnswerText || "(No model answer provided — evaluate based on subject knowledge)"}
 
-Student Details (from OCR):
+${markingSchemeText ? `=== MARKING SCHEME ===\n${markingSchemeText}` : ""}
+
+=== STUDENT DETAILS ===
 Name: ${sheet.studentName}
 Admission Number: ${sheet.admissionNumber}
 
-Student's Written Answers (extracted by OCR):
-${sheet.ocrOutput}
+=== STUDENT'S ANSWERS (from OCR) ===
+${studentAnswers || sheet.ocrOutput}
 
-Instructions:
-- Award marks for each question based on how well the student's answer matches the model answer.
-- Be fair: award partial marks for partially correct answers.
-- For blank answers, award 0 marks.
-- Total marks must not exceed ${exam.totalMarks}.
+=== INSTRUCTIONS ===
+- Compare each student answer against the model answer.
+- Award marks fairly: full marks for correct, partial for partially correct, 0 for blank/wrong.
+- Total marks awarded must not exceed ${exam.totalMarks}.
+- Provide specific improvement suggestions per question.
 
-Return ONLY valid JSON (no extra text) with this exact structure:
+Return ONLY valid JSON with this exact structure:
 {
   "student_name": "${sheet.studentName}",
   "admission_number": "${sheet.admissionNumber}",
@@ -388,41 +456,16 @@ Return ONLY valid JSON (no extra text) with this exact structure:
       "question_number": <number>,
       "marks_awarded": <number>,
       "max_marks": <number>,
-      "improvement_suggestion": "<specific feedback>"
+      "improvement_suggestion": "<specific, actionable feedback>"
     }
   ],
-  "overall_feedback": "<2-3 sentence summary of performance>"
+  "overall_feedback": "<2-3 sentence summary of overall performance>"
 }`;
 
-      const isImageDataUrl = (url: string) => {
-        const m = url?.match(/^data:([^;]+);base64,/);
-        return !!m && m[1].startsWith("image/");
-      };
-
-      const imageContent: Array<{ type: "image_url"; image_url: { url: string } }> = [];
-      if (exam.modelAnswerUrl && isImageDataUrl(exam.modelAnswerUrl)) {
-        imageContent.push({ type: "image_url", image_url: { url: exam.modelAnswerUrl } });
-      }
-      if (exam.markingSchemeUrl && exam.markingSchemeUrl !== exam.modelAnswerUrl && isImageDataUrl(exam.markingSchemeUrl)) {
-        imageContent.push({ type: "image_url", image_url: { url: exam.markingSchemeUrl } });
-      }
-
-      if (imageContent.length === 0) {
-        console.log("[EVAL] No image references available (model answer may be a PDF). Evaluating from OCR text only.");
-      } else {
-        console.log(`[EVAL] Attaching ${imageContent.length} image(s) to vision call.`);
-      }
-
-      console.log("[EVAL] Calling OpenAI GPT-4o for evaluation...");
+      console.log("[EVAL] Calling OpenAI GPT-4o for evaluation (text-only)...");
       const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o",
-        messages: [{
-          role: "user",
-          content: [
-            { type: "text", text: textPrompt },
-            ...imageContent
-          ]
-        }],
+        messages: [{ role: "user", content: evalPrompt }],
         response_format: { type: "json_object" }
       });
 

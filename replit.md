@@ -69,8 +69,10 @@ Test files: `tests/integration/`
 ## AI Pipeline Notes
 
 - **OCR route** (`POST /api/exams/:id/process-answer-sheet`): sends answer sheet image to GPT-4o vision, extracts student name, admission number, and answers array
-- **Evaluation route** (`POST /api/answer-sheets/:id/evaluate`): sends OCR output + model answer image to GPT-4o vision, returns marks per question and overall feedback
-- Model answer images must be passed as image content (not text URLs) to GPT-4o vision API
+- **Evaluation route** (`POST /api/answer-sheets/:id/evaluate`): extracts model answer as text first (`extractDocumentText`), then does text-to-text GPT-4o comparison — no vision in evaluation call
+- **Model answer text** (`exams.modelAnswerText`): teachers can type expected answers directly in the Create Exam form; takes priority over PDF/image extraction in evaluation
+- **PDF text extraction**: Uses regex on BT/ET content streams (works for uncompressed PDFs); compressed PDFs fall back to a placeholder — use `modelAnswerText` instead
+- Answer sheets must be images (JPEG/PNG/WEBP); PDFs blocked with clear error
 - Replit AI Integration env vars (`AI_INTEGRATIONS_OPENAI_*`) are set automatically — no manual API key management needed
 
 ## Security Notes

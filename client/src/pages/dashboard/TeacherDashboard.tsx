@@ -50,6 +50,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -363,6 +364,7 @@ export default function TeacherDashboard() {
         questionPaperUrl: z.string().optional(),
         modelAnswerUrl: z.string().optional(),
         markingSchemeUrl: z.string().optional(),
+        modelAnswerText: z.string().optional(),
       })
     ),
     defaultValues: {
@@ -373,6 +375,7 @@ export default function TeacherDashboard() {
       questionPaperUrl: "",
       modelAnswerUrl: "",
       markingSchemeUrl: "",
+      modelAnswerText: "",
     },
   });
 
@@ -433,7 +436,16 @@ export default function TeacherDashboard() {
             <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
             <p className="text-muted-foreground mt-1">Manage exams, evaluate answer sheets, and track performance.</p>
           </div>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              className="rounded-xl gap-2"
+              onClick={() => setIsChatOpen(true)}
+              data-testid="button-ai-analyst"
+            >
+              <MessageSquare className="h-4 w-4" /> AI Analyst
+            </Button>
+            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
               <Button className="rounded-xl gap-2 shadow-premium">
                 <Plus className="h-4 w-4" /> Create Exam
@@ -498,6 +510,22 @@ export default function TeacherDashboard() {
                     </p>
                   </div>
 
+                  <FormField control={form.control} name="modelAnswerText" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Model Answer Key <span className="text-muted-foreground font-normal">(recommended)</span></FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder={"Q1: The capital of France is Paris.\nQ2: Photosynthesis converts sunlight into glucose using CO₂ and water..."}
+                          className="rounded-xl min-h-[100px] text-sm"
+                          data-testid="input-model-answer-text"
+                          {...field}
+                        />
+                      </FormControl>
+                      <p className="text-xs text-muted-foreground">Type the expected answers. This is used directly by the AI for accurate evaluation.</p>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+
                   <Button type="submit" className="w-full rounded-xl shadow-premium" disabled={form.formState.isSubmitting}>
                     {form.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Exam"}
                   </Button>
@@ -505,6 +533,7 @@ export default function TeacherDashboard() {
               </Form>
             </DialogContent>
           </Dialog>
+          </div>
         </div>
 
         {/* Stats Grid */}

@@ -30,6 +30,7 @@ export const exams = pgTable("exams", {
   questionPaperUrl: text("question_paper_url"),
   modelAnswerUrl: text("model_answer_url"),
   markingSchemeUrl: text("marking_scheme_url"),
+  modelAnswerText: text("model_answer_text"),
 });
 
 export const answerSheets = pgTable("answer_sheets", {
