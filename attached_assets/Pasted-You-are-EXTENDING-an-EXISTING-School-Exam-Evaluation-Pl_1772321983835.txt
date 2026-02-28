@@ -1,0 +1,293 @@
+You are EXTENDING an EXISTING School Exam Evaluation Platform.
+
+THIS TASK ADDS ANALYTICAL INTELLIGENCE FEATURES
+WITHOUT MODIFYING EXISTING DASHBOARD UI.
+
+====================================================
+CRITICAL GLOBAL RULE — UI MUST REMAIN UNCHANGED
+====================================================
+
+Student, Teacher and Admin dashboards are already stable.
+
+YOU MUST NOT:
+
+- redesign dashboards
+- change layouts
+- move KPI cards
+- modify sidebar structure
+- alter spacing or styling
+- rebuild dashboard components
+- change navigation positioning
+
+Early Warning and Question Quality must appear
+ONLY as navigation tabs identical to Homework tab.
+
+No dashboard clutter allowed.
+
+
+====================================================
+FEATURE 1 — EARLY WARNING SYSTEM (TAB BASED)
+====================================================
+
+Create navigation tab:
+
+"Early Warning"
+
+Behaviour MUST be identical to Homework tab.
+
+
+----------------------------------------------------
+TAB BEHAVIOUR
+----------------------------------------------------
+
+Nothing visible on dashboard homepage.
+
+ONLY when user clicks:
+
+Early Warning → open Early Warning page.
+
+
+====================================================
+EARLY WARNING ANALYTICS LOGIC
+====================================================
+
+System must identify academic risk using:
+
+- declining marks trend
+- low subject performance
+- attendance drop
+- homework inconsistency
+- repeated low evaluations
+- ranking decline
+
+
+Risk analysis MUST aggregate:
+
+✓ marks across subjects
+✓ attendance patterns
+✓ homework completion history
+✓ evaluation trends
+
+
+====================================================
+TEACHER EARLY WARNING VIEW
+====================================================
+
+Teacher dashboard Early Warning tab shows:
+
+HIGH RISK STUDENTS
++
+TOP 5 MOST AT-RISK students.
+
+
+Scope rules:
+
+IF teacher IS CLASS TEACHER:
+→ Entire assigned class.
+
+IF teacher IS SUBJECT TEACHER:
+→ Only students enrolled in teacher subject.
+
+
+Each student card displays:
+
+✓ Risk Score
+✓ Weak Subjects
+✓ Marks trend
+✓ Attendance pattern
+✓ Homework consistency
+✓ Improvement / decline indicator
+
+
+----------------------------------------------------
+RISK EXPLANATION ON CLICK
+----------------------------------------------------
+
+When teacher clicks student:
+
+System must explain WHY student is at risk using:
+
+- marks obtained across subjects
+- subject-wise performance comparison
+- attendance history
+- homework submission behaviour
+- performance decline timeline
+
+
+====================================================
+ADMIN EARLY WARNING VIEW
+====================================================
+
+Admin Early Warning tab must show:
+
+BOTTOM 2 STUDENTS FROM EVERY CLASS.
+
+
+Example:
+
+Class 8A:
+- Student A
+- Student B
+
+Class 9B:
+- Student A
+- Student B
+
+
+Clicking student must display:
+
+✓ subject-wise marks
+✓ attendance trend
+✓ homework engagement
+✓ detailed risk explanation
+
+
+====================================================
+FEATURE 2 — QUESTION QUALITY ANALYSIS (TAB BASED)
+====================================================
+
+Create navigation tab:
+
+"Question Quality Analysis"
+
+Behaviour identical to Homework tab.
+
+
+====================================================
+QUESTION QUALITY ANALYTICS
+====================================================
+
+Analyze teacher-created:
+
+✓ exams
+✓ homework assignments
+
+
+Evaluation parameters:
+
+- conceptual depth
+- difficulty balance
+- analytical vs memory ratio
+- repetition frequency
+- syllabus coverage
+
+
+====================================================
+ADMIN QUESTION QUALITY VIEW
+====================================================
+
+Admin must see SCHOOL-WIDE analysis.
+
+
+Display:
+
+Teacher Name
+Subject
+Assignment/Test
+Quality Score
+
+
+Example:
+
+Physics Test — Quality Score: 64%
+
+
+----------------------------------------------------
+LOW QUALITY INSIGHT ON CLICK
+----------------------------------------------------
+
+When admin clicks LOW QUALITY item:
+
+Analyze recent papers of that teacher.
+
+Show insights such as:
+
+✓ excessive memory-based questions
+✓ repeated question patterns
+✓ lack of conceptual variation
+✓ poor difficulty spread
+
+
+Reuse existing analytics cards.
+
+
+====================================================
+DATA SOURCE REQUIREMENT
+====================================================
+
+Analytics must derive from:
+
+- exams table
+- homework table
+- submissions
+- evaluations
+- attendance
+- rankings
+
+NO STATIC OR HARDCODED DATA.
+
+
+====================================================
+SEED / BOOTSTRAP DATA REQUIREMENT
+====================================================
+
+IF required data does not exist,
+system must automatically create
+BOOTSTRAP SEED DATA on application startup.
+
+Create realistic sample data for:
+
+✓ classes
+✓ sections
+✓ students
+✓ teachers
+✓ exams
+✓ homework
+✓ submissions
+✓ evaluations
+✓ attendance records
+
+
+Seed data must allow:
+
+✓ Early Warning tab to populate
+✓ Question Quality analysis to populate
+✓ Risk students to appear
+✓ Quality scores to compute
+
+
+Bootstrap must run ONLY IF database is empty.
+
+
+Pseudo logic:
+
+IF students.count == 0
+   run BootstrapDataService()
+
+
+====================================================
+STRICT BEHAVIOUR RULE
+====================================================
+
+Early Warning and Question Quality:
+
+✓ appear ONLY when tab clicked
+✓ behave exactly like Homework tab
+✓ do NOT appear on dashboard homepage
+✓ do NOT modify KPI layout
+✓ do NOT change dashboard UI
+
+
+====================================================
+FINAL ACCEPTANCE CONDITIONS
+====================================================
+
+✓ Early Warning tab opens dedicated page
+✓ Teacher sees High Risk + Top 5 students
+✓ Admin sees Bottom 2 students per class
+✓ Risk explanation visible on click
+✓ Explanation uses marks, attendance & homework
+✓ Question Quality visible school-wide to admin
+✓ Low-quality insights generated correctly
+✓ Seed data auto-created if required
+✓ Dashboard UI remains completely unchanged

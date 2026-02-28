@@ -169,6 +169,7 @@ export default function TeacherDashboard() {
   const [classFilter, setClassFilter] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
   const [showAvaMenu, setShowAvaMenu] = useState(false);
+  const [expandedEWStudent, setExpandedEWStudent] = useState<string | null>(null);
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
   const [bulkFiles, setBulkFiles] = useState<File[]>([]);
   const [isBulkUploading, setIsBulkUploading] = useState(false);
@@ -1089,54 +1090,146 @@ export default function TeacherDashboard() {
         )}
 
         {/* ── EARLY WARNING TAB ── */}
-        {activeSection === "early-warning" && (
-          <div className="sf-panel">
-            <div className="sf-panel-title">Early Warning System</div>
-            <div className="sf-panel-sub">
-              {teacherScope?.isClassTeacher
-                ? `All students in class ${teacherScope.classTeacherOf} — flagged by score decline or low homework engagement`
-                : "Students in your subjects flagged by score decline or low homework engagement"}
-            </div>
-            {isLoadingEW ? (
-              <div style={{ padding: "32px 0", textAlign: "center" }}><div className="sf-spinner" /></div>
-            ) : !earlyWarnings || earlyWarnings.length === 0 ? (
-              <div className="sf-empty"><div className="sf-empty-icon">🟢</div>No at-risk students detected. Evaluate more answer sheets to enable early warnings.</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-                {earlyWarnings.map((w: any, i: number) => {
-                  const riskColor = w.riskLevel === "HIGH" ? "#d94f4f" : w.riskLevel === "MEDIUM" ? "#d08a2b" : "#3a8a5c";
-                  const riskBg = w.riskLevel === "HIGH" ? "#fff0f0" : w.riskLevel === "MEDIUM" ? "#fff8ed" : "#f0faf4";
-                  const riskIcon = w.riskLevel === "HIGH" ? "🔴" : w.riskLevel === "MEDIUM" ? "🟡" : "🟢";
-                  return (
-                    <div key={i} data-testid={`ew-tab-student-${w.admissionNumber}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12, background: riskBg, border: `1.5px solid ${riskColor}22` }}>
-                      <div style={{ width: 40, height: 40, borderRadius: "50%", background: `${riskColor}1a`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: riskColor, flexShrink: 0 }}>
-                        {w.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+        {activeSection === "early-warning" && (() => {
+          const highRisk = (earlyWarnings || []).filter((w: any) => w.riskLevel === "HIGH");
+          const top5 = (earlyWarnings || []).filter((w: any) => w.riskLevel !== "HIGH").slice(0, 5);
+
+          const EWStudentCard = ({ w, showSection }: { w: any; showSection?: boolean }) => {
+            const isExpanded = expandedEWStudent === w.admissionNumber;
+            const riskColor = w.riskLevel === "HIGH" ? "#d94f4f" : w.riskLevel === "MEDIUM" ? "#d08a2b" : "#3a8a5c";
+            const riskBg = w.riskLevel === "HIGH" ? "#fff0f0" : w.riskLevel === "MEDIUM" ? "#fff8ed" : "#f0faf4";
+            const riskIcon = w.riskLevel === "HIGH" ? "🔴" : w.riskLevel === "MEDIUM" ? "🟡" : "🟢";
+            return (
+              <div key={w.admissionNumber} data-testid={`ew-tab-student-${w.admissionNumber}`} style={{ borderRadius: 14, border: `1.5px solid ${riskColor}22`, overflow: "hidden", background: riskBg }}>
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", cursor: "pointer" }}
+                  onClick={() => setExpandedEWStudent(isExpanded ? null : w.admissionNumber)}
+                >
+                  <div style={{ width: 40, height: 40, borderRadius: "50%", background: `${riskColor}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: riskColor, flexShrink: 0 }}>
+                    {w.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{w.studentName}</div>
+                    <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>
+                      Class {w.studentClass} &nbsp;·&nbsp; {w.earlierAvgPct}% → {w.recentAvgPct}% &nbsp;·&nbsp; HW: {w.hwSubmitted}/{w.hwTotal}
+                    </div>
+                    {(w.weakSubjects || []).length > 0 && (
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
+                        {(w.weakSubjects || []).map((s: string) => (
+                          <span key={s} style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: "#f0e0e0", color: "#b03030" }}>{s}</span>
+                        ))}
                       </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{w.studentName}</div>
-                        <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>
-                          Class {w.studentClass} &nbsp;·&nbsp; Score: {w.earlierAvgPct}% → {w.recentAvgPct}% &nbsp;·&nbsp; HW submitted: {w.hwSubmitted}/{w.hwTotal}
-                        </div>
-                        <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
-                          <div style={{ fontSize: 11, color: "var(--mid)" }}>
-                            Score trend: <b style={{ color: w.scoreTrend > 0 ? "#3a8a5c" : w.scoreTrend < 0 ? "#d94f4f" : "var(--mid)" }}>{w.scoreTrend > 0 ? `↑ +${w.scoreTrend.toFixed(1)}%` : w.scoreTrend < 0 ? `↓ ${w.scoreTrend.toFixed(1)}%` : "→ stable"}</b>
-                          </div>
-                          <div style={{ fontSize: 11, color: "var(--mid)" }}>
-                            HW miss rate: <b style={{ color: w.hwMissRate > 50 ? "#d94f4f" : "#3a8a5c" }}>{Math.round(w.hwMissRate)}%</b>
-                          </div>
+                    )}
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: riskColor }}>{riskIcon} {w.riskLevel}</div>
+                    <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>Risk: {w.riskScore}</div>
+                    <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ explain"}</div>
+                  </div>
+                </div>
+                {isExpanded && (
+                  <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${riskColor}22` }}>
+                    {/* Risk Reason */}
+                    <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(0,0,0,0.04)", borderRadius: 10, fontSize: 13, color: "var(--ink)", lineHeight: 1.6 }}>
+                      <b>Why at risk:</b> {w.riskReason || "Insufficient data for detailed analysis."}
+                    </div>
+                    {/* Subject Breakdown */}
+                    {(w.subjectBreakdown || []).length > 0 && (
+                      <div style={{ marginTop: 14 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Subject Performance</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {(w.subjectBreakdown || []).map((sb: any) => (
+                            <div key={sb.subject}>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
+                                <span style={{ color: "var(--ink)", fontWeight: 500 }}>{sb.subject}</span>
+                                <span style={{ color: sb.avgPct < 50 ? "#d94f4f" : sb.avgPct < 65 ? "#d08a2b" : "#3a8a5c", fontWeight: 600 }}>{sb.avgPct}%</span>
+                              </div>
+                              <div style={{ height: 5, borderRadius: 3, background: "rgba(0,0,0,0.08)" }}>
+                                <div style={{ height: "100%", borderRadius: 3, width: `${sb.avgPct}%`, background: sb.avgPct < 50 ? "#d94f4f" : sb.avgPct < 65 ? "#d08a2b" : "#3a8a5c", transition: "width 0.4s" }} />
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                      <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: riskColor }}>{riskIcon} {w.riskLevel}</div>
-                        <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>Risk score: {w.riskScore}</div>
+                    )}
+                    {/* Evaluation Timeline */}
+                    {(w.evalTimeline || []).length > 0 && (
+                      <div style={{ marginTop: 14 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Evaluation History</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {(w.evalTimeline || []).map((et: any, idx: number) => (
+                            <div key={et.evalId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 10px", background: "rgba(255,255,255,0.5)", borderRadius: 6, fontSize: 12 }}>
+                              <span style={{ color: "var(--mid)" }}>#{idx + 1} {et.examName || et.subject}</span>
+                              <span style={{ fontWeight: 600, color: et.pct < 50 ? "#d94f4f" : et.pct < 65 ? "#d08a2b" : "#3a8a5c" }}>{et.pct}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* HW Stats */}
+                    <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
+                      <div style={{ flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.5)", borderRadius: 9, textAlign: "center" }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: w.hwMissRate > 50 ? "#d94f4f" : "#3a8a5c" }}>{w.hwSubmitted}/{w.hwTotal}</div>
+                        <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>HW Submitted</div>
+                      </div>
+                      <div style={{ flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.5)", borderRadius: 9, textAlign: "center" }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: w.hwMissRate > 50 ? "#d94f4f" : "#3a8a5c" }}>{w.hwMissRate}%</div>
+                        <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>HW Miss Rate</div>
+                      </div>
+                      <div style={{ flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.5)", borderRadius: 9, textAlign: "center" }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: w.scoreTrend > 5 ? "#d94f4f" : w.scoreTrend < -2 ? "#3a8a5c" : "#d08a2b" }}>
+                          {w.scoreTrend > 0 ? `↓${w.scoreTrend}%` : w.scoreTrend < 0 ? `↑${Math.abs(w.scoreTrend)}%` : "→"}
+                        </div>
+                        <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>Score Trend</div>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        )}
+            );
+          };
+
+          return (
+            <div className="sf-panel">
+              <div className="sf-panel-title">Early Warning System</div>
+              <div className="sf-panel-sub">
+                {teacherScope?.isClassTeacher
+                  ? `Entire class ${teacherScope.classTeacherOf} — click any student to see a full risk explanation`
+                  : "Students in your subjects — click any student to see a full risk explanation"}
+              </div>
+              {isLoadingEW ? (
+                <div style={{ padding: "32px 0", textAlign: "center" }}><div className="sf-spinner" /></div>
+              ) : !earlyWarnings || earlyWarnings.length === 0 ? (
+                <div className="sf-empty"><div className="sf-empty-icon">🟢</div>No at-risk students detected. Evaluate more answer sheets to enable early warnings.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                  {highRisk.length > 0 && (
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#d94f4f" }}>🔴 High Risk Students</span>
+                        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 20, background: "#fff0f0", color: "#d94f4f", fontWeight: 600 }}>{highRisk.length}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {highRisk.map((w: any) => <EWStudentCard key={w.admissionNumber} w={w} />)}
+                      </div>
+                    </div>
+                  )}
+                  {top5.length > 0 && (
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", color: "#d08a2b" }}>⚠ Top 5 At-Risk Students</span>
+                        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 20, background: "#fff8ed", color: "#d08a2b", fontWeight: 600 }}>{top5.length}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {top5.map((w: any) => <EWStudentCard key={w.admissionNumber} w={w} />)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── EXAMS TAB — Repository View ── */}
         {activeSection === "exams" && (

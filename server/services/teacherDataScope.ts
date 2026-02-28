@@ -238,6 +238,10 @@ export interface EarlyWarningItem {
   earlierAvgPct: number;
   hwSubmitted: number;
   hwTotal: number;
+  weakSubjects: string[];
+  subjectBreakdown: { subject: string; avgPct: number }[];
+  evalTimeline: { evalId: number; subject: string; pct: number; examName: string }[];
+  riskReason: string;
 }
 
 export async function computeEarlyWarnings(teacherId: number): Promise<EarlyWarningItem[]> {
@@ -248,6 +252,8 @@ export async function computeEarlyWarnings(teacherId: number): Promise<EarlyWarn
       totalMarks: evaluations.totalMarks,
       maxMarks: exams.totalMarks,
       className: exams.className,
+      subject: exams.subject,
+      examName: exams.examName,
       evalId: evaluations.id,
     })
     .from(evaluations)
@@ -281,7 +287,8 @@ export async function computeEarlyWarnings(teacherId: number): Promise<EarlyWarn
   const studentMap = new Map<string, {
     name: string;
     className: string;
-    evals: Array<{ pct: number; evalId: number }>;
+    evals: Array<{ pct: number; evalId: number; subject: string; examName: string }>;
+    subjectTotals: Map<string, { total: number; count: number }>;
   }>();
 
   for (const row of allEvals) {
@@ -290,8 +297,13 @@ export async function computeEarlyWarnings(teacherId: number): Promise<EarlyWarn
       name: row.studentName,
       className: row.className,
       evals: [],
+      subjectTotals: new Map(),
     };
-    cur.evals.push({ pct, evalId: row.evalId });
+    cur.evals.push({ pct, evalId: row.evalId, subject: row.subject, examName: row.examName });
+    const st = cur.subjectTotals.get(row.subject) ?? { total: 0, count: 0 };
+    st.total += pct;
+    st.count += 1;
+    cur.subjectTotals.set(row.subject, st);
     studentMap.set(row.admissionNumber, cur);
   }
 
@@ -327,6 +339,31 @@ export async function computeEarlyWarnings(teacherId: number): Promise<EarlyWarn
     const riskLevel: "LOW" | "MEDIUM" | "HIGH" =
       riskScore >= 50 ? "HIGH" : riskScore >= 25 ? "MEDIUM" : "LOW";
 
+    const subjectBreakdown: { subject: string; avgPct: number }[] = [];
+    const weakSubjects: string[] = [];
+    for (const [subj, val] of info.subjectTotals.entries()) {
+      const avg = Math.round(val.total / val.count);
+      subjectBreakdown.push({ subject: subj, avgPct: avg });
+      if (avg < 55) weakSubjects.push(subj);
+    }
+    subjectBreakdown.sort((a, b) => a.avgPct - b.avgPct);
+
+    const evalTimeline = evals.map(e => ({
+      evalId: e.evalId,
+      subject: e.subject,
+      pct: Math.round(e.pct),
+      examName: e.examName,
+    }));
+
+    const reasonParts: string[] = [];
+    if (scoreTrend > 5) reasonParts.push(`Score declined by ${scoreTrend.toFixed(1)}% from earlier evaluations`);
+    if (hwMissRate > 0.5) reasonParts.push(`Missed ${Math.round(hwMissRate * 100)}% of homework assignments`);
+    if (weakSubjects.length > 0) reasonParts.push(`Weak in ${weakSubjects.join(", ")} (below 55% avg)`);
+    if (recentAvgPct < 50) reasonParts.push(`Recent evaluation avg is critically low at ${Math.round(recentAvgPct)}%`);
+    const riskReason = reasonParts.length > 0
+      ? reasonParts.join(". ") + "."
+      : "Low homework engagement and consistently below-average performance.";
+
     warnings.push({
       admissionNumber: admNum,
       studentName: info.name,
@@ -339,6 +376,10 @@ export async function computeEarlyWarnings(teacherId: number): Promise<EarlyWarn
       earlierAvgPct: Math.round(earlierAvgPct),
       hwSubmitted: submitted,
       hwTotal: totalHw,
+      weakSubjects,
+      subjectBreakdown,
+      evalTimeline,
+      riskReason,
     });
   }
 

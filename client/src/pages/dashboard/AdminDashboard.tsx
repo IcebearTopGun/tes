@@ -53,6 +53,8 @@ export default function AdminDashboard() {
   const [chatMessage, setChatMessage] = useState("");
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [showAvaMenu, setShowAvaMenu] = useState(false);
+  const [expandedEWStudent, setExpandedEWStudent] = useState<string | null>(null);
+  const [expandedQQItem, setExpandedQQItem] = useState<number | null>(null);
   const [moreInsightsOpen, setMoreInsightsOpen] = useState(false);
   const [classFilter, setClassFilter] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
@@ -698,38 +700,95 @@ export default function AdminDashboard() {
         {activeSection === "early-warning" && (
           <div className="sf-panel">
             <div className="sf-panel-title">Early Warning System — School-Wide</div>
-            <div className="sf-panel-sub">Top 2 at-risk students per class, ranked by risk score (score decline + homework miss rate)</div>
+            <div className="sf-panel-sub">Bottom 2 at-risk students per class — click any student to view a full risk explanation</div>
             {adminEWLoading ? (
               <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
             ) : !adminEW || adminEW.length === 0 ? (
               <div className="sf-empty"><div className="sf-empty-icon">🟢</div>No at-risk students identified across the school. Evaluate more answer sheets to activate this system.</div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
                 {adminEW.map((group: any) => (
                   <div key={group.class}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Class {group.class}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Class {group.class}</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {group.students.map((w: any, i: number) => {
+                      {group.students.map((w: any) => {
+                        const ewKey = `${group.class}_${w.admissionNumber}`;
+                        const isExpanded = expandedEWStudent === ewKey;
                         const riskColor = w.riskLevel === "HIGH" ? "#d94f4f" : w.riskLevel === "MEDIUM" ? "#d08a2b" : "#3a8a5c";
                         const riskBg = w.riskLevel === "HIGH" ? "#fff0f0" : w.riskLevel === "MEDIUM" ? "#fff8ed" : "#f0faf4";
                         const riskIcon = w.riskLevel === "HIGH" ? "🔴" : w.riskLevel === "MEDIUM" ? "🟡" : "🟢";
                         return (
-                          <div key={i} data-testid={`admin-ew-student-${w.admissionNumber}`} style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12, background: riskBg, border: `1.5px solid ${riskColor}22` }}>
-                            <div style={{ width: 38, height: 38, borderRadius: "50%", background: `${riskColor}1a`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: riskColor, flexShrink: 0 }}>
-                              {w.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{w.studentName}</div>
-                              <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>Score: {w.earlierAvgPct}% → {w.recentAvgPct}% &nbsp;·&nbsp; HW: {w.hwSubmitted}/{w.hwTotal} submitted</div>
-                              <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 4 }}>
-                                Trend: <b style={{ color: w.scoreTrend < 0 ? "#d94f4f" : "#3a8a5c" }}>{w.scoreTrend < 0 ? `↓ ${w.scoreTrend.toFixed(1)}%` : `↑ +${w.scoreTrend.toFixed(1)}%`}</b>
-                                &nbsp;·&nbsp; HW miss: <b style={{ color: w.hwMissRate > 50 ? "#d94f4f" : "#3a8a5c" }}>{Math.round(w.hwMissRate)}%</b>
+                          <div key={w.admissionNumber} data-testid={`admin-ew-student-${w.admissionNumber}`} style={{ borderRadius: 13, border: `1.5px solid ${riskColor}22`, overflow: "hidden", background: riskBg }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", cursor: "pointer" }}
+                              onClick={() => setExpandedEWStudent(isExpanded ? null : ewKey)}>
+                              <div style={{ width: 38, height: 38, borderRadius: "50%", background: `${riskColor}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: riskColor, flexShrink: 0 }}>
+                                {w.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{w.studentName}</div>
+                                <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>Score: {w.earlierAvgPct}% → {w.recentAvgPct}% &nbsp;·&nbsp; HW: {w.hwSubmitted}/{w.hwTotal}</div>
+                                {(w.weakSubjects || []).length > 0 && (
+                                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
+                                    {(w.weakSubjects || []).map((s: string) => (
+                                      <span key={s} style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: "#f0e0e0", color: "#b03030" }}>{s}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: riskColor }}>{riskIcon} {w.riskLevel}</div>
+                                <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>Risk: {w.riskScore}</div>
+                                <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ explain"}</div>
                               </div>
                             </div>
-                            <div style={{ textAlign: "right", flexShrink: 0 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: riskColor }}>{riskIcon} {w.riskLevel}</div>
-                              <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>Risk: {w.riskScore}</div>
-                            </div>
+                            {isExpanded && (
+                              <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${riskColor}22` }}>
+                                <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(0,0,0,0.04)", borderRadius: 10, fontSize: 13, color: "var(--ink)", lineHeight: 1.6 }}>
+                                  <b>Why at risk:</b> {w.riskReason || "Low homework engagement and consistently below-average performance."}
+                                </div>
+                                {(w.subjectBreakdown || []).length > 0 && (
+                                  <div style={{ marginTop: 14 }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Subject-Wise Marks</div>
+                                    {(w.subjectBreakdown || []).map((sb: any) => (
+                                      <div key={sb.subject} style={{ marginBottom: 8 }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
+                                          <span style={{ color: "var(--ink)", fontWeight: 500 }}>{sb.subject}</span>
+                                          <span style={{ color: sb.avgPct < 50 ? "#d94f4f" : sb.avgPct < 65 ? "#d08a2b" : "#3a8a5c", fontWeight: 600 }}>{sb.avgPct}%</span>
+                                        </div>
+                                        <div style={{ height: 5, borderRadius: 3, background: "rgba(0,0,0,0.08)" }}>
+                                          <div style={{ height: "100%", borderRadius: 3, width: `${sb.avgPct}%`, background: sb.avgPct < 50 ? "#d94f4f" : sb.avgPct < 65 ? "#d08a2b" : "#3a8a5c" }} />
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {(w.evalTimeline || []).length > 0 && (
+                                  <div style={{ marginTop: 14 }}>
+                                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Evaluation History</div>
+                                    {(w.evalTimeline || []).map((et: any, idx: number) => (
+                                      <div key={et.evalId} style={{ display: "flex", justifyContent: "space-between", padding: "5px 10px", background: "rgba(255,255,255,0.5)", borderRadius: 6, fontSize: 12, marginBottom: 4 }}>
+                                        <span style={{ color: "var(--mid)" }}>#{idx + 1} {et.examName || et.subject}</span>
+                                        <span style={{ fontWeight: 600, color: et.pct < 50 ? "#d94f4f" : et.pct < 65 ? "#d08a2b" : "#3a8a5c" }}>{et.pct}%</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
+                                  <div style={{ flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.5)", borderRadius: 9, textAlign: "center" }}>
+                                    <div style={{ fontSize: 16, fontWeight: 700, color: w.hwMissRate > 50 ? "#d94f4f" : "#3a8a5c" }}>{w.hwSubmitted}/{w.hwTotal}</div>
+                                    <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>HW Submitted</div>
+                                  </div>
+                                  <div style={{ flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.5)", borderRadius: 9, textAlign: "center" }}>
+                                    <div style={{ fontSize: 16, fontWeight: 700, color: w.hwMissRate > 50 ? "#d94f4f" : "#3a8a5c" }}>{w.hwMissRate}%</div>
+                                    <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>HW Miss Rate</div>
+                                  </div>
+                                  <div style={{ flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.5)", borderRadius: 9, textAlign: "center" }}>
+                                    <div style={{ fontSize: 16, fontWeight: 700, color: w.scoreTrend > 5 ? "#d94f4f" : "#3a8a5c" }}>{w.recentAvgPct}%</div>
+                                    <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>Recent Avg</div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -745,33 +804,91 @@ export default function AdminDashboard() {
         {activeSection === "question-quality" && (
           <div className="sf-panel">
             <div className="sf-panel-title">Question Quality Analysis — School-Wide</div>
-            <div className="sf-panel-sub">Questions with low average scores across all teachers and classes — flagged for review</div>
+            <div className="sf-panel-sub">Questions with low average scores flagged for review — click any item to see detailed insight</div>
             {adminQQLoading ? (
               <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
             ) : !adminQQ || adminQQ.length === 0 ? (
               <div className="sf-empty"><div className="sf-empty-icon">📊</div>No question quality signals detected yet. More evaluations are needed to generate analysis.</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {adminQQ.map((q: any, i: number) => (
-                  <div key={i} data-testid={`admin-qq-item-${i}`} style={{ padding: "14px 16px", borderRadius: 12, background: "var(--pane)", border: "1.5px solid var(--rule)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--ink)", marginBottom: 4 }}>
-                          Q{q.questionNo}: {q.subject || q.examName}
+                {adminQQ.map((q: any, i: number) => {
+                  const isExpanded = expandedQQItem === i;
+                  const qualityScore = Math.round(q.avgPct || 0);
+                  const qualityLabel = qualityScore < 30 ? "Critical" : qualityScore < 45 ? "Poor" : "Needs Review";
+                  const qualityColor = qualityScore < 30 ? "#d94f4f" : qualityScore < 45 ? "#d08a2b" : "#c07a20";
+                  const deviations: string[] = q.sampleDeviations || [];
+
+                  const insights: string[] = [];
+                  if (qualityScore < 30) insights.push("Critically low class performance — possible teaching gap or unclear question framing.");
+                  if (qualityScore < 45) insights.push("More than half of students scored below 50% on this question.");
+                  if (deviations.length > 0) insights.push(`Common deviation patterns: "${deviations[0]}"`);
+                  if (q.studentsAffected && q.studentsAffected > 3) insights.push(`${q.studentsAffected} students affected — this may indicate a recurring conceptual gap.`);
+                  const memoryBased = deviations.some((d: string) => /memory|rote|recall|definition/i.test(d));
+                  if (memoryBased) insights.push("Pattern suggests over-reliance on memory-based question formats rather than conceptual depth.");
+                  if (insights.length === 0) insights.push("Question shows consistently low student performance. Review difficulty calibration and answer scheme clarity.");
+
+                  return (
+                    <div key={i} data-testid={`admin-qq-item-${i}`} style={{ borderRadius: 13, border: "1.5px solid var(--rule)", overflow: "hidden", background: "var(--pane)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "14px 16px", cursor: "pointer" }}
+                        onClick={() => setExpandedQQItem(isExpanded ? null : i)}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--ink)", marginBottom: 4 }}>
+                            Q{q.questionNumber}: {q.examName || q.subject}
+                          </div>
+                          <div style={{ fontSize: 12, color: "var(--mid)", marginBottom: 5 }}>
+                            {q.teacherName || "Unknown Teacher"} &nbsp;·&nbsp; {q.subject} &nbsp;·&nbsp; {q.studentsAffected || 0} students evaluated
+                          </div>
+                          <div style={{ fontSize: 12, color: qualityColor, fontWeight: 500 }}>
+                            {q.flagReason || "Low student performance flagged for quality review."}
+                          </div>
                         </div>
-                        <div style={{ fontSize: 12, color: "var(--mid)", marginBottom: 6 }}>
-                          Class {q.className} &nbsp;·&nbsp; {q.teacherName || "Unknown Teacher"} &nbsp;·&nbsp; {q.attemptCount || 0} students evaluated
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: qualityColor }}>{qualityScore}%</div>
+                          <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>avg score</div>
+                          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 5 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, background: "#fff0f0", color: qualityColor }}>{qualityLabel}</span>
+                            <span style={{ fontSize: 10, color: "var(--mid)" }}>{isExpanded ? "▲" : "▼"}</span>
+                          </div>
                         </div>
-                        <div style={{ fontSize: 12, color: "#d94f4f" }}>{q.flagReason || "Low student performance on this question."}</div>
                       </div>
-                      <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#d94f4f" }}>{(q.avgPct || 0).toFixed(1)}%</div>
-                        <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>avg score</div>
-                        <span style={{ display: "inline-block", fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, marginTop: 4, background: "#fff0f0", color: "#d94f4f" }}>{q.flag || "Flagged"}</span>
-                      </div>
+                      {isExpanded && (
+                        <div style={{ padding: "0 16px 16px", borderTop: "1px solid var(--rule)" }}>
+                          <div style={{ marginTop: 12, fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Quality Insights</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {insights.map((insight, idx) => (
+                              <div key={idx} style={{ display: "flex", gap: 8, padding: "9px 12px", background: "#fff8ed", borderRadius: 8, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>
+                                <span style={{ flexShrink: 0, color: "#d08a2b" }}>⚠</span>
+                                <span>{insight}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Quality Score Breakdown</div>
+                            <div style={{ height: 7, borderRadius: 4, background: "rgba(0,0,0,0.07)", marginBottom: 6 }}>
+                              <div style={{ height: "100%", borderRadius: 4, width: `${qualityScore}%`, background: qualityScore < 30 ? "#d94f4f" : qualityScore < 45 ? "#d08a2b" : "#c07a20", transition: "width 0.4s" }} />
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--mid)" }}>
+                              <span>Class avg: <b style={{ color: qualityColor }}>{qualityScore}%</b></span>
+                              <span>Students affected: <b style={{ color: "var(--ink)" }}>{q.studentsAffected || 0}</b></span>
+                              <span>Exam: <b style={{ color: "var(--ink)" }}>{q.examName}</b></span>
+                            </div>
+                          </div>
+                          {deviations.length > 0 && (
+                            <div style={{ marginTop: 14 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Sample Student Deviation Patterns</div>
+                              {deviations.map((d: string, idx: number) => (
+                                <div key={idx} style={{ padding: "7px 11px", background: "rgba(0,0,0,0.03)", borderRadius: 7, fontSize: 12, color: "var(--mid)", marginBottom: 5, lineHeight: 1.5 }}>"{d}"</div>
+                              ))}
+                            </div>
+                          )}
+                          <div style={{ marginTop: 14, padding: "10px 13px", background: "#f0f4ff", borderRadius: 8, fontSize: 12.5, color: "#4460cc", lineHeight: 1.55 }}>
+                            <b>Recommendation:</b> Review this question with {q.teacherName || "the teacher"}. Consider rebalancing difficulty, adding analytical depth, or clarifying question framing.
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

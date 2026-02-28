@@ -1,0 +1,259 @@
+You are EXTENDING an EXISTING School Exam Evaluation Platform.
+
+THIS TASK ADDS ANALYTICAL FEATURES
+WITHOUT MODIFYING EXISTING DASHBOARD UI.
+
+====================================================
+CRITICAL GLOBAL RULE — UI MUST REMAIN UNCHANGED
+====================================================
+
+Student, Teacher and Admin dashboards are already stable.
+
+YOU MUST NOT:
+
+- redesign dashboards
+- change layouts
+- move KPI cards
+- modify sidebar structure
+- alter spacing or styling
+- rebuild dashboard components
+
+Early Warning and Question Quality
+must appear ONLY as navigation tabs,
+exactly similar to the existing Homework tab.
+
+No dashboard clutter allowed.
+
+
+====================================================
+FEATURE 1 — EARLY WARNING SYSTEM (TAB BASED)
+====================================================
+
+Create navigation tab:
+
+"Early Warning"
+
+Behaviour MUST match Homework tab.
+
+
+----------------------------------------------------
+TAB BEHAVIOUR
+----------------------------------------------------
+
+Nothing visible on dashboard by default.
+
+ONLY when user clicks:
+
+Early Warning → open Early Warning page.
+
+
+====================================================
+EARLY WARNING DATA LOGIC
+====================================================
+
+System identifies academic risk using:
+
+- declining marks trend
+- low subject performance
+- attendance drop
+- homework inconsistency
+- repeated poor evaluations
+- ranking decline
+
+
+Risk analysis must aggregate:
+
+✓ marks across ALL subjects
+✓ attendance patterns
+✓ homework completion history
+✓ evaluation trends
+
+
+====================================================
+TEACHER EARLY WARNING VIEW
+====================================================
+
+Teacher dashboard Early Warning tab shows:
+
+HIGH RISK STUDENTS
++
+TOP 5 MOST AT-RISK students
+within teacher scope.
+
+
+Scope rules:
+
+IF Class Teacher:
+→ Entire assigned class.
+
+IF Subject Teacher:
+→ Only students enrolled in teacher subject.
+
+
+Each student card must show:
+
+✓ Risk Score
+✓ Subjects performing poorly
+✓ Marks trend graph
+✓ Attendance pattern
+✓ Homework consistency
+✓ Improvement / decline indicator
+
+
+----------------------------------------------------
+INSIGHT ON CLICK
+----------------------------------------------------
+
+When teacher clicks student:
+
+Show WHY student is at risk.
+
+Explain using:
+
+- marks obtained across subjects
+- attendance history
+- homework submission behaviour
+- performance decline timeline
+
+
+====================================================
+ADMIN EARLY WARNING VIEW
+====================================================
+
+Admin Early Warning tab shows:
+
+CLASS-WISE BOTTOM 2 STUDENTS.
+
+
+Example:
+
+Class 8A:
+- Student 1
+- Student 2
+
+Class 9B:
+- Student 1
+- Student 2
+
+
+Admin view aggregates FULL SCHOOL data.
+
+
+Clicking student must show:
+
+✓ subject-wise marks comparison
+✓ attendance trend
+✓ homework engagement
+✓ risk explanation summary
+
+
+====================================================
+FEATURE 2 — QUESTION QUALITY ANALYSIS (TAB BASED)
+====================================================
+
+Create navigation tab:
+
+"Question Quality Analysis"
+
+
+Behaviour identical to Homework tab.
+
+Visible ONLY when clicked.
+
+
+====================================================
+QUESTION QUALITY DATA
+====================================================
+
+System evaluates teacher-created:
+
+✓ exams
+✓ homework assignments
+
+
+Analyze:
+
+- conceptual depth
+- difficulty balance
+- analytical vs memory ratio
+- repetition frequency
+- syllabus coverage
+
+
+====================================================
+ADMIN QUESTION QUALITY VIEW
+====================================================
+
+Admin must see SCHOOL-WIDE analysis.
+
+Display:
+
+Teacher Name
+Subject
+Assignment/Test
+Quality Score
+
+
+Example:
+
+Math Test — Quality Score: 68%
+
+
+----------------------------------------------------
+LOW QUALITY INSIGHT
+----------------------------------------------------
+
+When admin clicks LOW QUALITY item:
+
+Analyze recent papers of that teacher.
+
+Show insights:
+
+✓ excessive memory-based questions
+✓ repeated patterns detected
+✓ lack of conceptual variation
+✓ weak difficulty distribution
+
+
+Reuse existing analytics cards.
+
+
+====================================================
+DATA REQUIREMENTS
+====================================================
+
+Ensure analytics computed from:
+
+- exam papers
+- model answers
+- homework questions
+- evaluation datasets
+
+
+NO STATIC DATA allowed.
+
+
+====================================================
+STRICT BEHAVIOUR RULE
+====================================================
+
+Early Warning and Question Quality:
+
+✓ appear ONLY when tab clicked
+✓ behave exactly like Homework tab
+✓ do NOT appear on dashboard homepage
+✓ do NOT modify KPI layout
+
+
+====================================================
+FINAL ACCEPTANCE CONDITIONS
+====================================================
+
+✓ Early Warning tab opens dedicated view
+✓ Teacher sees High Risk + Top 5 students
+✓ Admin sees Bottom 2 per class
+✓ Risk explanation visible on click
+✓ Explanation uses marks, attendance & homework
+✓ Question Quality visible school-wide to admin
+✓ Low-quality insights generated correctly
+✓ Dashboard UI remains unchanged
