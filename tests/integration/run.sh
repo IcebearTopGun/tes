@@ -7,7 +7,7 @@ echo "║  ScholarFlow Pipeline Integration Tests                  ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 echo "Prerequisites:"
-echo "  • Server running:  npm run dev  (port 5000)"
+echo "  • Server running:  npm run dev  (port 5008)"
 echo "  • Seed accounts:   T001 / password123"
 echo ""
 
