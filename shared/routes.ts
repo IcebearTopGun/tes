@@ -163,6 +163,16 @@ export const api = {
         400: errorSchemas.validation,
         401: errorSchemas.unauthorized
       }
+    },
+    evaluate: {
+      method: 'POST' as const,
+      path: '/api/answer-sheets/:id/evaluate' as const,
+      responses: {
+        200: z.any(),
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+        404: errorSchemas.notFound
+      }
     }
   }
 };

@@ -284,5 +284,75 @@ export async function registerRoutes(
     }
   });
 
+  app.post(api.exams.evaluate.path, authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const answerSheetId = parseInt(req.params.id);
+    try {
+      const sheet = await storage.getAnswerSheet(answerSheetId);
+      if (!sheet) {
+        return res.status(404).json({ message: "Answer sheet not found" });
+      }
+
+      const exam = await storage.getExam(sheet.examId);
+      if (!exam) {
+        return res.status(404).json({ message: "Exam not found" });
+      }
+
+      const prompt = `
+        Evaluate this student's answer sheet based on the teacher's model answers and marking scheme.
+        
+        Exam Details:
+        Subject: \${exam.subject}
+        Total Marks: \${exam.totalMarks}
+        Model Answer URL: \${exam.modelAnswerUrl || 'Not provided'}
+        Marking Scheme URL: \${exam.markingSchemeUrl || 'Not provided'}
+
+        Student Answer Sheet (OCR output):
+        \${sheet.ocrOutput}
+
+        Return ONLY valid JSON with the following structure:
+        {
+          "student_name": "string",
+          "admission_number": "string",
+          "total_marks": number,
+          "questions": [
+            {
+              "question_number": number,
+              "marks_awarded": number,
+              "max_marks": number,
+              "improvement_suggestion": "string"
+            }
+          ],
+          "overall_feedback": "string"
+        }
+      `;
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" }
+      });
+
+      const evalData = JSON.parse(response.choices[0].message.content || "{}");
+      
+      const evaluation = await storage.createEvaluation({
+        answerSheetId,
+        studentName: evalData.student_name,
+        admissionNumber: evalData.admission_number,
+        totalMarks: evalData.total_marks,
+        questions: JSON.stringify(evalData.questions),
+        overallFeedback: evalData.overall_feedback
+      });
+
+      res.json(evaluation);
+    } catch (err) {
+      console.error("Evaluation Error:", err);
+      res.status(500).json({ message: "Failed to evaluate answer sheet" });
+    }
+  });
+
   return httpServer;
 }

@@ -42,7 +42,24 @@ export const answerSheets = pgTable("answer_sheets", {
   status: text("status").notNull().default("processed"),
 });
 
-export const answerSheetsRelations = relations(answerSheets, ({ one }) => ({
+export const evaluations = pgTable("evaluations", {
+  id: serial("id").primaryKey(),
+  answerSheetId: integer("answer_sheet_id").notNull().references(() => answerSheets.id),
+  studentName: text("student_name").notNull(),
+  admissionNumber: text("admission_number").notNull(),
+  totalMarks: integer("total_marks").notNull(),
+  questions: text("questions").notNull(), // JSON string: [{question_number, marks_awarded, max_marks, improvement_suggestion}]
+  overallFeedback: text("overall_feedback").notNull(),
+});
+
+export const evaluationsRelations = relations(evaluations, ({ one }) => ({
+  answerSheet: one(answerSheets, {
+    fields: [evaluations.answerSheetId],
+    references: [answerSheets.id],
+  }),
+}));
+
+export const answerSheetsRelations = relations(answerSheets, ({ one, many }) => ({
   exam: one(exams, {
     fields: [answerSheets.examId],
     references: [exams.id],
@@ -51,6 +68,7 @@ export const answerSheetsRelations = relations(answerSheets, ({ one }) => ({
     fields: [answerSheets.studentId],
     references: [students.id],
   }),
+  evaluations: many(evaluations),
 }));
 
 export const examsRelations = relations(exams, ({ one, many }) => ({
@@ -65,6 +83,7 @@ export const insertTeacherSchema = createInsertSchema(teachers).omit({ id: true 
 export const insertStudentSchema = createInsertSchema(students).omit({ id: true });
 export const insertExamSchema = createInsertSchema(exams).omit({ id: true });
 export const insertAnswerSheetSchema = createInsertSchema(answerSheets).omit({ id: true });
+export const insertEvaluationSchema = createInsertSchema(evaluations).omit({ id: true });
 
 export type Teacher = typeof teachers.$inferSelect;
 export type InsertTeacher = z.infer<typeof insertTeacherSchema>;
@@ -77,3 +96,6 @@ export type InsertExam = z.infer<typeof insertExamSchema>;
 
 export type AnswerSheet = typeof answerSheets.$inferSelect;
 export type InsertAnswerSheet = z.infer<typeof insertAnswerSheetSchema>;
+
+export type Evaluation = typeof evaluations.$inferSelect;
+export type InsertEvaluation = z.infer<typeof insertEvaluationSchema>;

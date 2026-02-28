@@ -1,6 +1,6 @@
 import { db } from "./db";
 import {
-  teachers, students, exams, answerSheets,
+  teachers, students, exams, answerSheets, evaluations,
   type Teacher, type Student, type Exam,
   type InsertTeacher, type InsertStudent, type InsertExam
 } from "@shared/schema";
@@ -19,6 +19,10 @@ export interface IStorage {
   getExamsByTeacher(teacherId: number): Promise<Exam[]>;
 
   createAnswerSheet(sheet: any): Promise<any>;
+  getAnswerSheet(id: number): Promise<any>;
+  getExam(id: number): Promise<Exam | undefined>;
+  createEvaluation(evaluation: any): Promise<any>;
+  getEvaluationByAnswerSheetId(answerSheetId: number): Promise<any>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -60,6 +64,26 @@ export class DatabaseStorage implements IStorage {
   async createAnswerSheet(sheet: any): Promise<any> {
     const [created] = await db.insert(answerSheets).values(sheet).returning();
     return created;
+  }
+
+  async getAnswerSheet(id: number): Promise<any> {
+    const [sheet] = await db.select().from(answerSheets).where(eq(answerSheets.id, id));
+    return sheet;
+  }
+
+  async getExam(id: number): Promise<Exam | undefined> {
+    const [exam] = await db.select().from(exams).where(eq(exams.id, id));
+    return exam;
+  }
+
+  async createEvaluation(evaluation: any): Promise<any> {
+    const [created] = await db.insert(evaluations).values(evaluation).returning();
+    return created;
+  }
+
+  async getEvaluationByAnswerSheetId(answerSheetId: number): Promise<any> {
+    const [evaluation] = await db.select().from(evaluations).where(eq(evaluations.answerSheetId, answerSheetId));
+    return evaluation;
   }
 }
 
