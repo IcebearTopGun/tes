@@ -43,6 +43,36 @@ On startup, the server seeds default accounts if they don't exist:
 - Teacher: employeeId `T001`, password `password123`
 - Student: admissionNumber `S001`, password `password123`
 
+## Integration Tests
+
+Run the full pipeline test suite with:
+```bash
+npx tsx tests/integration/run-pipeline.ts
+# or
+bash tests/integration/run.sh
+```
+
+Tests validate (server must be running on port 5000):
+- Teacher authentication
+- Exam creation
+- Answer sheet OCR (GPT-4o vision) for 4 scoring scenarios (~100%, ~99%, ~78%, ~50%)
+- Evaluation scoring — marks awarded, stored in DB, and in expected range
+- Relative ordering: higher-ability students always outscore lower-ability ones
+- Conversational AI chat endpoint
+
+Test files: `tests/integration/`
+- `run-pipeline.ts` — main test runner
+- `generate-sheet.ts` — generates PNG answer sheet images (`@napi-rs/canvas`)
+- `api.ts` — HTTP client helpers
+- `run.sh` — shell wrapper
+
+## AI Pipeline Notes
+
+- **OCR route** (`POST /api/exams/:id/process-answer-sheet`): sends answer sheet image to GPT-4o vision, extracts student name, admission number, and answers array
+- **Evaluation route** (`POST /api/answer-sheets/:id/evaluate`): sends OCR output + model answer image to GPT-4o vision, returns marks per question and overall feedback
+- Model answer images must be passed as image content (not text URLs) to GPT-4o vision API
+- Replit AI Integration env vars (`AI_INTEGRATIONS_OPENAI_*`) are set automatically — no manual API key management needed
+
 ## Security Notes
 
 - Passwords are hashed with bcryptjs (cost factor 10)

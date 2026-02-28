@@ -26,6 +26,7 @@ function headers() {
 export async function createExam(payload: {
   examName: string;
   subject: string;
+  className: string;
   totalMarks: number;
   questionPaperUrl?: string;
   modelAnswerUrl?: string;

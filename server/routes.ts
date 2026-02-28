@@ -346,39 +346,63 @@ export async function registerRoutes(
       console.log(`[EVAL] Exam found: ${exam.examName} (${exam.subject}), totalMarks=${exam.totalMarks}`);
       console.log(`[EVAL] Has model answer: ${!!exam.modelAnswerUrl}, has marking scheme: ${!!exam.markingSchemeUrl}`);
 
-      const prompt = `
-        Evaluate this student's answer sheet based on the teacher's model answers and marking scheme.
-        
-        Exam Details:
-        Subject: \${exam.subject}
-        Total Marks: \${exam.totalMarks}
-        Model Answer URL: \${exam.modelAnswerUrl || 'Not provided'}
-        Marking Scheme URL: \${exam.markingSchemeUrl || 'Not provided'}
+      const textPrompt = `You are an experienced teacher evaluating a student's exam.
 
-        Student Answer Sheet (OCR output):
-        \${sheet.ocrOutput}
+Exam: ${exam.examName}
+Subject: ${exam.subject}
+Total Marks Available: ${exam.totalMarks}
 
-        Return ONLY valid JSON with the following structure:
-        {
-          "student_name": "string",
-          "admission_number": "string",
-          "total_marks": number,
-          "questions": [
-            {
-              "question_number": number,
-              "marks_awarded": number,
-              "max_marks": number,
-              "improvement_suggestion": "string"
-            }
-          ],
-          "overall_feedback": "string"
-        }
-      `;
+The image(s) attached show:
+${exam.modelAnswerUrl ? "- Image 1: The model answer / marking scheme (teacher's reference)" : ""}
+${exam.modelAnswerUrl && exam.markingSchemeUrl && exam.markingSchemeUrl !== exam.modelAnswerUrl ? "- Image 2: Marking scheme" : ""}
+
+Student Details (from OCR):
+Name: ${sheet.studentName}
+Admission Number: ${sheet.admissionNumber}
+
+Student's Written Answers (extracted by OCR):
+${sheet.ocrOutput}
+
+Instructions:
+- Award marks for each question based on how well the student's answer matches the model answer.
+- Be fair: award partial marks for partially correct answers.
+- For blank answers, award 0 marks.
+- Total marks must not exceed ${exam.totalMarks}.
+
+Return ONLY valid JSON (no extra text) with this exact structure:
+{
+  "student_name": "${sheet.studentName}",
+  "admission_number": "${sheet.admissionNumber}",
+  "total_marks": <number 0-${exam.totalMarks}>,
+  "questions": [
+    {
+      "question_number": <number>,
+      "marks_awarded": <number>,
+      "max_marks": <number>,
+      "improvement_suggestion": "<specific feedback>"
+    }
+  ],
+  "overall_feedback": "<2-3 sentence summary of performance>"
+}`;
+
+      const imageContent: Array<{ type: "image_url"; image_url: { url: string } }> = [];
+      if (exam.modelAnswerUrl) {
+        imageContent.push({ type: "image_url", image_url: { url: exam.modelAnswerUrl } });
+      }
+      if (exam.markingSchemeUrl && exam.markingSchemeUrl !== exam.modelAnswerUrl) {
+        imageContent.push({ type: "image_url", image_url: { url: exam.markingSchemeUrl } });
+      }
 
       console.log("[EVAL] Calling OpenAI GPT-4o for evaluation...");
       const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o",
-        messages: [{ role: "user", content: prompt }],
+        messages: [{
+          role: "user",
+          content: [
+            { type: "text", text: textPrompt },
+            ...imageContent
+          ]
+        }],
         response_format: { type: "json_object" }
       });
 
@@ -389,11 +413,11 @@ export async function registerRoutes(
 
       const evaluation = await storage.createEvaluation({
         answerSheetId,
-        studentName: evalData.student_name,
-        admissionNumber: evalData.admission_number,
-        totalMarks: evalData.total_marks,
-        questions: JSON.stringify(evalData.questions),
-        overallFeedback: evalData.overall_feedback
+        studentName: evalData.student_name || sheet.studentName,
+        admissionNumber: evalData.admission_number || sheet.admissionNumber,
+        totalMarks: evalData.total_marks ?? 0,
+        questions: JSON.stringify(evalData.questions ?? []),
+        overallFeedback: evalData.overall_feedback || ""
       });
 
       res.json(evaluation);

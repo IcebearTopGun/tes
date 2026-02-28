@@ -260,6 +260,7 @@ async function main() {
     const exam = await createExam({
       examName: "Integration Test — Science Assessment",
       subject: "Science",
+      className: "Grade 10A",
       totalMarks: 100,
       modelAnswerUrl: modelAnswerImage,
       markingSchemeUrl: modelAnswerImage,
