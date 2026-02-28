@@ -97,6 +97,24 @@ export interface IStorage {
     homeworkStats: { className: string; totalAssigned: number; totalSubmitted: number; completionPct: number }[];
     marksDistribution: { range: string; count: number }[];
   }>;
+  getAdminKPIs(): Promise<{
+    healthScore: number;
+    healthGrade: string;
+    improvementIndex: number;
+    improvementCount: number;
+    improvementTotal: number;
+    interventionCount: number;
+    teacherEffectivenessScore: number;
+    engagementIndex: number;
+    homeworkEffectivenessIndex: number;
+    moreInsights: {
+      classStability: { className: string; stdDev: number; label: string }[];
+      subjectDifficulty: { subject: string; avgPct: number; trend: string }[];
+      rankDistribution: { band: string; count: number; pct: number }[];
+      engagementAlerts: { className: string; completionPct: number; alert: string }[];
+    };
+  }>;
+  updateProfile(role: "student" | "teacher" | "admin", id: number, data: { name?: string; phone?: string; profilePhotoUrl?: string }): Promise<void>;
 
   // Analytics
   getTeacherStats(teacherId: number): Promise<{
@@ -823,6 +841,190 @@ export class DatabaseStorage implements IStorage {
     }
 
     return { classPerformance, subjectPerformance, teacherStats, homeworkStats, marksDistribution: dist };
+  }
+
+  async getAdminKPIs() {
+    // Get all evaluations with context
+    const evalData = await db
+      .select({
+        admissionNumber: evaluations.admissionNumber,
+        marks: evaluations.totalMarks,
+        maxMarks: exams.totalMarks,
+        examId: exams.id,
+        subject: exams.subject,
+        className: exams.className,
+        teacherId: exams.teacherId,
+      })
+      .from(evaluations)
+      .innerJoin(answerSheets, eq(evaluations.answerSheetId, answerSheets.id))
+      .innerJoin(exams, eq(answerSheets.examId, exams.id))
+      .orderBy(exams.id);
+
+    // Per-student avg
+    const studentAccum = new Map<string, { pctsInOrder: number[] }>();
+    for (const e of evalData) {
+      const pct = e.maxMarks > 0 ? (e.marks / e.maxMarks) * 100 : 0;
+      const cur = studentAccum.get(e.admissionNumber) || { pctsInOrder: [] };
+      cur.pctsInOrder.push(pct);
+      studentAccum.set(e.admissionNumber, cur);
+    }
+
+    // 1. Improvement Index — students whose last exam > first exam
+    let improvementCount = 0;
+    let studentsWithMultiple = 0;
+    studentAccum.forEach(({ pctsInOrder }) => {
+      if (pctsInOrder.length >= 2) {
+        studentsWithMultiple++;
+        if (pctsInOrder[pctsInOrder.length - 1] > pctsInOrder[0]) improvementCount++;
+      }
+    });
+    const improvementIndex = studentsWithMultiple > 0 ? Math.round((improvementCount / studentsWithMultiple) * 100) : 0;
+
+    // 2. Intervention Count — students with avg < 50%
+    let interventionCount = 0;
+    studentAccum.forEach(({ pctsInOrder }) => {
+      const avg = pctsInOrder.reduce((s, p) => s + p, 0) / pctsInOrder.length;
+      if (avg < 50) interventionCount++;
+    });
+
+    // 3. School avg performance
+    const avgPerformance = evalData.length > 0
+      ? evalData.reduce((s, e) => s + (e.maxMarks > 0 ? e.marks / e.maxMarks * 100 : 0), 0) / evalData.length
+      : 0;
+
+    // 4. Homework stats
+    const hwData = await db.select().from(homework);
+    const hwSubs = await db.select().from(homeworkSubmissions);
+    const hwAssigned = hwData.length;
+    const hwSubmitted = hwSubs.length;
+    const engagementIndex = hwAssigned > 0 ? Math.round((hwSubmitted / hwAssigned) * 100) : 0;
+
+    // 5. Homework effectiveness — ratio of completed vs needs_improvement
+    const completedHw = hwSubs.filter(s => s.status === "completed").length;
+    const needsImpHw = hwSubs.filter(s => s.status === "needs_improvement").length;
+    const totalGraded = completedHw + needsImpHw;
+    const hwEffectiveness = totalGraded > 0 ? Math.round((completedHw / totalGraded) * 100) : 0;
+    const avgCorrectness = hwSubs.length > 0
+      ? Math.round(hwSubs.reduce((s, h) => s + (h.correctnessScore || 0), 0) / hwSubs.length)
+      : 0;
+    const homeworkEffectivenessIndex = avgCorrectness > 0 ? avgCorrectness : hwEffectiveness;
+
+    // 6. Teacher Effectiveness Score — consistency across class avgs (lower std dev = higher score)
+    const classAccum = new Map<string, number[]>();
+    for (const e of evalData) {
+      const pct = e.maxMarks > 0 ? (e.marks / e.maxMarks) * 100 : 0;
+      const key = e.className;
+      const cur = classAccum.get(key) || [];
+      cur.push(pct);
+      classAccum.set(key, cur);
+    }
+    const classAvgs = Array.from(classAccum.values()).map(pcts => pcts.reduce((s, p) => s + p, 0) / pcts.length);
+    let teacherEffectivenessScore = 75;
+    if (classAvgs.length >= 2) {
+      const mean = classAvgs.reduce((s, v) => s + v, 0) / classAvgs.length;
+      const variance = classAvgs.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / classAvgs.length;
+      const stdDev = Math.sqrt(variance);
+      teacherEffectivenessScore = Math.max(0, Math.round(100 - stdDev));
+    } else if (classAvgs.length === 1) {
+      teacherEffectivenessScore = Math.round(classAvgs[0]);
+    }
+
+    // Health Score = weighted composite
+    const evaluationRate = evalData.length > 0 ? Math.min(100, Math.round(evalData.length / Math.max(1, hwAssigned + 1) * 100)) : 0;
+    const healthScore = Math.round(
+      avgPerformance * 0.5 +
+      engagementIndex * 0.25 +
+      teacherEffectivenessScore * 0.25
+    );
+    const healthGrade = healthScore >= 80 ? "A" : healthScore >= 65 ? "B" : healthScore >= 50 ? "C" : "D";
+
+    // More Insights
+    // Class stability (std dev per class)
+    const classStability = Array.from(classAccum.entries()).map(([cls, pcts]) => {
+      const mean = pcts.reduce((s, p) => s + p, 0) / pcts.length;
+      const variance = pcts.reduce((s, p) => s + Math.pow(p - mean, 2), 0) / pcts.length;
+      const stdDev = Math.round(Math.sqrt(variance) * 10) / 10;
+      return { className: cls, stdDev, label: stdDev < 10 ? "Stable" : stdDev < 20 ? "Moderate" : "Volatile" };
+    }).sort((a, b) => a.stdDev - b.stdDev);
+
+    // Subject difficulty
+    const subjAccum = new Map<string, number[]>();
+    for (const e of evalData) {
+      const pct = e.maxMarks > 0 ? (e.marks / e.maxMarks) * 100 : 0;
+      const cur = subjAccum.get(e.subject) || [];
+      cur.push(pct);
+      subjAccum.set(e.subject, cur);
+    }
+    const subjectDifficulty = Array.from(subjAccum.entries()).map(([subject, pcts]) => {
+      const avgPct = Math.round(pcts.reduce((s, p) => s + p, 0) / pcts.length);
+      return { subject, avgPct, trend: avgPct >= 70 ? "Easy" : avgPct >= 55 ? "Medium" : "Hard" };
+    }).sort((a, b) => a.avgPct - b.avgPct);
+
+    // Rank distribution
+    const bands = [
+      { band: "A+ (90–100%)", min: 90, max: 100, count: 0 },
+      { band: "A (75–89%)", min: 75, max: 89, count: 0 },
+      { band: "B (60–74%)", min: 60, max: 74, count: 0 },
+      { band: "C (45–59%)", min: 45, max: 59, count: 0 },
+      { band: "D (<45%)", min: 0, max: 44, count: 0 },
+    ];
+    studentAccum.forEach(({ pctsInOrder }) => {
+      const avg = pctsInOrder.reduce((s, p) => s + p, 0) / pctsInOrder.length;
+      const band = bands.find(b => avg >= b.min && avg <= b.max);
+      if (band) band.count++;
+    });
+    const totalStudentsInEval = studentAccum.size;
+    const rankDistribution = bands.map(b => ({
+      band: b.band, count: b.count,
+      pct: totalStudentsInEval > 0 ? Math.round((b.count / totalStudentsInEval) * 100) : 0,
+    }));
+
+    // Engagement alerts
+    const hwClassMap = new Map<string, { assigned: number; submitted: number }>();
+    for (const hw of hwData) {
+      const key = `${hw.className}-${hw.section}`;
+      const cur = hwClassMap.get(key) || { assigned: 0, submitted: 0 };
+      cur.assigned++;
+      hwClassMap.set(key, cur);
+    }
+    for (const sub of hwSubs) {
+      const hw = hwData.find(h => h.id === sub.homeworkId);
+      if (hw) {
+        const key = `${hw.className}-${hw.section}`;
+        const cur = hwClassMap.get(key);
+        if (cur) cur.submitted++;
+      }
+    }
+    const engagementAlerts = Array.from(hwClassMap.entries())
+      .map(([className, d]) => ({
+        className,
+        completionPct: d.assigned > 0 ? Math.round((d.submitted / d.assigned) * 100) : 0,
+        alert: d.assigned > 0 && (d.submitted / d.assigned) < 0.5 ? "Low submission rate" : "",
+      }))
+      .filter(a => a.alert);
+
+    return {
+      healthScore,
+      healthGrade,
+      improvementIndex,
+      improvementCount,
+      improvementTotal: studentsWithMultiple,
+      interventionCount,
+      teacherEffectivenessScore,
+      engagementIndex,
+      homeworkEffectivenessIndex,
+      moreInsights: { classStability, subjectDifficulty, rankDistribution, engagementAlerts },
+    };
+  }
+
+  async updateProfile(role: "student" | "teacher" | "admin", id: number, data: { name?: string; phone?: string; profilePhotoUrl?: string }): Promise<void> {
+    if (role === "student") {
+      await db.update(students).set(data).where(eq(students.id, id));
+    } else if (role === "teacher") {
+      await db.update(teachers).set(data).where(eq(teachers.id, id));
+    } else {
+      await db.update(admins).set(data).where(eq(admins.id, id));
+    }
   }
 }
 

@@ -37,6 +37,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { api, buildUrl } from "@shared/routes";
 import { fetchWithAuth } from "@/lib/fetcher";
+import ProfilePanel from "@/components/ProfilePanel";
 import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -473,6 +474,12 @@ export default function TeacherDashboard() {
             </svg>
             Analytics
           </button>
+          <button className={`sf-nav-tab${activeSection === "profile" ? " on" : ""}`} onClick={() => setActiveSection("profile")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+            Profile
+          </button>
         </div>
 
         <div className="sf-nav-right">
@@ -585,6 +592,12 @@ export default function TeacherDashboard() {
               <polyline points="14 2 14 8 20 8"/>
             </svg>
             Answer Sheets
+          </button>
+          <button className={`sf-stab${activeSection === "profile" ? " on" : ""}`} onClick={() => setActiveSection("profile")}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+            Profile
           </button>
         </div>
 
@@ -1060,6 +1073,7 @@ export default function TeacherDashboard() {
             )}
           </div>
         )}
+        {activeSection === "profile" && <ProfilePanel />}
       </div>
 
       {/* ── CREATE EXAM DIALOG ── */}

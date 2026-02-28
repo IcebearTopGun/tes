@@ -9,6 +9,8 @@ export const admins = pgTable("admins", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
+  phone: text("phone"),
+  profilePhotoUrl: text("profile_photo_url"),
 });
 
 export const teachers = pgTable("teachers", {
@@ -21,6 +23,8 @@ export const teachers = pgTable("teachers", {
   classesAssigned: text("classes_assigned"),
   isClassTeacher: integer("is_class_teacher").notNull().default(0),
   classTeacherOf: text("class_teacher_of"),
+  phone: text("phone"),
+  profilePhotoUrl: text("profile_photo_url"),
 });
 
 export const students = pgTable("students", {
@@ -30,6 +34,8 @@ export const students = pgTable("students", {
   studentClass: text("class").notNull(),
   section: text("section").notNull(),
   password: text("password").notNull(),
+  phone: text("phone"),
+  profilePhotoUrl: text("profile_photo_url"),
 });
 
 export const EXAM_CATEGORIES = ["mid_term", "unit_test", "end_sem", "class_test"] as const;

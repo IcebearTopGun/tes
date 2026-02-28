@@ -2,6 +2,8 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { db } from "./db";
+import fs from "fs";
+import path from "path";
 import { sql as drizzleSql } from "drizzle-orm";
 import { api } from "@shared/routes";
 import { z } from "zod";
@@ -1770,6 +1772,102 @@ Generate 5 practice questions that target the student's specific gaps. Vary ques
       res.json(stats);
     } catch (err) {
       res.status(500).json({ message: "Failed to load stats" });
+    }
+  });
+
+  // ─── ADMIN: INTELLIGENCE KPIs ───────────────────────────────────────────────
+  app.get("/api/admin/kpis", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const kpis = await storage.getAdminKPIs();
+      res.json(kpis);
+    } catch (err: any) {
+      console.error("Admin KPIs error:", err?.message);
+      res.status(500).json({ message: "Failed to compute KPIs" });
+    }
+  });
+
+  // ─── PROFILE: GET current user's profile ────────────────────────────────────
+  app.get("/api/profile", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { id, role } = req.user!;
+      if (role === "teacher") {
+        const t = await storage.getTeacher(id);
+        if (!t) return res.status(404).json({ message: "Not found" });
+        const { password, ...u } = t;
+        return res.json({ role, ...u });
+      } else if (role === "admin") {
+        const a = await storage.getAdmin(id);
+        if (!a) return res.status(404).json({ message: "Not found" });
+        const { password, ...u } = a;
+        return res.json({ role, ...u });
+      } else {
+        const s = await storage.getStudent(id);
+        if (!s) return res.status(404).json({ message: "Not found" });
+        const { password, ...u } = s;
+        return res.json({ role, ...u });
+      }
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ─── PROFILE: PATCH update name / phone ─────────────────────────────────────
+  app.patch("/api/profile", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { id, role } = req.user!;
+      const { name, phone } = req.body;
+      const updateData: any = {};
+      if (name) updateData.name = name;
+      if (phone !== undefined) updateData.phone = phone;
+      await storage.updateProfile(role as any, id, updateData);
+      res.json({ message: "Profile updated" });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  // ─── PROFILE: POST upload photo ──────────────────────────────────────────────
+  app.post("/api/profile/upload-photo", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { id, role } = req.user!;
+      const { imageBase64 } = req.body;
+      if (!imageBase64) return res.status(400).json({ message: "imageBase64 required" });
+
+      // Parse base64
+      const match = imageBase64.match(/^data:(image\/\w+);base64,(.+)$/);
+      if (!match) return res.status(400).json({ message: "Invalid image format. Must be data:image/... base64" });
+      const ext = match[1].replace("image/", "");
+      if (!["jpeg", "jpg", "png", "webp"].includes(ext)) return res.status(400).json({ message: "Only JPG, PNG, WEBP allowed" });
+
+      const base64Data = match[2];
+      const sizeBytes = Buffer.byteLength(base64Data, "base64");
+      if (sizeBytes > 5 * 1024 * 1024) return res.status(400).json({ message: "Image must be under 5MB" });
+
+      const uploadsDir = path.join(process.cwd(), "uploads", "profile-images");
+      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+      const filename = `profile-${role}-${id}-${Date.now()}.${ext}`;
+      const filepath = path.join(uploadsDir, filename);
+      fs.writeFileSync(filepath, Buffer.from(base64Data, "base64"));
+
+      const photoUrl = `/uploads/profile-images/${filename}`;
+      await storage.updateProfile(role as any, id, { profilePhotoUrl: photoUrl });
+
+      res.json({ photoUrl });
+    } catch (err: any) {
+      console.error("Photo upload error:", err?.message);
+      res.status(500).json({ message: "Failed to upload photo" });
+    }
+  });
+
+  // Serve uploaded profile photos
+  app.use("/uploads", (req: Request, res: Response, next: NextFunction) => {
+    const filePath = path.join(process.cwd(), "uploads", req.path);
+    if (fs.existsSync(filePath)) {
+      res.sendFile(filePath);
+    } else {
+      res.status(404).json({ message: "Not found" });
     }
   });
 

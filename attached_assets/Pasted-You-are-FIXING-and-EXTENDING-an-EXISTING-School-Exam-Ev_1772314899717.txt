@@ -1,0 +1,300 @@
+You are FIXING and EXTENDING an EXISTING
+School Exam Evaluation Platform.
+
+THIS IS A STABILITY + DATA + ROLE CONSISTENCY TASK.
+
+====================================================
+CRITICAL GLOBAL RULE — STRICT UI FREEZE
+====================================================
+
+Student and Teacher dashboards are already approved.
+
+YOU MUST NOT:
+
+- redesign dashboards
+- modify CSS
+- change layout structure
+- alter spacing or colors
+- rebuild navigation
+- introduce new UI systems
+- recreate dashboard components
+
+Admin Dashboard MUST be an EXACT COPY
+of the Teacher Dashboard.
+
+DITTO layout.
+
+Only DATA CONTENT may change.
+
+
+====================================================
+ADMIN DASHBOARD IMPLEMENTATION RULE
+====================================================
+
+AdminDashboard MUST reuse:
+
+✓ TeacherDashboardLayout
+✓ Sidebar
+✓ Navbar
+✓ KPI Card components
+✓ Graph containers
+✓ Grid system
+
+Implementation pattern:
+
+AdminDashboard =
+TeacherDashboardLayout + AdminAnalyticsData
+
+DO NOT create AdminLayout.
+
+
+====================================================
+ADMIN INTELLIGENCE DASHBOARD
+====================================================
+
+Replace shallow KPIs like:
+
+✗ Total Students
+✗ Total Teachers
+✗ Total Exams
+
+with AI-driven institutional KPIs.
+
+
+----------------------------------------------------
+VISIBLE KPIs (ONLY 6)
+----------------------------------------------------
+
+Display EXACTLY six KPIs on dashboard load:
+
+1. School Academic Health Score
+2. Academic Improvement Index
+3. Students Requiring Intervention
+4. Teacher Effectiveness Score
+5. Learning Engagement Index
+6. Homework Effectiveness Index
+
+
+These KPIs must come from aggregated analytics:
+
+- exams
+- evaluations
+- homework completion
+- engagement trends
+- rankings
+- improvement metrics
+
+NO STATIC VALUES allowed.
+
+
+====================================================
+MORE INSIGHTS SECTION
+====================================================
+
+Create collapsible section:
+
+"More Insights ▼"
+
+Place remaining analytics here:
+
+- Class Performance Stability
+- Subject Difficulty Trends
+- Evaluation Turnaround Time
+- Homework Consistency
+- Assessment Quality Score
+- Rank Distribution
+- Engagement Drop Alerts
+- Performance Decline Trends
+
+Reuse existing card UI.
+
+
+====================================================
+CONVERSATIONAL AI REQUIREMENT
+====================================================
+
+Admin Dashboard MUST include
+ALWAYS AVAILABLE AI Assistant.
+
+DO NOT create new chat system.
+
+Reuse existing conversational AI component.
+
+Assistant must appear as:
+
+✓ right side panel OR
+✓ floating assistant widget
+
+
+Dashboard shows WHAT.
+AI explains WHY and WHAT TO DO.
+
+
+====================================================
+PROFILE SECTION (ALL ROLES)
+====================================================
+
+Profile section must work dynamically for:
+
+✓ STUDENT
+✓ TEACHER
+✓ ADMIN
+
+
+Reuse ONE shared ProfileComponent.
+
+Load authenticated user using:
+
+currentUser session.
+
+
+----------------------------------------------------
+PROFILE DETAILS
+----------------------------------------------------
+
+STUDENT:
+- Name
+- Class
+- Section
+- Email
+- Phone
+- Profile Photo
+
+TEACHER:
+- Name
+- Subjects
+- Assigned Classes
+- Email
+- Phone
+- Profile Photo
+
+ADMIN:
+- Name
+- Designation
+- Email
+- Phone
+- Profile Photo
+
+
+====================================================
+PROFILE PHOTO SUPPORT
+====================================================
+
+Ensure field exists:
+
+profile_photo_url TEXT
+
+Tables:
+students
+teachers
+admins
+
+
+Display circular avatar at top of profile.
+
+If missing → show default avatar.
+
+
+----------------------------------------------------
+PHOTO UPLOAD
+----------------------------------------------------
+
+Endpoint:
+
+POST /api/profile/upload-photo
+
+Rules:
+
+✓ authenticated user only
+✓ user updates ONLY own photo
+✓ JPG / PNG / WEBP allowed
+✓ max size 5MB
+
+Store in:
+
+/uploads/profile-images/
+
+
+====================================================
+STUDENT HOMEWORK TAB — BROKEN SYNC FIX
+====================================================
+
+Student Homework page keeps syncing infinitely.
+
+FIX LOADING FLOW.
+
+
+Correct lifecycle:
+
+loading = true
+→ GET /api/homework/student
+→ response received
+→ loading = false
+
+
+Backend MUST ALWAYS return:
+
+{
+  success: true,
+  data: []
+}
+
+Never return null or unresolved promise.
+
+
+----------------------------------------------------
+PREVENT FETCH LOOP
+----------------------------------------------------
+
+Incorrect (REMOVE):
+
+useEffect(fetchHomework, [homework])
+
+
+Correct:
+
+useEffect(() => {
+   fetchHomework();
+}, []);
+
+
+Frontend must NOT depend on:
+
+data.length > 0
+
+
+----------------------------------------------------
+EMPTY STATE
+----------------------------------------------------
+
+If no homework exists:
+
+Display:
+"No homework assigned yet"
+
+Spinner must stop.
+
+
+====================================================
+ACCESS CONTROL
+====================================================
+
+Student → own profile only  
+Teacher → own profile only  
+Admin → own profile only  
+
+
+====================================================
+FINAL ACCEPTANCE CONDITIONS
+====================================================
+
+✓ Admin dashboard visually identical to Teacher dashboard
+✓ Exactly 6 intelligence KPIs visible
+✓ Remaining analytics under "More Insights"
+✓ Conversational AI always accessible
+✓ Profile works for Student/Teacher/Admin
+✓ Profile photo visible & uploadable
+✓ Student homework stops infinite syncing
+✓ Loader resolves correctly
+✓ No static dashboard data
+✓ Existing UI fully preserved

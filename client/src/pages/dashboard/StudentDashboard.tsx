@@ -1,4 +1,5 @@
 import "@/dashboard.css";
+import ProfilePanel from "@/components/ProfilePanel";
 import { useStudentDashboard } from "@/hooks/use-dashboard";
 import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
@@ -109,16 +110,18 @@ export default function StudentDashboard() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: homeworkList, refetch: refetchHomework } = useQuery<any[]>({
+  const { data: homeworkList, isLoading: isHomeworkLoading, refetch: refetchHomework } = useQuery<any[]>({
     queryKey: ["/api/student/homework"],
-    queryFn: () => fetchWithAuth("/api/student/homework").then(r => r.json()),
+    queryFn: () => fetchWithAuth("/api/student/homework"),
     enabled: activeTab === "homework",
+    staleTime: 30000,
   });
 
   const { data: hwAnalytics, refetch: refetchHwAnalytics } = useQuery<any>({
     queryKey: ["/api/student/homework/analytics"],
-    queryFn: () => fetchWithAuth("/api/student/homework/analytics").then(r => r.json()),
+    queryFn: () => fetchWithAuth("/api/student/homework/analytics"),
     enabled: activeTab === "homework",
+    staleTime: 30000,
   });
 
   const submitHomework = useMutation({
@@ -304,6 +307,12 @@ export default function StudentDashboard() {
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
             </svg>
             AI Coach
+          </button>
+          <button className={`sf-nav-tab${activeTab === "profile" ? " on" : ""}`} onClick={() => setActiveTab("profile")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+            Profile
           </button>
         </div>
 
@@ -618,9 +627,9 @@ export default function StudentDashboard() {
             <div className="sf-panel">
               <div className="sf-panel-title">My Homework</div>
               <div className="sf-panel-sub">Daily sync from your class — submit to get AI evaluation</div>
-              {!homeworkList ? (
+              {isHomeworkLoading ? (
                 <div style={{ padding: "24px 0", textAlign: "center" }}><Spinner size="sm" /></div>
-              ) : homeworkList.length === 0 ? (
+              ) : !homeworkList || homeworkList.length === 0 ? (
                 <div className="sf-empty"><div className="sf-empty-icon">📚</div>No homework assigned yet for your class and section.</div>
               ) : (
                 homeworkList.map((hw: any) => {
@@ -740,6 +749,8 @@ export default function StudentDashboard() {
             </motion.div>
           )}
         </AnimatePresence>}
+
+        {activeTab === "profile" && <ProfilePanel />}
       </div>
 
       {/* AI CHAT SIDEBAR */}
