@@ -1,5 +1,5 @@
 import { pgTable, text, serial, integer } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -59,6 +59,32 @@ export const evaluationsRelations = relations(evaluations, ({ one }) => ({
   }),
 }));
 
+export const conversations = pgTable("conversations", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  teacherId: integer("teacher_id").notNull().references(() => teachers.id),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const messages = pgTable("messages", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // 'user' | 'assistant'
+  content: text("content").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const conversationsRelations = relations(conversations, ({ many }) => ({
+  messages: many(messages),
+}));
+
+export const messagesRelations = relations(messages, ({ one }) => ({
+  conversation: one(conversations, {
+    fields: [messages.conversationId],
+    references: [conversations.id],
+  }),
+}));
+
 export const answerSheetsRelations = relations(answerSheets, ({ one, many }) => ({
   exam: one(exams, {
     fields: [answerSheets.examId],
@@ -99,3 +125,8 @@ export type InsertAnswerSheet = z.infer<typeof insertAnswerSheetSchema>;
 
 export type Evaluation = typeof evaluations.$inferSelect;
 export type InsertEvaluation = z.infer<typeof insertEvaluationSchema>;
+
+export type Conversation = typeof conversations.$inferSelect;
+export type Message = typeof messages.$inferSelect;
+export type InsertConversation = typeof conversations.$inferInsert;
+export type InsertMessage = typeof messages.$inferInsert;

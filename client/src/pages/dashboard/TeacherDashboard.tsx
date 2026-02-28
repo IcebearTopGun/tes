@@ -11,9 +11,11 @@ import {
   MoreHorizontal,
   Plus,
   Loader2,
-  Upload
+  Upload,
+  MessageSquare,
+  Send
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { 
   Table, 
@@ -24,7 +26,7 @@ import {
   TableRow 
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -46,17 +48,67 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertExamSchema, type Exam } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 import { fetchWithAuth } from "@/lib/fetcher";
 import { z } from "zod";
+import { ScrollArea } from "@/components/ui/spinner"; // Assuming ScrollArea might be missing, or use a div
 
 export default function TeacherDashboard() {
   const { data, isLoading, error } = useTeacherDashboard();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [chatMessage, setChatMessage] = useState("");
+  const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  const { data: conversations } = useQuery<any[]>({
+    queryKey: ["/api/chat/conversations"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/chat/conversations");
+      return res.json();
+    },
+    enabled: isChatOpen
+  });
+
+  const { data: messages, refetch: refetchMessages } = useQuery<any[]>({
+    queryKey: ["/api/chat/messages", activeConversationId],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`/api/chat/conversations/${activeConversationId}/messages`);
+      return res.json();
+    },
+    enabled: !!activeConversationId
+  });
+
+  const startConversation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/chat/conversations", { title: "New Analysis" });
+      return res;
+    },
+    onSuccess: (data) => {
+      setActiveConversationId(data.id);
+      queryClient.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
+    }
+  });
+
+  const sendMessage = useMutation({
+    mutationFn: async (content: string) => {
+      return apiRequest("POST", `/api/chat/conversations/${activeConversationId}/messages`, { content });
+    },
+    onSuccess: () => {
+      setChatMessage("");
+      refetchMessages();
+    }
+  });
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   const handleFileUpload = async (examId: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -406,6 +458,110 @@ export default function TeacherDashboard() {
           </div>
         </div>
       </div>
+
+      {/* AI Chat Sidebar */}
+      <AnimatePresence>
+        {isChatOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsChatOpen(false)}
+              className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40"
+            />
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 20 }}
+              className="fixed right-0 top-0 h-screen w-full sm:w-[400px] bg-background border-l z-50 flex flex-col shadow-2xl"
+            >
+              <div className="p-4 border-b flex items-center justify-between bg-primary text-primary-foreground">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5" />
+                  <h2 className="font-bold">AI Performance Analyst</h2>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)} className="text-primary-foreground hover:bg-white/10">
+                  <Plus className="h-5 w-5 rotate-45" />
+                </Button>
+              </div>
+
+              <div className="flex-1 overflow-hidden flex flex-col">
+                {!activeConversationId ? (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
+                    <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+                      <TrendingUp className="h-8 w-8 text-primary" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-lg">Analyze Class Performance</h3>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Ask questions about student progress, weak areas, and performance trends.
+                      </p>
+                    </div>
+                    <Button onClick={() => startConversation.mutate()} disabled={startConversation.isPending}>
+                      {startConversation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                      Start New Analysis
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                      {messages?.map((msg) => (
+                        <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${
+                            msg.role === 'user' 
+                              ? 'bg-primary text-primary-foreground rounded-tr-none' 
+                              : 'bg-muted rounded-tl-none'
+                          }`}>
+                            {msg.content}
+                          </div>
+                        </div>
+                      ))}
+                      {sendMessage.isPending && (
+                        <div className="flex justify-start">
+                          <div className="bg-muted p-3 rounded-2xl rounded-tl-none">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-4 border-t bg-muted/30">
+                      <form 
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (chatMessage.trim()) sendMessage.mutate(chatMessage);
+                        }}
+                        className="flex gap-2"
+                      >
+                        <Input 
+                          placeholder="Ask about John's performance..." 
+                          value={chatMessage}
+                          onChange={(e) => setChatMessage(e.target.value)}
+                          className="rounded-xl bg-background"
+                        />
+                        <Button type="submit" size="icon" className="rounded-xl shrink-0" disabled={sendMessage.isPending || !chatMessage.trim()}>
+                          <Send className="h-4 w-4" />
+                        </Button>
+                      </form>
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Chat Button */}
+      {!isChatOpen && (
+        <Button 
+          onClick={() => setIsChatOpen(true)}
+          className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-2xl z-40 hover:scale-110 transition-transform"
+        >
+          <MessageSquare className="h-6 w-6" />
+        </Button>
+      )}
     </DashboardLayout>
   );
 }

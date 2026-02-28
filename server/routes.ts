@@ -8,10 +8,13 @@ import bcrypt from "bcryptjs";
 import OpenAI from "openai";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "super-secret-key";
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+
+function getOpenAIClient() {
+  return new OpenAI({
+    apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+    baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  });
+}
 
 async function seedDatabase() {
   const existingTeacher = await storage.getTeacherByEmployeeId("T001");
@@ -241,7 +244,7 @@ export async function registerRoutes(
     const { imageBase64 } = req.body;
 
     try {
-      const response = await openai.chat.completions.create({
+      const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o",
         messages: [
           {
@@ -330,7 +333,7 @@ export async function registerRoutes(
         }
       `;
 
-      const response = await openai.chat.completions.create({
+      const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o",
         messages: [{ role: "user", content: prompt }],
         response_format: { type: "json_object" }
@@ -351,6 +354,72 @@ export async function registerRoutes(
     } catch (err) {
       console.error("Evaluation Error:", err);
       res.status(500).json({ message: "Failed to evaluate answer sheet" });
+    }
+  });
+
+  // CHAT ANALYTICS
+  app.get("/api/chat/conversations", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const convs = await storage.getConversationsByTeacher(req.user.id);
+    res.json(convs);
+  });
+
+  app.post("/api/chat/conversations", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const conv = await storage.createConversation(req.body.title || "New Analysis", req.user.id);
+    res.status(201).json(conv);
+  });
+
+  app.get("/api/chat/conversations/:id/messages", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const msgs = await storage.getMessagesByConversation(parseInt(req.params.id));
+    res.json(msgs);
+  });
+
+  app.post("/api/chat/conversations/:id/messages", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    
+    const conversationId = parseInt(req.params.id);
+    const { content } = req.body;
+
+    try {
+      // 1. Get context (RAG)
+      const evals = await storage.getEvaluationsByTeacher(req.user.id);
+      const context = JSON.stringify(evals.map(e => ({
+        student: e.studentName,
+        admission: e.admissionNumber,
+        marks: e.totalMarks,
+        subject: e.subject,
+        exam: e.examName,
+        feedback: e.overallFeedback
+      })));
+
+      // 2. Save user message
+      await storage.createMessage({ conversationId, role: "user", content });
+
+      // 3. Get AI response
+      const response = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { 
+            role: "system", 
+            content: `You are an educational data analyst. Use the following student evaluation data to answer the teacher's questions. 
+            ONLY use the provided data. Do NOT hallucinate. If data is missing, say so.
+            Data: ${context}` 
+          },
+          { role: "user", content }
+        ]
+      });
+
+      const aiContent = response.choices[0].message.content || "I couldn't analyze that.";
+      
+      // 4. Save AI message
+      const msg = await storage.createMessage({ conversationId, role: "assistant", content: aiContent });
+      
+      res.json(msg);
+    } catch (err) {
+      console.error("Chat Error:", err);
+      res.status(500).json({ message: "Analysis failed" });
     }
   });
 
