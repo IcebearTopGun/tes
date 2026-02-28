@@ -272,7 +272,16 @@ export async function registerRoutes(
       return res.status(400).json({ message: "Missing imageBase64 in request body" });
     }
 
-    console.log(`[OCR] Starting OCR for exam ${examId}, image size: ${imageBase64.length} chars`);
+    const mimeMatch = imageBase64.match(/^data:([^;]+);base64,/);
+    const mimeType = mimeMatch?.[1] ?? "";
+    if (!mimeType.startsWith("image/")) {
+      console.error(`[OCR] Unsupported file type: ${mimeType}`);
+      return res.status(400).json({
+        message: `Unsupported file type: ${mimeType || "unknown"}. Answer sheets must be image files (JPG, PNG, WEBP). PDFs cannot be processed — please photograph or scan the sheet as an image.`
+      });
+    }
+
+    console.log(`[OCR] Starting OCR for exam ${examId}, image size: ${imageBase64.length} chars, type: ${mimeType}`);
 
     try {
       console.log("[OCR] Calling OpenAI GPT-4o vision...");

@@ -164,6 +164,10 @@ function DropZone({
   const [isDragging, setIsDragging] = useState(false);
 
   const processFile = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      alert("Only image files are supported for answer sheets (JPG, PNG, WEBP). PDFs are not accepted.");
+      return;
+    }
     const dataUrl = await readFileAsDataUrl(file);
     onFile(dataUrl, file.name);
   };
@@ -193,7 +197,7 @@ function DropZone({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*,application/pdf"
+        accept="image/*"
         className="hidden"
         onChange={async (e) => {
           const file = e.target.files?.[0];
@@ -214,7 +218,7 @@ function DropZone({
           <div className="text-center px-4">
             <p className="font-semibold">Drop the answer sheet here</p>
             <p className="text-sm text-muted-foreground mt-1">or click to browse files</p>
-            <p className="text-xs text-muted-foreground mt-2">Supports: JPG, PNG, PDF</p>
+            <p className="text-xs text-muted-foreground mt-2">Supports: JPG, PNG, WEBP (images only — not PDF)</p>
           </div>
         </>
       )}
@@ -319,6 +323,10 @@ export default function TeacherDashboard() {
         body: JSON.stringify({ imageBase64: dataUrl }),
       });
       const result = await res.json();
+      if (!res.ok) {
+        toast({ title: "Upload Failed", description: result.message || "Failed to process answer sheet", variant: "destructive" });
+        return;
+      }
       setOcrResult({ ...result, sheetId: result.id, examId });
       setIsOcrDialogOpen(true);
       refetchSheets();
