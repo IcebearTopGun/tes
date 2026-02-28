@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
 import { fetchWithAuth } from "@/lib/fetcher";
-import ProfilePanel from "@/components/ProfilePanel";
+import ProfileDrawer from "@/components/ProfileDrawer";
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -48,6 +48,7 @@ export default function AdminDashboard() {
   const queryClient = useQueryClient();
 
   const [activeSection, setActiveSection] = useState("overview");
+  const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -210,7 +211,7 @@ export default function AdminDashboard() {
             </svg>
             Teachers
           </button>
-          <button className={`sf-nav-tab${activeSection === "profile" ? " on" : ""}`} onClick={() => setActiveSection("profile")}>
+          <button className="sf-nav-tab" onClick={() => setIsProfilePanelOpen(true)}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
               <circle cx="12" cy="7" r="4"/>
@@ -242,7 +243,7 @@ export default function AdminDashboard() {
             {initials}
             {showAvaMenu && (
               <div className="sf-ava-menu">
-                <button className="sf-ava-menu-item" onClick={() => { setActiveSection("profile"); setShowAvaMenu(false); }}>My Profile</button>
+                <button className="sf-ava-menu-item" onClick={() => { setIsProfilePanelOpen(true); setShowAvaMenu(false); }}>My Profile</button>
                 <button className="sf-ava-menu-item danger" onClick={() => logout()}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                   Sign Out
@@ -354,7 +355,7 @@ export default function AdminDashboard() {
             </svg>
             All Teachers
           </button>
-          <button className={`sf-stab${activeSection === "profile" ? " on" : ""}`} onClick={() => setActiveSection("profile")}>
+          <button className="sf-stab" onClick={() => setIsProfilePanelOpen(true)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
             </svg>
@@ -667,7 +668,7 @@ export default function AdminDashboard() {
         )}
 
         {/* ── PROFILE TAB ── */}
-        {activeSection === "profile" && <ProfilePanel />}
+        <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
 
       {/* ── AI CHAT SIDEBAR — exact TeacherDashboard structure ── */}

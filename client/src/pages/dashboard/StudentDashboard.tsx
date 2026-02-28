@@ -1,5 +1,5 @@
 import "@/dashboard.css";
-import ProfilePanel from "@/components/ProfilePanel";
+import ProfileDrawer from "@/components/ProfileDrawer";
 import { useStudentDashboard } from "@/hooks/use-dashboard";
 import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
@@ -78,6 +78,7 @@ export default function StudentDashboard() {
   const [expandedQuestion, setExpandedQuestion] = useState<number | null>(null);
   const [showAvaMenu, setShowAvaMenu] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
+  const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
   const [uploadingHwId, setUploadingHwId] = useState<number | null>(null);
   const hwFileRef = useRef<HTMLInputElement>(null);
   const [pendingHwId, setPendingHwId] = useState<number | null>(null);
@@ -308,7 +309,7 @@ export default function StudentDashboard() {
             </svg>
             AI Coach
           </button>
-          <button className={`sf-nav-tab${activeTab === "profile" ? " on" : ""}`} onClick={() => setActiveTab("profile")}>
+          <button className="sf-nav-tab" onClick={() => setIsProfilePanelOpen(true)}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
             </svg>
@@ -750,7 +751,7 @@ export default function StudentDashboard() {
           )}
         </AnimatePresence>}
 
-        {activeTab === "profile" && <ProfilePanel />}
+        <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
 
       {/* AI CHAT SIDEBAR */}

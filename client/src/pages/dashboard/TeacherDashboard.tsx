@@ -37,7 +37,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { api, buildUrl } from "@shared/routes";
 import { fetchWithAuth } from "@/lib/fetcher";
-import ProfilePanel from "@/components/ProfilePanel";
+import ProfileDrawer from "@/components/ProfileDrawer";
 import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -156,6 +156,7 @@ export default function TeacherDashboard() {
   const { toast } = useToast();
 
   const [activeSection, setActiveSection] = useState("overview");
+  const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
@@ -474,7 +475,7 @@ export default function TeacherDashboard() {
             </svg>
             Analytics
           </button>
-          <button className={`sf-nav-tab${activeSection === "profile" ? " on" : ""}`} onClick={() => setActiveSection("profile")}>
+          <button className="sf-nav-tab" onClick={() => setIsProfilePanelOpen(true)}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
             </svg>
@@ -593,7 +594,7 @@ export default function TeacherDashboard() {
             </svg>
             Answer Sheets
           </button>
-          <button className={`sf-stab${activeSection === "profile" ? " on" : ""}`} onClick={() => setActiveSection("profile")}>
+          <button className="sf-stab" onClick={() => setIsProfilePanelOpen(true)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
             </svg>
@@ -1073,7 +1074,7 @@ export default function TeacherDashboard() {
             )}
           </div>
         )}
-        {activeSection === "profile" && <ProfilePanel />}
+        <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
 
       {/* ── CREATE EXAM DIALOG ── */}

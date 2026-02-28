@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 
-export default function ProfilePanel() {
+export default function ProfilePanel({ hideTitle }: { hideTitle?: boolean } = {}) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -90,9 +90,9 @@ export default function ProfilePanel() {
   try { classes = JSON.parse(profile?.classesAssigned || "[]"); } catch {}
 
   return (
-    <div className="sf-panel" style={{ maxWidth: 600 }}>
-      <div className="sf-panel-title">My Profile</div>
-      <div className="sf-panel-sub">Manage your account information and profile photo</div>
+    <div style={{ maxWidth: 600 }}>
+      {!hideTitle && <div className="sf-panel-title">My Profile</div>}
+      {!hideTitle && <div className="sf-panel-sub">Manage your account information and profile photo</div>}
 
       {/* Photo + basic info */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 24, marginBottom: 28 }}>
