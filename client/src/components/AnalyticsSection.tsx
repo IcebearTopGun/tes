@@ -3,7 +3,9 @@ import { fetchWithAuth } from "@/lib/fetcher";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BarChart2, TrendingUp, PieChart, Users } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { BarChart2, TrendingUp, PieChart, Users, BookOpen, X, Filter } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -20,12 +22,19 @@ import {
   Legend,
   ReferenceLine,
 } from "recharts";
+import { useState } from "react";
 
 interface AnalyticsData {
   classAverages: { subject: string; avgMarks: number; totalMarks: number; examCount: number }[];
   studentPerformance: { studentName: string; totalMarks: number; maxMarks: number; examName: string; subject: string; pct: number }[];
   marksDistribution: { range: string; count: number }[];
   improvementTrends: { examName: string; subject: string; avgMarks: number; maxMarks: number; avgPct: number }[];
+  chapterWeakness: { chapter: string; subject: string; avgScore: number; totalQuestions: number; studentsAffected: number }[];
+}
+
+interface FilterOptions {
+  classes: string[];
+  subjects: string[];
 }
 
 const COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899"];
@@ -55,7 +64,7 @@ function CustomTooltip({ active, payload, label }: any) {
       <p className="font-bold mb-1 text-foreground">{label}</p>
       {payload.map((p: any) => (
         <p key={p.name} style={{ color: p.color }} className="font-medium">
-          {p.name}: <span className="text-foreground">{p.value}{p.name.includes("Pct") || p.name.includes("%") ? "%" : ""}</span>
+          {p.name}: <span className="text-foreground">{p.value}{p.name.includes("Pct") || p.name.includes("%") || p.name === "Avg Score %" ? "%" : ""}</span>
         </p>
       ))}
     </div>
@@ -63,10 +72,23 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export function AnalyticsSection() {
-  const { data, isLoading } = useQuery<AnalyticsData>({
-    queryKey: ["/api/analytics"],
+  const [classFilter, setClassFilter] = useState<string>("");
+  const [subjectFilter, setSubjectFilter] = useState<string>("");
+
+  const { data: filterOptions } = useQuery<FilterOptions>({
+    queryKey: ["/api/analytics/filter-options"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/analytics");
+      const res = await fetchWithAuth("/api/analytics/filter-options");
+      return res.json();
+    },
+  });
+
+  const analyticsUrl = `/api/analytics${classFilter || subjectFilter ? `?${classFilter ? `class=${encodeURIComponent(classFilter)}` : ""}${classFilter && subjectFilter ? "&" : ""}${subjectFilter ? `subject=${encodeURIComponent(subjectFilter)}` : ""}` : ""}`;
+
+  const { data, isLoading } = useQuery<AnalyticsData>({
+    queryKey: ["/api/analytics", classFilter, subjectFilter],
+    queryFn: async () => {
+      const res = await fetchWithAuth(analyticsUrl);
       return res.json();
     },
     refetchInterval: 60_000,
@@ -78,18 +100,66 @@ export function AnalyticsSection() {
     data.improvementTrends.length > 0
   );
 
+  const hasFilters = !!(classFilter || subjectFilter);
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-bold tracking-tight">Analytics</h2>
           <p className="text-sm text-muted-foreground mt-0.5">Live data from evaluated answer sheets</p>
         </div>
-        {hasData && (
-          <Badge variant="secondary" className="rounded-lg border-none text-xs">
-            Auto-refreshes every minute
-          </Badge>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Class filter */}
+          <Select value={classFilter || "all"} onValueChange={v => setClassFilter(v === "all" ? "" : v)}>
+            <SelectTrigger className="w-32 rounded-xl text-xs h-8" data-testid="select-filter-class">
+              <Filter className="h-3 w-3 mr-1 opacity-50" />
+              <SelectValue placeholder="Class" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Classes</SelectItem>
+              {filterOptions?.classes.map(c => (
+                <SelectItem key={c} value={c}>{c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Subject filter */}
+          <Select value={subjectFilter || "all"} onValueChange={v => setSubjectFilter(v === "all" ? "" : v)}>
+            <SelectTrigger className="w-36 rounded-xl text-xs h-8" data-testid="select-filter-subject">
+              <SelectValue placeholder="Subject" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Subjects</SelectItem>
+              {filterOptions?.subjects.map(s => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {hasFilters && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 rounded-xl text-xs gap-1 text-muted-foreground"
+              onClick={() => { setClassFilter(""); setSubjectFilter(""); }}
+              data-testid="button-clear-filters"
+            >
+              <X className="h-3 w-3" /> Clear
+            </Button>
+          )}
+
+          {hasData && !hasFilters && (
+            <Badge variant="secondary" className="rounded-lg border-none text-xs">
+              Auto-refreshes every minute
+            </Badge>
+          )}
+          {hasFilters && (
+            <Badge className="rounded-lg bg-primary/10 text-primary border-none text-xs">
+              Filtered
+            </Badge>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -284,6 +354,69 @@ export function AnalyticsSection() {
           </CardContent>
         </Card>
       </div>
+
+      {/* 5. Chapter Weakness Analysis */}
+      {(data?.chapterWeakness?.length ?? 0) > 0 && (
+        <Card className="border-border/40 shadow-premium rounded-2xl">
+          <CardHeader className="pb-2 flex flex-row items-center gap-2">
+            <div className="h-8 w-8 rounded-xl bg-rose-500/10 flex items-center justify-center">
+              <BookOpen className="h-4 w-4 text-rose-600" />
+            </div>
+            <div>
+              <CardTitle className="text-base">Chapter Weakness Analysis</CardTitle>
+              <p className="text-xs text-muted-foreground">Chapters where students consistently score lowest (from evaluation data)</p>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart
+                data={data!.chapterWeakness}
+                layout="vertical"
+                margin={{ top: 4, right: 40, left: 0, bottom: 4 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                <YAxis
+                  type="category"
+                  dataKey="chapter"
+                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={130}
+                  tickFormatter={(v) => v.length > 16 ? v.slice(0, 16) + "…" : v}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0].payload;
+                    return (
+                      <div className="bg-background border border-border/60 rounded-xl px-3 py-2 shadow-xl text-xs space-y-1">
+                        <p className="font-bold">{d.chapter}</p>
+                        <p className="text-muted-foreground">Subject: {d.subject}</p>
+                        <p style={{ color: d.avgScore < 50 ? "#ef4444" : "#f59e0b" }}>Avg Score: {d.avgScore}%</p>
+                        <p className="text-muted-foreground">{d.studentsAffected} student(s) · {d.totalQuestions} question(s)</p>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="avgScore" name="Avg Score %" radius={[0, 6, 6, 0]} maxBarSize={24}>
+                  {data!.chapterWeakness.map((entry, i) => (
+                    <Cell
+                      key={i}
+                      fill={entry.avgScore < 40 ? "#ef4444" : entry.avgScore < 60 ? "#f59e0b" : "#10b981"}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500 inline-block" />Below 40% (Critical)</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500 inline-block" />40–59% (Needs work)</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />60%+ (Good)</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {!hasData && !isLoading && (
         <Card className="border-border/40 border-dashed rounded-2xl">

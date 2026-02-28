@@ -20,12 +20,16 @@ export const students = pgTable("students", {
   password: text("password").notNull(),
 });
 
+export const EXAM_CATEGORIES = ["mid_term", "unit_test", "end_sem", "class_test"] as const;
+export type ExamCategory = typeof EXAM_CATEGORIES[number];
+
 export const exams = pgTable("exams", {
   id: serial("id").primaryKey(),
   teacherId: integer("teacher_id").notNull().references(() => teachers.id),
   subject: text("subject").notNull(),
   className: text("class_name").notNull(),
   examName: text("exam_name").notNull(),
+  category: text("category").notNull().default("unit_test"),
   totalMarks: integer("total_marks").notNull(),
   questionPaperUrl: text("question_paper_url"),
   modelAnswerUrl: text("model_answer_url"),
@@ -51,16 +55,72 @@ export const evaluations = pgTable("evaluations", {
   studentName: text("student_name").notNull(),
   admissionNumber: text("admission_number").notNull(),
   totalMarks: integer("total_marks").notNull(),
-  questions: text("questions").notNull(), // JSON string: [{question_number, marks_awarded, max_marks, improvement_suggestion}]
+  questions: text("questions").notNull(), // JSON string: [{question_number, chapter, marks_awarded, max_marks, deviation_reason, improvement_suggestion}]
   overallFeedback: text("overall_feedback").notNull(),
 });
 
-export const evaluationsRelations = relations(evaluations, ({ one }) => ({
-  answerSheet: one(answerSheets, {
-    fields: [evaluations.answerSheetId],
-    references: [answerSheets.id],
-  }),
-}));
+// Bulk upload: individual pages uploaded before grouping/merging
+export const answerSheetPages = pgTable("answer_sheet_pages", {
+  id: serial("id").primaryKey(),
+  examId: integer("exam_id").notNull().references(() => exams.id),
+  admissionNumber: text("admission_number"),
+  studentName: text("student_name"),
+  sheetNumber: integer("sheet_number"),
+  imageBase64: text("image_base64").notNull(),
+  ocrOutput: text("ocr_output"), // JSON string
+  status: text("status").notNull().default("pending"), // pending | processed
+  uploadedAt: text("uploaded_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// Merged scripts grouped per student per exam
+export const mergedAnswerScripts = pgTable("merged_answer_scripts", {
+  id: serial("id").primaryKey(),
+  examId: integer("exam_id").notNull().references(() => exams.id),
+  admissionNumber: text("admission_number").notNull(),
+  studentName: text("student_name").notNull(),
+  mergedAnswers: text("merged_answers").notNull(), // JSON string - merged answers from all pages
+  pageIds: text("page_ids").notNull(), // JSON array of page ids
+  status: text("status").notNull().default("pending"), // pending | evaluated
+  answerSheetId: integer("answer_sheet_id").references(() => answerSheets.id), // set after evaluation
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// NCERT reference chapters
+export const ncertChapters = pgTable("ncert_chapters", {
+  id: serial("id").primaryKey(),
+  class: text("class").notNull(),
+  subject: text("subject").notNull(),
+  chapterName: text("chapter_name").notNull(),
+  chapterContent: text("chapter_content").notNull(),
+  teacherId: integer("teacher_id").notNull().references(() => teachers.id),
+});
+
+// Per-question deviation logs (extracted for efficient querying)
+export const deviationLogs = pgTable("deviation_logs", {
+  id: serial("id").primaryKey(),
+  evaluationId: integer("evaluation_id").notNull().references(() => evaluations.id),
+  answerSheetId: integer("answer_sheet_id").notNull().references(() => answerSheets.id),
+  admissionNumber: text("admission_number").notNull(),
+  examId: integer("exam_id").notNull().references(() => exams.id),
+  subject: text("subject").notNull(),
+  questionNumber: integer("question_number").notNull(),
+  chapter: text("chapter"),
+  expectedConcept: text("expected_concept"),
+  studentGap: text("student_gap"),
+  deviationReason: text("deviation_reason"),
+  marksAwarded: integer("marks_awarded"),
+  maxMarks: integer("max_marks"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// Cached AI-generated performance profile per student
+export const performanceProfiles = pgTable("performance_profiles", {
+  id: serial("id").primaryKey(),
+  studentId: integer("student_id").notNull().references(() => students.id),
+  admissionNumber: text("admission_number").notNull(),
+  profileData: text("profile_data").notNull(), // JSON
+  generatedAt: text("generated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
 
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
@@ -89,6 +149,13 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   }),
 }));
 
+export const evaluationsRelations = relations(evaluations, ({ one }) => ({
+  answerSheet: one(answerSheets, {
+    fields: [evaluations.answerSheetId],
+    references: [answerSheets.id],
+  }),
+}));
+
 export const answerSheetsRelations = relations(answerSheets, ({ one, many }) => ({
   exam: one(exams, {
     fields: [answerSheets.examId],
@@ -114,6 +181,7 @@ export const insertStudentSchema = createInsertSchema(students).omit({ id: true 
 export const insertExamSchema = createInsertSchema(exams).omit({ id: true });
 export const insertAnswerSheetSchema = createInsertSchema(answerSheets).omit({ id: true });
 export const insertEvaluationSchema = createInsertSchema(evaluations).omit({ id: true });
+export const insertNcertChapterSchema = createInsertSchema(ncertChapters).omit({ id: true });
 
 export type Teacher = typeof teachers.$inferSelect;
 export type InsertTeacher = z.infer<typeof insertTeacherSchema>;
@@ -130,7 +198,15 @@ export type InsertAnswerSheet = z.infer<typeof insertAnswerSheetSchema>;
 export type Evaluation = typeof evaluations.$inferSelect;
 export type InsertEvaluation = z.infer<typeof insertEvaluationSchema>;
 
+export type AnswerSheetPage = typeof answerSheetPages.$inferSelect;
+export type MergedAnswerScript = typeof mergedAnswerScripts.$inferSelect;
+export type NcertChapter = typeof ncertChapters.$inferSelect;
+export type InsertNcertChapter = z.infer<typeof insertNcertChapterSchema>;
+
 export type Conversation = typeof conversations.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type InsertConversation = typeof conversations.$inferInsert;
 export type InsertMessage = typeof messages.$inferInsert;
+
+export type DeviationLog = typeof deviationLogs.$inferSelect;
+export type PerformanceProfile = typeof performanceProfiles.$inferSelect;

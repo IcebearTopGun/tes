@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   BarChart3,
   Target,
@@ -16,6 +17,14 @@ import {
   Loader2,
   Bot,
   Send,
+  Brain,
+  TrendingUp,
+  BookOpen,
+  Star,
+  AlertTriangle,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useRef, useEffect } from "react";
@@ -44,6 +53,23 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
   return res.json();
 }
 
+interface PerformanceProfile {
+  strengths: string[];
+  weak_chapters: { chapter: string; reason: string; score_pct: number }[];
+  recurring_mistakes: string[];
+  attendance_impact: string;
+  performance_trend: string;
+  recommended_focus_areas: string[];
+}
+
+interface RevisionData {
+  chapter: string;
+  subject: string;
+  revision_focus: string;
+  key_concepts: string[];
+  practice_questions: { question_number: number; question: string; hint: string; marks: number }[];
+}
+
 export default function StudentDashboard() {
   const { data, isLoading, error } = useStudentDashboard();
   const { toast } = useToast();
@@ -51,6 +77,8 @@ export default function StudentDashboard() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  const [revisionChapter, setRevisionChapter] = useState<{ chapter: string; subject: string } | null>(null);
+  const [expandedQuestion, setExpandedQuestion] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { data: conversations } = useQuery<any[]>({
@@ -63,6 +91,20 @@ export default function StudentDashboard() {
     queryKey: ["/api/student/chat/messages", activeConversationId],
     queryFn: () => fetchWithAuth(`/api/student/chat/conversations/${activeConversationId}/messages`),
     enabled: !!activeConversationId,
+  });
+
+  const { data: performanceProfile, isLoading: isProfileLoading, refetch: refetchProfile } = useQuery<PerformanceProfile>({
+    queryKey: ["/api/student/performance-profile"],
+    queryFn: () => fetchWithAuth("/api/student/performance-profile"),
+    staleTime: 10 * 60 * 1000,
+    retry: false,
+  });
+
+  const { data: revisionData, isLoading: isRevisionLoading } = useQuery<RevisionData>({
+    queryKey: ["/api/student/revision", revisionChapter?.chapter, revisionChapter?.subject],
+    queryFn: () => fetchWithAuth(`/api/student/revision?chapter=${encodeURIComponent(revisionChapter!.chapter)}&subject=${encodeURIComponent(revisionChapter!.subject)}`),
+    enabled: !!revisionChapter,
+    staleTime: 5 * 60 * 1000,
   });
 
   const startConversation = useMutation({
@@ -114,6 +156,8 @@ export default function StudentDashboard() {
       </DashboardLayout>
     );
   }
+
+  const hasEvals = (data?.assignments ?? 0) > 0;
 
   return (
     <DashboardLayout>
@@ -232,6 +276,255 @@ export default function StudentDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* AI Performance Profile */}
+        {hasEvals && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold flex items-center gap-2">
+                <Brain className="h-5 w-5 text-indigo-600" /> AI Performance Profile
+              </h2>
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl gap-1.5 text-xs"
+                onClick={() => refetchProfile()}
+                data-testid="button-refresh-profile"
+              >
+                <RefreshCw className="h-3 w-3" /> Refresh Analysis
+              </Button>
+            </div>
+
+            {isProfileLoading ? (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {[1, 2, 3].map(i => (
+                  <Card key={i} className="border-border/40 rounded-2xl">
+                    <CardContent className="p-6 space-y-3">
+                      <Skeleton className="h-4 w-1/3" />
+                      <Skeleton className="h-3 w-full" />
+                      <Skeleton className="h-3 w-4/5" />
+                      <Skeleton className="h-3 w-3/5" />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : performanceProfile ? (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Strengths */}
+                <Card className="border-border/40 shadow-premium rounded-2xl border-l-4 border-l-emerald-500">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Star className="h-4 w-4 text-emerald-600" /> Strengths
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {performanceProfile.strengths.length > 0 ? (
+                      performanceProfile.strengths.map((s, i) => (
+                        <div key={i} className="flex items-start gap-2 text-sm" data-testid={`strength-${i}`}>
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 mt-2 shrink-0" />
+                          <span>{s}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No strengths identified yet.</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Performance Trend */}
+                <Card className="border-border/40 shadow-premium rounded-2xl border-l-4 border-l-violet-500">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4 text-violet-600" /> Performance Trend
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <p className="text-sm" data-testid="text-performance-trend">{performanceProfile.performance_trend}</p>
+                    <div className="pt-2 border-t border-border/40">
+                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-1">Attendance</p>
+                      <p className="text-xs text-muted-foreground">{performanceProfile.attendance_impact}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Recurring Mistakes */}
+                <Card className="border-border/40 shadow-premium rounded-2xl border-l-4 border-l-amber-500">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600" /> Recurring Patterns
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {performanceProfile.recurring_mistakes.length > 0 ? (
+                      performanceProfile.recurring_mistakes.map((m, i) => (
+                        <div key={i} className="flex items-start gap-2 text-sm" data-testid={`mistake-${i}`}>
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500 mt-2 shrink-0" />
+                          <span>{m}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No recurring mistakes detected.</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Weak Chapters with Revision Buttons */}
+                {performanceProfile.weak_chapters.length > 0 && (
+                  <Card className="border-border/40 shadow-premium rounded-2xl lg:col-span-2">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <BookOpen className="h-4 w-4 text-rose-600" /> Weak Chapters
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {performanceProfile.weak_chapters.map((wc, i) => (
+                        <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-muted/30 hover:bg-rose-50 transition-colors" data-testid={`weak-chapter-${i}`}>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-sm">{wc.chapter}</span>
+                              <Badge variant="secondary" className="rounded-lg border-none text-xs">{wc.score_pct}%</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">{wc.reason}</p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="rounded-lg text-xs gap-1.5 shrink-0 ml-3"
+                            onClick={() => setRevisionChapter({ chapter: wc.chapter, subject: data?.marksOverview?.[0]?.subject || "General" })}
+                            data-testid={`button-practice-${i}`}
+                          >
+                            <BookOpen className="h-3 w-3" /> Practice
+                          </Button>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Recommended Focus Areas */}
+                {performanceProfile.recommended_focus_areas.length > 0 && (
+                  <Card className="border-border/40 shadow-premium rounded-2xl">
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Target className="h-4 w-4 text-indigo-600" /> Recommended Focus
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {performanceProfile.recommended_focus_areas.map((area, i) => (
+                        <div key={i} className="flex items-start gap-2 text-sm" data-testid={`focus-area-${i}`}>
+                          <span className="text-indigo-600 font-bold shrink-0">{i + 1}.</span>
+                          <span>{area}</span>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            ) : (
+              <Card className="border-border/40 border-dashed rounded-2xl">
+                <CardContent className="py-8 text-center text-muted-foreground">
+                  <Brain className="h-8 w-8 mx-auto mb-2 opacity-20" />
+                  <p className="text-sm">Could not load profile. Try refreshing.</p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+
+        {/* Adaptive Revision Panel */}
+        <AnimatePresence>
+          {revisionChapter && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="rounded-2xl border border-border/40 shadow-premium overflow-hidden"
+            >
+              <div className="p-6 bg-gradient-to-r from-indigo-500/5 to-violet-500/5 border-b border-border/40">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                      <BookOpen className="h-5 w-5 text-indigo-600" />
+                      Practice: {revisionChapter.chapter}
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-0.5">AI-generated revision questions based on your gaps</p>
+                  </div>
+                  <Button variant="ghost" size="icon" onClick={() => setRevisionChapter(null)} className="rounded-xl" data-testid="button-close-revision">
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+              <div className="p-6 space-y-6">
+                {isRevisionLoading ? (
+                  <div className="space-y-4">
+                    <Skeleton className="h-4 w-2/3" />
+                    <Skeleton className="h-24 w-full" />
+                    <Skeleton className="h-24 w-full" />
+                  </div>
+                ) : revisionData ? (
+                  <>
+                    {/* Revision Focus */}
+                    <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                      <p className="text-xs font-bold uppercase tracking-wide text-indigo-600 mb-1">Revision Focus</p>
+                      <p className="text-sm text-indigo-900">{revisionData.revision_focus}</p>
+                    </div>
+
+                    {/* Key Concepts */}
+                    {revisionData.key_concepts?.length > 0 && (
+                      <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2">Key Concepts</p>
+                        <div className="flex flex-wrap gap-2">
+                          {revisionData.key_concepts.map((c, i) => (
+                            <Badge key={i} variant="secondary" className="rounded-lg border-none text-xs">{c}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Practice Questions */}
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-3">Practice Questions</p>
+                      <div className="space-y-3">
+                        {revisionData.practice_questions?.map((q, i) => (
+                          <div key={i} className="border border-border/40 rounded-xl overflow-hidden" data-testid={`practice-q-${i}`}>
+                            <button
+                              className="w-full flex items-center justify-between p-4 text-left hover:bg-muted/30 transition-colors"
+                              onClick={() => setExpandedQuestion(expandedQuestion === i ? null : i)}
+                            >
+                              <div className="flex items-start gap-3">
+                                <span className="font-bold text-indigo-600 shrink-0">Q{q.question_number}.</span>
+                                <span className="text-sm font-medium">{q.question}</span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0 ml-3">
+                                <Badge variant="secondary" className="rounded-lg border-none text-xs">{q.marks}m</Badge>
+                                {expandedQuestion === i ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                              </div>
+                            </button>
+                            <AnimatePresence>
+                              {expandedQuestion === i && (
+                                <motion.div
+                                  initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="p-4 pt-0 border-t border-border/40 bg-muted/10">
+                                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-1">Hint</p>
+                                    <p className="text-sm text-muted-foreground italic">{q.hint}</p>
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-4">Could not generate revision content.</p>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Teacher Feedback */}
         {data?.feedback && data.feedback.length > 0 && (

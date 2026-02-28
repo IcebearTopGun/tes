@@ -9,6 +9,7 @@ import {
   Search,
   User,
   GraduationCap,
+  Library,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +28,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
   const navItems = [
     { name: "Overview", href: role === "teacher" ? "/teacher-dashboard" : "/student-dashboard", icon: LayoutDashboard },
     { name: "Analytics", href: "#", icon: GraduationCap },
-    { name: "Resources", href: "#", icon: BookOpen },
+    ...(role === "teacher" ? [{ name: "NCERT Chapters", href: "/ncert-chapters", icon: Library }] : []),
     { name: "Community", href: "#", icon: Users },
   ];
 

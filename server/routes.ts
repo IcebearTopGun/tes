@@ -222,18 +222,13 @@ export async function registerRoutes(
     if (req.user?.role !== "teacher") {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    res.json({ 
-      totalStudents: 150, 
-      activeClasses: 5,
-      totalExams: 24,
-      sheetsEvaluated: 1240,
-      avgPerformance: 82,
-      recentActivity: [
-        { id: 1, action: "Evaluated", target: "Midterm Math", time: "2 hours ago" },
-        { id: 2, action: "Created", target: "Final Science Exam", time: "5 hours ago" },
-        { id: 3, action: "Graded", target: "History Essay", time: "1 day ago" }
-      ]
-    });
+    try {
+      const stats = await storage.getTeacherStats(req.user.id);
+      res.json(stats);
+    } catch (err) {
+      console.error("Teacher stats error:", err);
+      res.status(500).json({ message: "Failed to load stats" });
+    }
   });
 
   app.get(api.dashboard.studentStats.path, authMiddleware, async (req: AuthRequest, res) => {
@@ -461,17 +456,26 @@ export async function registerRoutes(
         .map((a: any) => `Q${a.question_number}: ${a.answer_text}`)
         .join("\n");
 
+      // Fetch NCERT context for this exam's class + subject
+      const ncertChaptersData = await storage.getNcertChaptersByClassAndSubject(exam.className, exam.subject);
+      const ncertContext = ncertChaptersData.length > 0
+        ? ncertChaptersData.map(ch => `Chapter: ${ch.chapterName}\n${ch.chapterContent}`).join("\n\n---\n\n")
+        : "";
+
       const evalPrompt = `You are an experienced teacher evaluating a student's exam answer sheet.
 
 === EXAM DETAILS ===
 Exam: ${exam.examName}
 Subject: ${exam.subject}
+Class: ${exam.className}
 Total Marks Available: ${exam.totalMarks}
 
 === MODEL ANSWER ===
 ${modelAnswerText || "(No model answer provided — evaluate based on subject knowledge)"}
 
 ${markingSchemeText ? `=== MARKING SCHEME ===\n${markingSchemeText}` : ""}
+
+${ncertContext ? `=== NCERT REFERENCE CHAPTERS ===\n${ncertContext}\n\nMap each question to the most relevant NCERT chapter above.` : ""}
 
 === STUDENT DETAILS ===
 Name: ${sheet.studentName}
@@ -484,6 +488,8 @@ ${studentAnswers || sheet.ocrOutput}
 - Compare each student answer against the model answer.
 - Award marks fairly: full marks for correct, partial for partially correct, 0 for blank/wrong.
 - Total marks awarded must not exceed ${exam.totalMarks}.
+- For each question, identify the NCERT chapter it relates to (use chapter name from reference above, or "General" if not applicable).
+- Provide a deviation reason explaining how the student's answer differs from the model answer.
 - Provide specific improvement suggestions per question.
 
 Return ONLY valid JSON with this exact structure:
@@ -494,8 +500,10 @@ Return ONLY valid JSON with this exact structure:
   "questions": [
     {
       "question_number": <number>,
+      "chapter": "<NCERT chapter name or General>",
       "marks_awarded": <number>,
       "max_marks": <number>,
+      "deviation_reason": "<why the student's answer differs from model answer>",
       "improvement_suggestion": "<specific, actionable feedback>"
     }
   ],
@@ -523,6 +531,29 @@ Return ONLY valid JSON with this exact structure:
         overallFeedback: evalData.overall_feedback || ""
       });
 
+      // Save per-question deviation logs for analytics
+      try {
+        const admissionNumber = evalData.admission_number || sheet.admissionNumber;
+        const devLogs = (evalData.questions ?? []).map((q: any) => ({
+          evaluationId: evaluation.id,
+          answerSheetId,
+          admissionNumber,
+          examId: exam.id,
+          subject: exam.subject,
+          questionNumber: q.question_number ?? 0,
+          chapter: q.chapter ?? "General",
+          expectedConcept: q.improvement_suggestion ?? null,
+          studentGap: q.deviation_reason ?? null,
+          deviationReason: q.deviation_reason ?? null,
+          marksAwarded: q.marks_awarded ?? 0,
+          maxMarks: q.max_marks ?? 0,
+        }));
+        await storage.createDeviationLogs(devLogs);
+        console.log(`[EVAL] Saved ${devLogs.length} deviation logs`);
+      } catch (devErr) {
+        console.warn("[EVAL] Could not save deviation logs:", devErr);
+      }
+
       res.json(evaluation);
     } catch (err: any) {
       console.error("[EVAL] Error:", err?.message || err);
@@ -531,17 +562,32 @@ Return ONLY valid JSON with this exact structure:
     }
   });
 
-  // ANALYTICS
+  // ANALYTICS — supports ?class=X&subject=Y filters
   app.get("/api/analytics", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") {
       return res.status(401).json({ message: "Unauthorized" });
     }
     try {
-      const data = await storage.getAnalytics(req.user.id);
+      const classFilter = req.query.class as string | undefined;
+      const subjectFilter = req.query.subject as string | undefined;
+      const data = await storage.getAnalytics(req.user.id, classFilter, subjectFilter);
       res.json(data);
     } catch (err) {
       console.error("Analytics Error:", err);
       res.status(500).json({ message: "Failed to load analytics" });
+    }
+  });
+
+  // CLASS + SUBJECT OPTIONS (for filter dropdowns)
+  app.get("/api/analytics/filter-options", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const teacherExams = await storage.getExamsByTeacher(req.user.id);
+      const classes = [...new Set(teacherExams.map(e => e.className))].sort();
+      const subjects = [...new Set(teacherExams.map(e => e.subject))].sort();
+      res.json({ classes, subjects });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load filter options" });
     }
   });
 
@@ -611,6 +657,318 @@ Return ONLY valid JSON with this exact structure:
     }
   });
 
+  // BULK UPLOAD — OCR all pages, group by admission number, merge into scripts
+  app.post("/api/exams/:id/bulk-upload", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const examId = parseInt(req.params.id);
+    const { images } = req.body; // Array of { imageBase64: string }
+
+    if (!Array.isArray(images) || images.length === 0) {
+      return res.status(400).json({ message: "No images provided" });
+    }
+
+    const exam = await storage.getExam(examId);
+    if (!exam || exam.teacherId !== req.user.id) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    console.log(`[BULK] Starting bulk OCR for exam ${examId}, ${images.length} pages`);
+
+    try {
+      // 1. Run OCR on all pages in parallel
+      const pageResults = await Promise.all(images.map(async (img: any, idx: number) => {
+        const imageBase64: string = img.imageBase64;
+        const mimeMatch = imageBase64.match(/^data:([^;]+);base64,/);
+        const mimeType = mimeMatch?.[1] ?? "";
+        if (!mimeType.startsWith("image/")) {
+          return { error: `Page ${idx + 1}: unsupported type ${mimeType}`, index: idx };
+        }
+
+        try {
+          const response = await getOpenAIClient().chat.completions.create({
+            model: "gpt-4o",
+            messages: [{
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Extract student information from this handwritten answer sheet page. Return ONLY valid JSON with fields: admission_number (string), student_name (string), sheet_number (integer, the page/sheet number written on the paper — default 1 if not visible), and answers (array of {question_number: number, answer_text: string}). If you cannot read the admission number or name, use 'UNKNOWN'."
+                },
+                { type: "image_url", image_url: { url: imageBase64 } },
+              ],
+            }],
+            response_format: { type: "json_object" },
+          });
+
+          const ocrData = JSON.parse(response.choices[0].message.content || "{}");
+          const page = await storage.createAnswerSheetPage({
+            examId,
+            admissionNumber: ocrData.admission_number || "UNKNOWN",
+            studentName: ocrData.student_name || "UNKNOWN",
+            sheetNumber: ocrData.sheet_number || (idx + 1),
+            imageBase64,
+            ocrOutput: JSON.stringify(ocrData),
+            status: "processed",
+          });
+          console.log(`[BULK] Page ${idx + 1} OCR done — student: ${ocrData.student_name}, admission: ${ocrData.admission_number}`);
+          return { page, ocrData };
+        } catch (err: any) {
+          console.error(`[BULK] OCR failed for page ${idx + 1}:`, err?.message);
+          return { error: `Page ${idx + 1} OCR failed`, index: idx };
+        }
+      }));
+
+      // 2. Group successful pages by admission_number
+      const groups = new Map<string, { studentName: string; pages: { page: any; ocrData: any }[] }>();
+      for (const result of pageResults) {
+        if ((result as any).error) continue;
+        const { page, ocrData } = result as any;
+        const admNo = page.admissionNumber;
+        if (!groups.has(admNo)) {
+          groups.set(admNo, { studentName: page.studentName, pages: [] });
+        }
+        groups.get(admNo)!.pages.push({ page, ocrData });
+      }
+
+      // 3. Sort each group by sheet_number and merge answers
+      const mergedScripts: any[] = [];
+      for (const [admNo, group] of groups.entries()) {
+        const sortedPages = group.pages.sort((a, b) => (a.page.sheetNumber || 1) - (b.page.sheetNumber || 1));
+        const mergedAnswers: any[] = [];
+        const pageIds: number[] = sortedPages.map(p => p.page.id);
+
+        for (const { ocrData } of sortedPages) {
+          const answers = ocrData.answers ?? [];
+          for (const ans of answers) {
+            const existing = mergedAnswers.find(m => m.question_number === ans.question_number);
+            if (existing) {
+              existing.answer_text += " " + ans.answer_text;
+            } else {
+              mergedAnswers.push({ ...ans });
+            }
+          }
+        }
+
+        const script = await storage.createMergedAnswerScript({
+          examId,
+          admissionNumber: admNo,
+          studentName: group.studentName,
+          mergedAnswers: JSON.stringify(mergedAnswers),
+          pageIds: JSON.stringify(pageIds),
+          status: "pending",
+        });
+        mergedScripts.push(script);
+        console.log(`[BULK] Merged script created for ${admNo} (${pageIds.length} pages, ${mergedAnswers.length} answers)`);
+      }
+
+      const errors = pageResults.filter((r: any) => r.error).map((r: any) => r.error);
+      res.json({
+        pagesProcessed: pageResults.length - errors.length,
+        errors,
+        mergedScripts,
+      });
+    } catch (err: any) {
+      console.error("[BULK] Error:", err?.message);
+      res.status(500).json({ message: "Bulk upload failed", detail: err?.message });
+    }
+  });
+
+  // GET merged scripts for an exam
+  app.get("/api/exams/:id/merged-scripts", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const examId = parseInt(req.params.id);
+    const exam = await storage.getExam(examId);
+    if (!exam || exam.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+    const scripts = await storage.getMergedAnswerScriptsByExam(examId);
+    // Attach evaluation if exists
+    const withEval = await Promise.all(scripts.map(async (s) => {
+      if (s.answerSheetId) {
+        const evaluation = await storage.getEvaluationByAnswerSheetId(s.answerSheetId);
+        return { ...s, evaluation: evaluation || null };
+      }
+      return { ...s, evaluation: null };
+    }));
+    res.json(withEval);
+  });
+
+  // Evaluate a merged answer script
+  app.post("/api/merged-scripts/:id/evaluate", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const scriptId = parseInt(req.params.id);
+    console.log(`[BULK-EVAL] Starting evaluation for merged script id=${scriptId}`);
+
+    try {
+      const script = await storage.getMergedAnswerScript(scriptId);
+      if (!script) return res.status(404).json({ message: "Merged script not found" });
+
+      const exam = await storage.getExam(script.examId);
+      if (!exam || exam.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+      let modelAnswerText = exam.modelAnswerText?.trim() || "";
+      if (!modelAnswerText && exam.modelAnswerUrl) {
+        modelAnswerText = await extractDocumentText(exam.modelAnswerUrl, "model answer");
+      }
+      let markingSchemeText = exam.markingSchemeText?.trim() || "";
+      if (!markingSchemeText && exam.markingSchemeUrl) {
+        markingSchemeText = await extractDocumentText(exam.markingSchemeUrl, "marking scheme");
+      }
+
+      const ncertChaptersData = await storage.getNcertChaptersByClassAndSubject(exam.className, exam.subject);
+      const ncertContext = ncertChaptersData.length > 0
+        ? ncertChaptersData.map(ch => `Chapter: ${ch.chapterName}\n${ch.chapterContent}`).join("\n\n---\n\n")
+        : "";
+
+      const mergedAnswers = (() => { try { return JSON.parse(script.mergedAnswers); } catch { return []; } })();
+      const studentAnswers = (mergedAnswers as any[])
+        .map((a: any) => `Q${a.question_number}: ${a.answer_text}`)
+        .join("\n");
+
+      const evalPrompt = `You are an experienced teacher evaluating a student's exam answer script.
+
+=== EXAM DETAILS ===
+Exam: ${exam.examName}
+Subject: ${exam.subject}
+Class: ${exam.className}
+Total Marks Available: ${exam.totalMarks}
+
+=== MODEL ANSWER ===
+${modelAnswerText || "(No model answer provided — evaluate based on subject knowledge)"}
+
+${markingSchemeText ? `=== MARKING SCHEME ===\n${markingSchemeText}` : ""}
+
+${ncertContext ? `=== NCERT REFERENCE CHAPTERS ===\n${ncertContext}\n\nMap each question to the most relevant NCERT chapter above.` : ""}
+
+=== STUDENT DETAILS ===
+Name: ${script.studentName}
+Admission Number: ${script.admissionNumber}
+
+=== STUDENT'S ANSWERS (merged from all pages) ===
+${studentAnswers}
+
+=== INSTRUCTIONS ===
+- Compare each student answer against the model answer.
+- Award marks fairly: full marks for correct, partial for partially correct, 0 for blank/wrong.
+- Total marks awarded must not exceed ${exam.totalMarks}.
+- For each question, identify the NCERT chapter it relates to.
+- Provide a deviation reason explaining how the student's answer differs.
+- Provide specific improvement suggestions per question.
+
+Return ONLY valid JSON:
+{
+  "student_name": "${script.studentName}",
+  "admission_number": "${script.admissionNumber}",
+  "total_marks": <number 0-${exam.totalMarks}>,
+  "questions": [
+    {
+      "question_number": <number>,
+      "chapter": "<NCERT chapter name or General>",
+      "marks_awarded": <number>,
+      "max_marks": <number>,
+      "deviation_reason": "<deviation from model answer>",
+      "improvement_suggestion": "<actionable feedback>"
+    }
+  ],
+  "overall_feedback": "<2-3 sentence summary>"
+}`;
+
+      const response = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: evalPrompt }],
+        response_format: { type: "json_object" },
+      });
+
+      const evalData = JSON.parse(response.choices[0].message.content || "{}");
+      console.log(`[BULK-EVAL] Eval done — student: ${evalData.student_name}, marks: ${evalData.total_marks}`);
+
+      // Find or create answer sheet record for this student
+      const student = await storage.getStudentByAdmissionNumber(script.admissionNumber);
+      const sheet = await storage.createAnswerSheet({
+        examId: exam.id,
+        studentId: student?.id || null,
+        admissionNumber: script.admissionNumber,
+        studentName: script.studentName,
+        ocrOutput: script.mergedAnswers,
+        status: "evaluated",
+      });
+
+      const evaluation = await storage.createEvaluation({
+        answerSheetId: sheet.id,
+        studentName: evalData.student_name || script.studentName,
+        admissionNumber: evalData.admission_number || script.admissionNumber,
+        totalMarks: evalData.total_marks ?? 0,
+        questions: JSON.stringify(evalData.questions ?? []),
+        overallFeedback: evalData.overall_feedback || "",
+      });
+
+      // Save deviation logs for bulk-eval
+      try {
+        const devLogs = (evalData.questions ?? []).map((q: any) => ({
+          evaluationId: evaluation.id,
+          answerSheetId: sheet.id,
+          admissionNumber: evalData.admission_number || script.admissionNumber,
+          examId: exam.id,
+          subject: exam.subject,
+          questionNumber: q.question_number ?? 0,
+          chapter: q.chapter ?? "General",
+          expectedConcept: q.improvement_suggestion ?? null,
+          studentGap: q.deviation_reason ?? null,
+          deviationReason: q.deviation_reason ?? null,
+          marksAwarded: q.marks_awarded ?? 0,
+          maxMarks: q.max_marks ?? 0,
+        }));
+        await storage.createDeviationLogs(devLogs);
+      } catch (devErr) {
+        console.warn("[BULK-EVAL] Could not save deviation logs:", devErr);
+      }
+
+      // Mark merged script as evaluated
+      await storage.updateMergedAnswerScript(scriptId, { status: "evaluated", answerSheetId: sheet.id });
+
+      res.json(evaluation);
+    } catch (err: any) {
+      console.error("[BULK-EVAL] Error:", err?.message);
+      res.status(500).json({ message: "Evaluation failed", detail: err?.message });
+    }
+  });
+
+  // NCERT CHAPTERS
+  app.get("/api/ncert-chapters", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const chapters = await storage.getNcertChaptersByTeacher(req.user.id);
+    res.json(chapters);
+  });
+
+  app.post("/api/ncert-chapters", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const chapter = await storage.createNcertChapter({ ...req.body, teacherId: req.user.id });
+      res.status(201).json(chapter);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to create chapter" });
+    }
+  });
+
+  app.put("/api/ncert-chapters/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const chapter = await storage.updateNcertChapter(parseInt(req.params.id), req.body);
+      res.json(chapter);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to update chapter" });
+    }
+  });
+
+  app.delete("/api/ncert-chapters/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      await storage.deleteNcertChapter(parseInt(req.params.id));
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete chapter" });
+    }
+  });
+
   // STUDENT CHAT
   app.get("/api/student/chat/conversations", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
@@ -675,6 +1033,172 @@ Student's evaluation data: ${context}`,
     } catch (err) {
       console.error("Student Chat Error:", err);
       res.status(500).json({ message: "Chat failed" });
+    }
+  });
+
+  // STUDENT PERFORMANCE PROFILE — AI-generated deep analysis
+  app.get("/api/student/performance-profile", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+
+    try {
+      const student = await storage.getStudent(req.user.id);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
+      if (evals.length === 0) {
+        return res.json({
+          strengths: [],
+          weak_chapters: [],
+          recurring_mistakes: [],
+          attendance_impact: "No attendance data available.",
+          performance_trend: "No exams evaluated yet.",
+          recommended_focus_areas: [],
+        });
+      }
+
+      // Aggregate question-level data
+      const chapterScores = new Map<string, { awarded: number; max: number; count: number; deviations: string[] }>();
+      const allDeviations: string[] = [];
+      for (const e of evals) {
+        let qs: any[] = [];
+        try { qs = JSON.parse(e.questions); } catch {}
+        for (const q of qs) {
+          const ch = q.chapter || "General";
+          const cur = chapterScores.get(ch) ?? { awarded: 0, max: 0, count: 0, deviations: [] };
+          cur.awarded += q.marks_awarded ?? 0;
+          cur.max += q.max_marks ?? 1;
+          cur.count++;
+          if (q.deviation_reason) { cur.deviations.push(q.deviation_reason); allDeviations.push(q.deviation_reason); }
+          chapterScores.set(ch, cur);
+        }
+      }
+
+      // Build prompt context
+      const chapterSummary = Array.from(chapterScores.entries()).map(([ch, d]) => ({
+        chapter: ch,
+        pct: d.max > 0 ? Math.round((d.awarded / d.max) * 100) : 0,
+        questions: d.count,
+        sample_deviations: d.deviations.slice(0, 2),
+      }));
+      const examSummary = evals.map(e => ({
+        exam: e.examName,
+        category: e.category,
+        subject: e.subject,
+        score: e.totalMarks,
+        max: e.maxMarks,
+        pct: e.maxMarks > 0 ? Math.round((e.totalMarks / e.maxMarks) * 100) : 0,
+      }));
+
+      const prompt = `You are an educational data analyst. Based on this student's evaluation history, generate a detailed performance profile.
+
+Student's exam history (ordered newest first):
+${JSON.stringify(examSummary, null, 2)}
+
+Chapter-level performance:
+${JSON.stringify(chapterSummary, null, 2)}
+
+Generate a JSON object with exactly these fields:
+{
+  "strengths": ["<strength 1>", "<strength 2>"],
+  "weak_chapters": [{"chapter": "<name>", "reason": "<why weak>", "score_pct": <number>}],
+  "recurring_mistakes": ["<mistake pattern 1>", "<mistake pattern 2>"],
+  "attendance_impact": "<brief comment if pattern detected, else 'Consistent attendance noted'>",
+  "performance_trend": "<improving/declining/stable with explanation>",
+  "recommended_focus_areas": ["<area 1>", "<area 2>", "<area 3>"]
+}
+
+Be specific, reference actual subjects/chapters, and keep each item concise.`;
+
+      const aiResp = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      });
+
+      const profile = JSON.parse(aiResp.choices[0].message.content || "{}");
+
+      // Cache profile
+      await storage.savePerformanceProfile(req.user.id, student.admissionNumber, profile);
+
+      res.json(profile);
+    } catch (err: any) {
+      console.error("Performance profile error:", err?.message);
+      res.status(500).json({ message: "Failed to generate performance profile" });
+    }
+  });
+
+  // STUDENT ADAPTIVE REVISION — generate practice questions for a specific chapter
+  app.get("/api/student/revision", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+
+    const chapter = req.query.chapter as string;
+    const subject = req.query.subject as string;
+
+    if (!chapter || !subject) {
+      return res.status(400).json({ message: "chapter and subject query params are required" });
+    }
+
+    try {
+      const student = await storage.getStudent(req.user.id);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      // Get NCERT chapter content (search across all teachers' chapters for this class+subject)
+      const chapters = await storage.getNcertChaptersByClassAndSubject(student.studentClass, subject);
+      const targetChapter = chapters.find(c => c.chapterName.toLowerCase().includes(chapter.toLowerCase()));
+      const ncertContent = targetChapter
+        ? `Chapter: ${targetChapter.chapterName}\n${targetChapter.chapterContent}`
+        : `Subject: ${subject}, Chapter: ${chapter} (No NCERT content stored — use general knowledge)`;
+
+      // Get student's past performance on this chapter
+      const devLogs = await storage.getDeviationLogsByStudent(student.admissionNumber);
+      const chapterLogs = devLogs.filter(d => d.chapter?.toLowerCase().includes(chapter.toLowerCase()));
+      const pastGaps = chapterLogs.map(d => d.deviationReason).filter(Boolean).slice(0, 5);
+
+      const prompt = `You are a study tutor generating personalized revision material.
+
+NCERT Chapter Content:
+${ncertContent}
+
+${pastGaps.length > 0 ? `Student's known gaps in this chapter from past exams:\n${pastGaps.join("\n")}` : ""}
+
+Generate a JSON response with:
+{
+  "revision_focus": "<2-3 sentences on what to focus on>",
+  "key_concepts": ["<concept 1>", "<concept 2>", "<concept 3>", "<concept 4>"],
+  "practice_questions": [
+    {
+      "question_number": 1,
+      "question": "<question text>",
+      "hint": "<brief hint>",
+      "marks": <1-5>
+    }
+  ]
+}
+
+Generate 5 practice questions that target the student's specific gaps. Vary question types (short answer, explain, give example). Base questions ONLY on the NCERT content provided.`;
+
+      const aiResp = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      });
+
+      const revision = JSON.parse(aiResp.choices[0].message.content || "{}");
+      res.json({ chapter, subject, ...revision });
+    } catch (err: any) {
+      console.error("Revision error:", err?.message);
+      res.status(500).json({ message: "Failed to generate revision material" });
+    }
+  });
+
+  // TEACHER DEVIATION ANALYSIS — class-wide per chapter
+  app.get("/api/analytics/deviations", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const logs = await storage.getDeviationLogsByTeacher(req.user.id);
+      res.json(logs);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load deviation logs" });
     }
   });
 

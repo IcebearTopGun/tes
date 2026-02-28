@@ -20,6 +20,9 @@ import {
   X,
   FileCheck,
   Clock,
+  Layers,
+  BookMarked,
+  AlertCircle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -291,20 +294,30 @@ export default function TeacherDashboard() {
     }
   };
 
+  const EXAM_CATEGORIES = [
+    { value: "mid_term", label: "Mid Term" },
+    { value: "unit_test", label: "Unit Test" },
+    { value: "end_sem", label: "End Sem" },
+    { value: "class_test", label: "Class Test" },
+  ];
+
   const form = useForm({
     resolver: zodResolver(
       insertExamSchema.extend({
         totalMarks: z.coerce.number().min(1, "Must be at least 1"),
         teacherId: z.number().optional(),
+        examName: z.string().optional(),
         questionText: z.string().optional(),
         modelAnswerText: z.string().optional(),
         markingSchemeText: z.string().optional(),
+        category: z.string().default("unit_test"),
       })
     ),
     defaultValues: {
       subject: "",
       className: "",
       examName: "",
+      category: "unit_test",
       totalMarks: 0,
       questionText: "",
       modelAnswerText: "",
@@ -312,10 +325,22 @@ export default function TeacherDashboard() {
     },
   });
 
+  const watchedSubject = form.watch("subject");
+  const watchedClass = form.watch("className");
+  const watchedCategory = form.watch("category");
+  const generatedExamName = (() => {
+    const date = new Date().toISOString().split("T")[0];
+    const subj = watchedSubject || "Subject";
+    const cat = EXAM_CATEGORIES.find(c => c.value === watchedCategory)?.label?.replace(/\s+/g, "") || "Exam";
+    const cls = watchedClass || "Class";
+    return `${date}-${subj}-${cat}-${cls}`;
+  })();
+
   const onSubmit = async (values: any) => {
     try {
       await apiRequest("POST", api.exams.create.path, {
         ...values,
+        examName: generatedExamName,
         questionText: values.questionText || null,
         modelAnswerText: values.modelAnswerText || null,
         markingSchemeText: values.markingSchemeText || null,
@@ -326,6 +351,65 @@ export default function TeacherDashboard() {
       form.reset();
     } catch {
       toast({ title: "Error", description: "Failed to create exam", variant: "destructive" });
+    }
+  };
+
+  // Bulk upload state
+  const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
+  const [bulkFiles, setBulkFiles] = useState<File[]>([]);
+  const [isBulkUploading, setIsBulkUploading] = useState(false);
+  const [bulkResult, setBulkResult] = useState<any>(null);
+  const [bulkEvaluatingId, setBulkEvaluatingId] = useState<number | null>(null);
+  const bulkInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: mergedScripts, refetch: refetchMergedScripts } = useQuery<any[]>({
+    queryKey: ["/api/exams/merged-scripts", selectedExamId],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`/api/exams/${selectedExamId}/merged-scripts`);
+      return res.json();
+    },
+    enabled: !!selectedExamId,
+  });
+
+  const handleBulkUpload = async () => {
+    if (!selectedExamId || bulkFiles.length === 0) return;
+    setIsBulkUploading(true);
+    setBulkResult(null);
+    try {
+      const images = await Promise.all(bulkFiles.map(file => new Promise<{ imageBase64: string }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ imageBase64: reader.result as string });
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      })));
+      const res = await fetchWithAuth(`/api/exams/${selectedExamId}/bulk-upload`, {
+        method: "POST",
+        body: JSON.stringify({ images }),
+      });
+      const result = await res.json();
+      setBulkResult(result);
+      refetchMergedScripts();
+      toast({ title: "Bulk upload complete", description: `${result.pagesProcessed} pages processed, ${result.mergedScripts?.length} student scripts created.` });
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err?.message || "Something went wrong", variant: "destructive" });
+    } finally {
+      setIsBulkUploading(false);
+      setBulkFiles([]);
+    }
+  };
+
+  const handleBulkEvaluate = async (scriptId: number) => {
+    setBulkEvaluatingId(scriptId);
+    try {
+      await fetchWithAuth(`/api/merged-scripts/${scriptId}/evaluate`, { method: "POST" });
+      refetchMergedScripts();
+      refetchSheets();
+      queryClient.invalidateQueries({ queryKey: ["/api/analytics"] });
+      toast({ title: "Evaluation complete" });
+    } catch {
+      toast({ title: "Evaluation failed", variant: "destructive" });
+    } finally {
+      setBulkEvaluatingId(null);
     }
   };
 
@@ -403,13 +487,28 @@ export default function TeacherDashboard() {
                       </FormItem>
                     )} />
                   </div>
-                  <FormField control={form.control} name="examName" render={({ field }) => (
+                  <FormField control={form.control} name="category" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Exam Name</FormLabel>
-                      <FormControl><Input placeholder="Mid-term Examination" {...field} className="rounded-xl" /></FormControl>
+                      <FormLabel>Exam Category</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="rounded-xl" data-testid="select-exam-category">
+                            <SelectValue placeholder="Select category…" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {EXAM_CATEGORIES.map(c => (
+                            <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )} />
+                  <div className="p-3 bg-muted/30 rounded-xl border border-border/30">
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide font-bold mb-1">Auto-generated Exam Name</p>
+                    <p className="text-sm font-mono font-semibold text-primary">{generatedExamName}</p>
+                  </div>
                   <FormField control={form.control} name="totalMarks" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Total Marks</FormLabel>
@@ -665,11 +764,138 @@ export default function TeacherDashboard() {
               </CardContent>
             </Card>
 
+            {/* Bulk Upload Section */}
+            {selectedExamId && (
+              <Card className="border-border/40 shadow-premium rounded-2xl">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Layers className="h-5 w-5 text-indigo-600" />
+                    Bulk Upload (Multiple Students)
+                  </CardTitle>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="rounded-lg gap-1.5 text-xs"
+                    onClick={() => bulkInputRef.current?.click()}
+                    data-testid="button-select-bulk-files"
+                  >
+                    <Upload className="h-3.5 w-3.5" /> Select Images
+                  </Button>
+                  <input
+                    ref={bulkInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={e => setBulkFiles(Array.from(e.target.files || []))}
+                  />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Upload multiple answer sheet pages at once. The system will OCR each page, group them by admission number, order by page number, and merge into one script per student.
+                  </p>
+                  {bulkFiles.length > 0 && (
+                    <div className="p-3 bg-muted/30 rounded-xl space-y-2">
+                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{bulkFiles.length} file{bulkFiles.length !== 1 ? "s" : ""} selected</p>
+                      <div className="flex flex-wrap gap-1">
+                        {bulkFiles.map((f, i) => (
+                          <Badge key={i} variant="secondary" className="rounded-lg text-xs border-none">{f.name}</Badge>
+                        ))}
+                      </div>
+                      <Button
+                        size="sm"
+                        className="rounded-lg gap-1.5 text-xs"
+                        onClick={handleBulkUpload}
+                        disabled={isBulkUploading}
+                        data-testid="button-bulk-upload"
+                      >
+                        {isBulkUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Layers className="h-3.5 w-3.5" />}
+                        {isBulkUploading ? `Processing ${bulkFiles.length} pages…` : "Upload & Process All"}
+                      </Button>
+                    </div>
+                  )}
+                  {bulkResult && (
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm">
+                      <p className="font-semibold text-emerald-800">
+                        ✓ {bulkResult.pagesProcessed} page{bulkResult.pagesProcessed !== 1 ? "s" : ""} processed → {bulkResult.mergedScripts?.length} student script{bulkResult.mergedScripts?.length !== 1 ? "s" : ""} created
+                      </p>
+                      {bulkResult.errors?.length > 0 && (
+                        <p className="text-orange-700 mt-1 text-xs">{bulkResult.errors.length} page(s) failed: {bulkResult.errors.join(", ")}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Merged scripts list */}
+                  {mergedScripts && mergedScripts.length > 0 && (
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-3">Merged Student Scripts</p>
+                      <Table>
+                        <TableHeader className="bg-muted/30">
+                          <TableRow className="hover:bg-transparent border-border/40">
+                            <TableHead className="font-bold">Student</TableHead>
+                            <TableHead className="font-bold">Admission No.</TableHead>
+                            <TableHead className="font-bold">Pages</TableHead>
+                            <TableHead className="font-bold">Status</TableHead>
+                            <TableHead className="font-bold text-right">Action</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {mergedScripts.map((script: any) => (
+                            <TableRow key={script.id} className="border-border/40 hover:bg-muted/20" data-testid={`row-script-${script.id}`}>
+                              <TableCell className="font-semibold">{script.studentName}</TableCell>
+                              <TableCell className="text-muted-foreground">{script.admissionNumber}</TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {(() => { try { return JSON.parse(script.pageIds).length; } catch { return "?"; } })()}
+                              </TableCell>
+                              <TableCell>
+                                {script.status === "evaluated" ? (
+                                  <Badge className="rounded-lg bg-emerald-100 text-emerald-700 border-none gap-1">
+                                    <FileCheck className="h-3 w-3" /> Evaluated
+                                    {script.evaluation && ` · ${script.evaluation.totalMarks} marks`}
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="secondary" className="rounded-lg border-none gap-1">
+                                    <Clock className="h-3 w-3" /> Pending
+                                  </Badge>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {script.status !== "evaluated" && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="rounded-lg gap-1.5 text-xs"
+                                    disabled={bulkEvaluatingId === script.id}
+                                    onClick={() => handleBulkEvaluate(script.id)}
+                                    data-testid={`button-evaluate-script-${script.id}`}
+                                  >
+                                    {bulkEvaluatingId === script.id ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Star className="h-3 w-3" />
+                                    )}
+                                    {bulkEvaluatingId === script.id ? "Evaluating…" : "Evaluate"}
+                                  </Button>
+                                )}
+                                {script.status === "evaluated" && (
+                                  <span className="text-xs text-muted-foreground italic">Done</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Sheets list */}
             {selectedExamId && (
               <Card className="border-border/40 shadow-premium rounded-2xl overflow-hidden">
                 <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle className="text-base">Uploaded Sheets</CardTitle>
+                  <CardTitle className="text-base">Uploaded Sheets (Individual)</CardTitle>
                   <Button variant="ghost" size="sm" className="rounded-lg text-xs gap-1" onClick={() => refetchSheets()}>
                     Refresh
                   </Button>
