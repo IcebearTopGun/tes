@@ -41,3 +41,8 @@ waitForPort = 5000
 [agent]
 integrations = ["javascript_openai_ai_integrations:2.0.0"]
 expertMode = true
+
+[userenv]
+
+[userenv.shared]
+PII_TOKEN_SECRET = "a5c2de3addfb34acb520a89c3898d8304ba821d8dfcdffe8"

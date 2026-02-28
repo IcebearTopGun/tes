@@ -132,3 +132,37 @@ A full-stack web application for teachers, students, and administrators to manag
 - **Evaluation**: Uses model answer + marking scheme + NCERT chapters as context; returns per-question scores, chapter, deviation_reason, improvement_suggestion
 - **Chat**: Context-aware AI chat using real evaluation data per teacher/student
 - Replit AI Integration env vars (`AI_INTEGRATIONS_OPENAI_*`) set automatically
+
+## Privacy Layer (Task 4)
+
+Seven-component PII protection system that wraps every AI call. All new files live in `server/privacy/`, `server/ai/`, and `server/middleware/`.
+
+### Components
+
+| File | Component | Role |
+|------|-----------|------|
+| `server/privacy/piiDetector.ts` | A — PII Detector | Finds names (5-min DB cache), emails, phones, roll numbers with exact positions |
+| `server/privacy/tokenizer.ts` | B — Tokenizer | HMAC-SHA256 tokens (STUDENT_XXXX etc.); per-request piiMap; never persisted |
+| `server/privacy/ocrSanitizer.ts` | C — OCR Sanitizer | Strips identity phrases from answer-sheet OCR, then runs PII detector as second pass |
+| `server/privacy/privacyGuard.ts` | D — Privacy Guard | Orchestrates detect→mask→LLM→unmask; enforces role-based unmasking (student=own, teacher=class, admin=all) |
+| `server/ai/llmRegistry.ts` | E — LLM Registry | Single source of truth for all model names, temperatures, token limits, system prompts (QUERY/EVALUATE/INSIGHT/HOMEWORK/RANKING) |
+| `server/ai/gateway.ts` | F — AI Gateway | Only file allowed to import OpenAI; runs final PII sweep on raw input; safe audit log only |
+| `server/middleware/aiRequestMiddleware.ts` | G — Request Middleware | Enriches `req.aiContext` with role-aware context (ownName, allowedStudentNames) |
+
+### Wiring
+
+- See `server/ai/exampleWiring.ts` for the pattern to apply to any route
+- `routes.ts` retains its own OpenAI calls (pre-privacy-layer); ask for migration when ready
+- Middleware chain: `authMiddleware → aiContextMiddleware → handler → askQuestion / evaluateAnswerSheet / etc.`
+
+### Environment Variables Required
+
+- `PII_TOKEN_SECRET` — minimum 32 random characters (HMAC key for token generation)
+- `AI_INTEGRATIONS_OPENAI_API_KEY` — already configured via Replit AI Integration
+
+### Tests
+
+- Location: `tests/privacy/` (5 files, 48 tests — all passing)
+- Run: `npx vitest run --config vitest.config.ts`
+- No real DB or OpenAI used in any test (fully mocked)
+- `injectNameCacheForTesting()` and `injectOpenAIForTesting()` available for test isolation
