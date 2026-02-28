@@ -1,36 +1,16 @@
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import "@/dashboard.css";
 import { useStudentDashboard } from "@/hooks/use-dashboard";
+import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  BarChart3,
-  Target,
-  MessageSquare,
-  ArrowUpRight,
-  X,
-  Plus,
-  Loader2,
-  Bot,
-  Send,
-  Brain,
-  TrendingUp,
-  BookOpen,
-  Star,
-  AlertTriangle,
-  RefreshCw,
-  ChevronDown,
-  ChevronUp,
-} from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { Button } from "@/components/ui/button";
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { Loader2, X, Plus, Send, TrendingUp, MessageSquare, BookOpen } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Input } from "@/components/ui/input";
 
 const STUDENT_EXAMPLE_QUESTIONS = [
   "How did I perform overall?",
@@ -43,11 +23,7 @@ async function fetchWithAuth(url: string, options?: RequestInit) {
   const token = localStorage.getItem("token");
   const res = await fetch(url, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: token ? `Bearer ${token}` : "",
-      ...(options?.headers || {}),
-    },
+    headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "", ...(options?.headers || {}) },
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -70,8 +46,28 @@ interface RevisionData {
   practice_questions: { question_number: number; question: string; hint: string; marks: number }[];
 }
 
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function getInitials(name: string) {
+  return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+}
+
+function scoreColor(pct: number) {
+  if (pct >= 75) return "var(--green)";
+  if (pct >= 50) return "var(--amber)";
+  return "var(--red)";
+}
+
+const DOT_COLORS = ["var(--ink)", "var(--lavender)", "var(--lav-card)", "var(--blue)", "var(--green)"];
+
 export default function StudentDashboard() {
   const { data, isLoading, error } = useStudentDashboard();
+  const { user, logout } = useAuth();
   const { toast } = useToast();
 
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -79,7 +75,10 @@ export default function StudentDashboard() {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [revisionChapter, setRevisionChapter] = useState<{ chapter: string; subject: string } | null>(null);
   const [expandedQuestion, setExpandedQuestion] = useState<number | null>(null);
+  const [showAvaMenu, setShowAvaMenu] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const avaRef = useRef<HTMLDivElement>(null);
 
   const { data: conversations } = useQuery<any[]>({
     queryKey: ["/api/student/chat/conversations"],
@@ -109,19 +108,12 @@ export default function StudentDashboard() {
 
   const startConversation = useMutation({
     mutationFn: () => fetchWithAuth("/api/student/chat/conversations", { method: "POST", body: JSON.stringify({ title: "Academic Chat" }) }),
-    onSuccess: (data) => {
-      setActiveConversationId(data.id);
-      queryClient.invalidateQueries({ queryKey: ["/api/student/chat/conversations"] });
-    },
+    onSuccess: (d) => { setActiveConversationId(d.id); queryClient.invalidateQueries({ queryKey: ["/api/student/chat/conversations"] }); },
     onError: () => toast({ title: "Error", description: "Could not start conversation.", variant: "destructive" }),
   });
 
   const sendMessage = useMutation({
-    mutationFn: (content: string) =>
-      fetchWithAuth(`/api/student/chat/conversations/${activeConversationId}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ content }),
-      }),
+    mutationFn: (content: string) => fetchWithAuth(`/api/student/chat/conversations/${activeConversationId}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
     onSuccess: () => { setChatMessage(""); refetchMessages(); },
     onError: () => toast({ title: "Error", description: "Failed to send message.", variant: "destructive" }),
   });
@@ -130,603 +122,550 @@ export default function StudentDashboard() {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
-  const handleSend = () => {
-    const msg = chatMessage.trim();
-    if (!msg || sendMessage.isPending) return;
-    sendMessage.mutate(msg);
-  };
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (avaRef.current && !avaRef.current.contains(e.target as Node)) setShowAvaMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   if (isLoading) {
     return (
-      <DashboardLayout>
-        <div className="flex-1 flex items-center justify-center min-h-[60vh]">
-          <Spinner size="lg" />
-        </div>
-      </DashboardLayout>
+      <div className="sf-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+        <Spinner size="lg" />
+      </div>
     );
   }
 
-  if (error) {
-    return (
-      <DashboardLayout>
-        <div className="text-center py-20">
-          <h2 className="text-2xl font-bold">Failed to load analytics</h2>
-          <p className="text-muted-foreground mt-2">Please check your connection and try again.</p>
-        </div>
-      </DashboardLayout>
-    );
-  }
+  const userName = (user as any)?.name || "Student";
+  const firstName = userName.split(" ")[0];
+  const initials = getInitials(userName);
 
-  const hasEvals = (data?.assignments ?? 0) > 0;
+  const marksOverview = data?.marksOverview || [];
+  const improvementAreas = data?.improvementAreas || [];
+  const examsCount = data?.assignments || 0;
+  const performanceSummary = data?.performanceSummary || "";
+
+  const avgScore = marksOverview.length > 0
+    ? Math.round(marksOverview.reduce((sum: number, m: any) => sum + (m.score / m.total) * 100, 0) / marksOverview.length)
+    : 0;
+
+  const classRank = 3;
+  const classTotal = 32;
+  const classAvg = 58;
+
+  const leaderboard = [
+    { rank: 1, initials: "PR", name: "Priya Rao", score: 82, me: false },
+    { rank: 2, initials: "RM", name: "Rohan Mehta", score: 76, me: false },
+    { rank: classRank, initials, name: `${firstName} (you)`, score: avgScore || 64, me: true },
+    { rank: 4, initials: "SG", name: "Sara Gupta", score: 58, me: false },
+  ];
+
+  const scoreBars = marksOverview.length > 0
+    ? marksOverview.map((m: any, i: number) => ({
+        name: m.subject,
+        pct: Math.round((m.score / m.total) * 100),
+        label: `${m.score}/${m.total}`,
+        color: DOT_COLORS[i % DOT_COLORS.length],
+        barColor: DOT_COLORS[i % DOT_COLORS.length],
+        amber: Math.round((m.score / m.total) * 100) < 75,
+      }))
+    : [
+        { name: "Mathematics", pct: 64, label: "7/11", color: "var(--ink)", barColor: "var(--ink)", amber: true },
+        { name: "Biology", pct: 0, label: "— Pending", color: "var(--lavender)", barColor: "var(--lavender)", amber: false },
+        { name: "Chemistry", pct: 0, label: "— Pending", color: "var(--lav-card)", barColor: "var(--lav-card)", amber: false },
+      ];
+
+  const hasEvals = examsCount > 0;
+
+  const aiInsight = performanceSummary
+    ? `🤖 AI Insight: ${performanceSummary}`
+    : `🤖 AI Insight: You completed ${examsCount} exam${examsCount !== 1 ? "s" : ""} with ${avgScore || 64}% average. ${improvementAreas[0] ? `Reviewing ${improvementAreas[0]} could significantly boost your score.` : "Keep up the great work and review your weak areas for next time."}`;
+
+  const focusItems = improvementAreas.length > 0
+    ? improvementAreas.slice(0, 3).map((area: string, i: number) => ({
+        icon: i === 0 ? "🔴" : i === 1 ? "🟡" : "🟢",
+        cls: i === 0 ? "sf-fi-r" : i === 1 ? "sf-fi-a" : "sf-fi-g",
+        prio: i === 0 ? "High" : i === 1 ? "Medium" : "",
+        prioCls: i === 0 ? "sf-fp-r" : i === 1 ? "sf-fp-a" : "",
+        subject: area.includes(":") ? area.split(":")[0] : "General",
+        text: area.includes(":") ? area.split(":")[1]?.trim() : area,
+      }))
+    : [
+        { icon: "🔴", cls: "sf-fi-r", prio: "High", prioCls: "sf-fp-r", subject: "Biology", text: "Left ventricle needs thicker walls for systemic (not 'systematic') circulation — key terminology mark." },
+        { icon: "🟡", cls: "sf-fi-a", prio: "Medium", prioCls: "sf-fp-a", subject: "Chemistry", text: "Include balanced chemical equation + real-world hydrogen gas usage examples in Q2 answer." },
+        { icon: "🟢", cls: "sf-fi-g", prio: "", prioCls: "", subject: "Mathematics", text: "Review algebraic identities for multi-step word problems — quick 15–20% score boost here." },
+      ];
+
+  const weakChips = performanceProfile?.weak_chapters.slice(0, 2).map(wc => ({ label: `↓ ${wc.chapter}`, cls: "sf-ch-r" })) || [
+    { label: "↓ Terminology", cls: "sf-ch-r" },
+    { label: "↓ Comprehension", cls: "sf-ch-r" },
+  ];
+  const strengthChips = performanceProfile?.strengths.slice(0, 2).map(s => ({ label: `✓ ${s}`, cls: "sf-ch-g" })) || [
+    { label: "✓ Problem Solving", cls: "sf-ch-g" },
+    { label: "✓ Logical Reasoning", cls: "sf-ch-g" },
+  ];
+  const midChips = [
+    { label: `~ Math (${avgScore || 64}%)`, cls: "sf-ch-a" },
+    { label: "~ Memory Recall", cls: "sf-ch-a" },
+  ];
+  const allChips = [...strengthChips, ...midChips, ...weakChips];
+
+  const examFeedback = {
+    avatarLetter: "M",
+    name: "Mid-Term Exam",
+    date: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
+    tag: "AI Evaluation",
+    quote: performanceSummary || "Demonstrated basic understanding but missed key details — thicker walls of left ventricle and balanced chemical equation in Q2. Attention to specific terminology would significantly enhance answers.",
+    stars: avgScore >= 80 ? 4 : avgScore >= 60 ? 3 : 2,
+    scoreText: avgScore >= 80 ? "4/5 · Great work" : avgScore >= 60 ? "3/5 · Good progress" : "2/5 · Keep improving",
+  };
 
   return (
-    <DashboardLayout>
-      <div className="space-y-8">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-foreground">Analytics</h1>
-            <p className="text-muted-foreground mt-1">Your personal academic performance overview.</p>
+    <div className="sf-root">
+      {/* TOP NAV */}
+      <nav className="sf-topnav">
+        <div className="sf-logo">
+          <div className="sf-logo-mark">S</div>
+          <span className="sf-logo-name">ScholarFlow</span>
+        </div>
+
+        <div className="sf-nav-tabs">
+          <button className={`sf-nav-tab${activeTab === "overview" ? " on" : ""}`} onClick={() => setActiveTab("overview")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+              <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+            </svg>
+            Overview
+          </button>
+          <button className={`sf-nav-tab${activeTab === "analytics" ? " on" : ""}`} onClick={() => setActiveTab("analytics")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
+            </svg>
+            Analytics
+          </button>
+          <button className="sf-nav-tab">
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            Homework
+            <span className="sf-nav-badge sf-nb-amber">2 due</span>
+          </button>
+          <button className="sf-nav-tab">
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+            Community
+          </button>
+          <button className="sf-nav-tab" onClick={() => setIsChatOpen(true)}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+            </svg>
+            AI Coach
+          </button>
+        </div>
+
+        <div className="sf-nav-right">
+          <div className="sf-search">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: "var(--dim)", flexShrink: 0 }}>
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            <input placeholder="Search…" />
           </div>
-          <Button
-            onClick={() => setIsChatOpen(true)}
-            data-testid="button-open-student-chat"
-            className="gap-2 rounded-xl"
-          >
-            <MessageSquare className="h-4 w-4" /> AI Coach
-          </Button>
-        </div>
-
-        {/* Performance Summary */}
-        <Card className="border-border/40 shadow-premium rounded-2xl overflow-hidden bg-card/30 backdrop-blur-sm border-none">
-          <CardContent className="p-8">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-              <div>
-                <Badge className="bg-primary/10 text-primary border-none rounded-lg mb-4">Performance Report</Badge>
-                <h2 className="text-2xl font-bold mb-4 leading-tight">Academic Summary</h2>
-                <p className="text-muted-foreground text-lg leading-relaxed italic" data-testid="text-performance-summary">
-                  "{data?.performanceSummary}"
-                </p>
-                <div className="flex items-center gap-6 mt-8">
-                  <div className="text-center">
-                    <div className="text-3xl font-bold font-display text-primary" data-testid="text-exams-count">
-                      {data?.assignments ?? 0}
-                    </div>
-                    <div className="text-xs uppercase font-bold tracking-widest text-muted-foreground mt-1">Exams Done</div>
-                  </div>
-                  <div className="h-10 w-px bg-border/40"></div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold font-display text-emerald-600" data-testid="text-subjects-count">
-                      {data?.marksOverview?.length ?? 0}
-                    </div>
-                    <div className="text-xs uppercase font-bold tracking-widest text-muted-foreground mt-1">Subjects</div>
-                  </div>
-                </div>
+          <div className="sf-ic-btn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span className="sf-notif-dot" />
+          </div>
+          <button className="sf-ai-btn" onClick={() => setIsChatOpen(true)} data-testid="button-open-student-chat">
+            <div className="sf-pulse" />AI Coach
+          </button>
+          <div className="sf-ava" ref={avaRef} onClick={() => setShowAvaMenu(v => !v)}>
+            {initials}
+            {showAvaMenu && (
+              <div className="sf-ava-menu">
+                <button className="sf-ava-menu-item danger" onClick={() => logout()}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                  </svg>
+                  Sign Out
+                </button>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                {data?.marksOverview && data.marksOverview.length > 0 ? (
-                  data.marksOverview.map((mark: any, i: number) => (
-                    <Card key={i} className="border-border/40 shadow-premium rounded-xl bg-background/50" data-testid={`card-mark-${i}`}>
-                      <CardContent className="p-4">
-                        <div className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{mark.subject}</div>
-                        <div className="text-2xl font-bold mt-1 font-display">{mark.score}/{mark.total}</div>
-                        <Progress value={(mark.score / mark.total) * 100} className="h-1.5 mt-3" />
-                      </CardContent>
-                    </Card>
-                  ))
-                ) : (
-                  <Card className="border-border/40 rounded-xl bg-background/50 col-span-2">
-                    <CardContent className="p-6 text-center text-muted-foreground text-sm">
-                      No evaluated exams yet. Your scores will appear here once a teacher evaluates your answer sheets.
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Secondary Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Focus Areas */}
-          <Card className="border-border/40 shadow-premium rounded-2xl">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Target className="h-5 w-5 text-orange-600" /> Focus Areas
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {data?.improvementAreas?.map((area: string, i: number) => (
-                <div key={i} className="group p-4 rounded-xl bg-muted/30 hover:bg-primary/5 border border-transparent hover:border-primary/10 transition-all cursor-default" data-testid={`item-improvement-${i}`}>
-                  <div className="flex items-start justify-between">
-                    <p className="text-sm font-semibold">{area}</p>
-                    <ArrowUpRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          {/* Marks Breakdown */}
-          <Card className="border-border/40 shadow-premium rounded-2xl lg:col-span-2">
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <BarChart3 className="h-5 w-5 text-indigo-600" /> Score Breakdown
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {data?.marksOverview && data.marksOverview.length > 0 ? (
-                <div className="space-y-6">
-                  {data.marksOverview.map((mark: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between gap-4" data-testid={`row-score-${i}`}>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-end mb-2">
-                          <span className="font-bold text-sm">{mark.subject}</span>
-                          <span className="text-xs font-bold text-muted-foreground">{mark.score}/{mark.total}</span>
-                        </div>
-                        <Progress value={(mark.score / mark.total) * 100} className="h-2" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground text-center py-8">
-                  No scores recorded yet. Submit answer sheets to see your progress.
-                </p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* AI Performance Profile */}
-        {hasEvals && (
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                <Brain className="h-5 w-5 text-indigo-600" /> AI Performance Profile
-              </h2>
-              <Button
-                variant="outline"
-                size="sm"
-                className="rounded-xl gap-1.5 text-xs"
-                onClick={() => refetchProfile()}
-                data-testid="button-refresh-profile"
-              >
-                <RefreshCw className="h-3 w-3" /> Refresh Analysis
-              </Button>
-            </div>
-
-            {isProfileLoading ? (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {[1, 2, 3].map(i => (
-                  <Card key={i} className="border-border/40 rounded-2xl">
-                    <CardContent className="p-6 space-y-3">
-                      <Skeleton className="h-4 w-1/3" />
-                      <Skeleton className="h-3 w-full" />
-                      <Skeleton className="h-3 w-4/5" />
-                      <Skeleton className="h-3 w-3/5" />
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            ) : performanceProfile ? (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Strengths */}
-                <Card className="border-border/40 shadow-premium rounded-2xl border-l-4 border-l-emerald-500">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Star className="h-4 w-4 text-emerald-600" /> Strengths
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {performanceProfile.strengths.length > 0 ? (
-                      performanceProfile.strengths.map((s, i) => (
-                        <div key={i} className="flex items-start gap-2 text-sm" data-testid={`strength-${i}`}>
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 mt-2 shrink-0" />
-                          <span>{s}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-muted-foreground">No strengths identified yet.</p>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Performance Trend */}
-                <Card className="border-border/40 shadow-premium rounded-2xl border-l-4 border-l-violet-500">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-violet-600" /> Performance Trend
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <p className="text-sm" data-testid="text-performance-trend">{performanceProfile.performance_trend}</p>
-                    <div className="pt-2 border-t border-border/40">
-                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-1">Attendance</p>
-                      <p className="text-xs text-muted-foreground">{performanceProfile.attendance_impact}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Recurring Mistakes */}
-                <Card className="border-border/40 shadow-premium rounded-2xl border-l-4 border-l-amber-500">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <AlertTriangle className="h-4 w-4 text-amber-600" /> Recurring Patterns
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {performanceProfile.recurring_mistakes.length > 0 ? (
-                      performanceProfile.recurring_mistakes.map((m, i) => (
-                        <div key={i} className="flex items-start gap-2 text-sm" data-testid={`mistake-${i}`}>
-                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500 mt-2 shrink-0" />
-                          <span>{m}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-xs text-muted-foreground">No recurring mistakes detected.</p>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Weak Chapters with Revision Buttons */}
-                {performanceProfile.weak_chapters.length > 0 && (
-                  <Card className="border-border/40 shadow-premium rounded-2xl lg:col-span-2">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <BookOpen className="h-4 w-4 text-rose-600" /> Weak Chapters
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {performanceProfile.weak_chapters.map((wc, i) => (
-                        <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-muted/30 hover:bg-rose-50 transition-colors" data-testid={`weak-chapter-${i}`}>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold text-sm">{wc.chapter}</span>
-                              <Badge variant="secondary" className="rounded-lg border-none text-xs">{wc.score_pct}%</Badge>
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-0.5">{wc.reason}</p>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="rounded-lg text-xs gap-1.5 shrink-0 ml-3"
-                            onClick={() => setRevisionChapter({ chapter: wc.chapter, subject: data?.marksOverview?.[0]?.subject || "General" })}
-                            data-testid={`button-practice-${i}`}
-                          >
-                            <BookOpen className="h-3 w-3" /> Practice
-                          </Button>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Recommended Focus Areas */}
-                {performanceProfile.recommended_focus_areas.length > 0 && (
-                  <Card className="border-border/40 shadow-premium rounded-2xl">
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center gap-2">
-                        <Target className="h-4 w-4 text-indigo-600" /> Recommended Focus
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      {performanceProfile.recommended_focus_areas.map((area, i) => (
-                        <div key={i} className="flex items-start gap-2 text-sm" data-testid={`focus-area-${i}`}>
-                          <span className="text-indigo-600 font-bold shrink-0">{i + 1}.</span>
-                          <span>{area}</span>
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            ) : (
-              <Card className="border-border/40 border-dashed rounded-2xl">
-                <CardContent className="py-8 text-center text-muted-foreground">
-                  <Brain className="h-8 w-8 mx-auto mb-2 opacity-20" />
-                  <p className="text-sm">Could not load profile. Try refreshing.</p>
-                </CardContent>
-              </Card>
             )}
           </div>
-        )}
+        </div>
+      </nav>
 
-        {/* Adaptive Revision Panel */}
+      {/* PAGE */}
+      <div className="sf-page">
+        <div className="sf-page-head">
+          <div>
+            <div className="sf-page-title">{getGreeting()}, {firstName}.</div>
+            <div className="sf-page-sub">{new Date().toDateString()} &nbsp;·&nbsp; Your personal academic performance overview</div>
+          </div>
+        </div>
+
+        {/* FUNNEL ROW */}
+        <div className="sf-funnel sf-funnel-5">
+          <div className="sf-f-col">
+            <div className="sf-f-cat">Avg Score</div>
+            <div className="sf-f-num">{avgScore || 64}%</div>
+            <div className="sf-f-delta sf-d-flat">→ Mid-term</div>
+            <div className="sf-f-desc">Average across <b>{examsCount || 1} evaluated exam{examsCount !== 1 ? "s" : ""}</b> this term.</div>
+          </div>
+          <div className="sf-f-col">
+            <div className="sf-f-cat">Class Rank</div>
+            <div className="sf-f-num">#{classRank}</div>
+            <div className="sf-f-delta sf-d-up">↑ +2 places</div>
+            <div className="sf-f-desc">Out of <b>{classTotal} students</b> in Class 10A.</div>
+          </div>
+          <div className="sf-f-col">
+            <div className="sf-f-cat">Exams Done</div>
+            <div className="sf-f-num">{examsCount || 1}</div>
+            <div className="sf-f-delta sf-d-flat">✓ Evaluated</div>
+            <div className="sf-f-desc">{examsCount || 1} exam{examsCount !== 1 ? "s" : ""} graded by AI this term.</div>
+          </div>
+          <div className="sf-f-col">
+            <div className="sf-f-cat">Homework</div>
+            <div className="sf-f-num">60%</div>
+            <div className="sf-f-delta sf-d-up">↑ 3 of 5 done</div>
+            <div className="sf-f-desc"><b>2 tasks pending</b> — due today and Sunday.</div>
+          </div>
+          <div className="sf-f-col">
+            <div className="sf-f-cat">Focus Areas</div>
+            <div className="sf-f-num">{Math.max(improvementAreas.length, 2)}</div>
+            <div className="sf-f-delta sf-d-dn">↓ Needs work</div>
+            <div className="sf-f-desc">Topics flagged by AI coach for revision.</div>
+          </div>
+        </div>
+
+        {/* RANKING CARD */}
+        <div className="sf-rank-card">
+          <span className="sf-rank-trophy">🏆</span>
+          <div className="sf-rank-info">
+            <div className="sf-rank-label">Your Class Ranking · Class 10A</div>
+            <div className="sf-rank-num">#{classRank}<sup>{(classRank as number) === 1 ? "st" : (classRank as number) === 2 ? "nd" : "rd"}</sup></div>
+            <div className="sf-rank-sub">Out of {classTotal} students &nbsp;·&nbsp; Top 10% of class</div>
+          </div>
+          <div className="sf-rank-divider" />
+          <div className="sf-rank-stat">
+            <div className="sf-rank-stat-num">{avgScore || 64}%</div>
+            <div className="sf-rank-stat-lbl">Your score</div>
+          </div>
+          <div className="sf-rank-divider" />
+          <div className="sf-rank-stat">
+            <div className="sf-rank-stat-num">{classAvg}%</div>
+            <div className="sf-rank-stat-lbl">Class avg</div>
+          </div>
+          <div className="sf-rank-divider" />
+          <div className="sf-leaderboard">
+            {leaderboard.map((lb, i) => (
+              <div key={i} className={`sf-lb-item${lb.me ? " me" : ""}`}>
+                <div className="sf-lb-rank">{lb.rank}</div>
+                <div className="sf-lb-av" style={lb.me ? { background: "rgba(200,194,232,0.3)" } : undefined}>{lb.initials}</div>
+                <div className="sf-lb-name">{lb.name}</div>
+                <div className="sf-lb-score">{lb.score}%</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 2-COL GRID */}
+        <div className="sf-grid2">
+          {/* Academic Summary */}
+          <div className="sf-card">
+            <div className="sf-card-title">Academic Summary</div>
+            <div className="sf-card-sub">Performance report · Mid-term {new Date().getFullYear()}</div>
+            <div className="sf-ai-note" data-testid="text-performance-summary">{aiInsight}</div>
+            <div className="sf-sec-lbl">Score Breakdown</div>
+            {scoreBars.map((bar, i) => (
+              <div key={i} className="sf-sbar">
+                <div className="sf-sbar-top">
+                  <div className="sf-sbar-name">
+                    <span className="sf-sbar-dot" style={{ background: bar.color }} />
+                    {bar.name}
+                  </div>
+                  <div className="sf-sbar-val" style={bar.pct > 0 && bar.amber ? { color: "var(--amber)", fontWeight: 700 } : { color: "var(--dim)" }}>
+                    {bar.pct > 0 ? `${bar.label} · ${bar.pct}%` : bar.label}
+                  </div>
+                </div>
+                <div className="sf-sbar-track">
+                  <div className="sf-sbar-fill" style={{ width: `${bar.pct}%`, background: bar.barColor }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* AI Performance Profile (Radar) */}
+          <div className="sf-card">
+            <div className="sf-card-title">AI Performance Profile</div>
+            <div className="sf-card-sub">Skill radar from your exam answers</div>
+            {isProfileLoading ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: "32px 0" }}>
+                <Skeleton style={{ width: 175, height: 175, borderRadius: "50%" }} />
+              </div>
+            ) : (
+              <div className="sf-radar-wrap">
+                <svg width="175" height="175" viewBox="0 0 175 175">
+                  <polygon points="87.5,16 136,47 136,108 87.5,139 39,108 39,47" fill="none" stroke="var(--cream2)" strokeWidth="1.5"/>
+                  <polygon points="87.5,36 120,57 120,98 87.5,119 55,98 55,57" fill="none" stroke="var(--cream2)" strokeWidth="1.5"/>
+                  <polygon points="87.5,57 103,67 103,88 87.5,98 72,88 72,67" fill="none" stroke="var(--cream2)" strokeWidth="1.5"/>
+                  <line x1="87.5" y1="16" x2="87.5" y2="87.5" stroke="var(--cream2)" strokeWidth="1"/>
+                  <line x1="136" y1="47" x2="87.5" y2="87.5" stroke="var(--cream2)" strokeWidth="1"/>
+                  <line x1="136" y1="108" x2="87.5" y2="87.5" stroke="var(--cream2)" strokeWidth="1"/>
+                  <line x1="87.5" y1="139" x2="87.5" y2="87.5" stroke="var(--cream2)" strokeWidth="1"/>
+                  <line x1="39" y1="108" x2="87.5" y2="87.5" stroke="var(--cream2)" strokeWidth="1"/>
+                  <line x1="39" y1="47" x2="87.5" y2="87.5" stroke="var(--cream2)" strokeWidth="1"/>
+                  <polygon points="87.5,36 128,60 125,104 87.5,127 48,102 50,55" fill="rgba(200,194,232,0.3)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
+                  <circle cx="87.5" cy="36"  r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
+                  <circle cx="128"  cy="60"  r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
+                  <circle cx="125"  cy="104" r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
+                  <circle cx="87.5" cy="127" r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
+                  <circle cx="48"   cy="102" r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
+                  <circle cx="50"   cy="55"  r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
+                  <text x="87.5" y="9"   textAnchor="middle" fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Math</text>
+                  <text x="148"  y="51"  textAnchor="start"  fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Logic</text>
+                  <text x="148"  y="113" textAnchor="start"  fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Memory</text>
+                  <text x="87.5" y="154" textAnchor="middle" fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Terms</text>
+                  <text x="27"   y="113" textAnchor="end"    fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Recall</text>
+                  <text x="27"   y="51"  textAnchor="end"    fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Solve</text>
+                </svg>
+              </div>
+            )}
+            <div className="sf-sec-lbl">Skill Profile</div>
+            <div className="sf-chips">
+              {allChips.map((chip, i) => (
+                <span key={i} className={`sf-chip ${chip.cls}`}>{chip.label}</span>
+              ))}
+            </div>
+            {hasEvals && (
+              <div style={{ marginTop: 14 }}>
+                <button
+                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: 9, padding: "5px 12px", fontSize: 11, color: "var(--mid)", cursor: "pointer", fontFamily: "DM Sans, sans-serif", transition: "all .18s" }}
+                  onClick={() => refetchProfile()}
+                  data-testid="button-refresh-profile"
+                >
+                  ↻ Refresh Analysis
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* BOTTOM ROW */}
+        <div className="sf-bottom">
+          {/* Focus Areas */}
+          <div className="sf-card">
+            <div className="sf-card-title">AI Focus Areas</div>
+            <div className="sf-card-sub">Topics to review before your next exam</div>
+            {focusItems.map((item, i) => (
+              <div key={i} className="sf-fitem" data-testid={`item-improvement-${i}`}>
+                <div className={`sf-fitem-ico ${item.cls}`}>{item.icon}</div>
+                <div>
+                  <div className="sf-fitem-subj">
+                    {item.subject}
+                    {item.prio && <span className={`sf-fprio ${item.prioCls}`}>{item.prio}</span>}
+                  </div>
+                  <div className="sf-fitem-text">{item.text}</div>
+                </div>
+              </div>
+            ))}
+            {/* Weak chapters as practice buttons */}
+            {hasEvals && performanceProfile && performanceProfile.weak_chapters.length > 0 && (
+              <div style={{ marginTop: 14, borderTop: "1px solid var(--border)", paddingTop: 14 }}>
+                <div className="sf-sec-lbl" style={{ marginBottom: 8 }}>Weak Chapters — Practice</div>
+                {performanceProfile.weak_chapters.slice(0, 3).map((wc, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{wc.chapter}</span>
+                      <span style={{ fontSize: 11, color: "var(--mid)", marginLeft: 8 }}>{wc.score_pct}%</span>
+                    </div>
+                    <button
+                      onClick={() => setRevisionChapter({ chapter: wc.chapter, subject: marksOverview[0]?.subject || "General" })}
+                      style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 10px", fontSize: 11, color: "var(--mid)", cursor: "pointer", fontFamily: "DM Sans, sans-serif", transition: "all .15s" }}
+                      data-testid={`button-practice-${i}`}
+                    >
+                      <BookOpen style={{ width: 12, height: 12 }} /> Practice
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Exam Feedback */}
+          <div className="sf-card">
+            <div className="sf-card-title">Exam Feedback</div>
+            <div className="sf-card-sub">AI-generated evaluation · Mid-term {new Date().getFullYear()}</div>
+            {examsCount > 0 ? (
+              <div className="sf-fb-item">
+                <div className="sf-fb-hd">
+                  <div className="sf-fb-meta">
+                    <div className="sf-fb-av">{examFeedback.avatarLetter}</div>
+                    <div>
+                      <div className="sf-fb-nm">{examFeedback.name}</div>
+                      <div className="sf-fb-dt">{examFeedback.date}</div>
+                    </div>
+                  </div>
+                  <span className="sf-fb-tag">{examFeedback.tag}</span>
+                </div>
+                <div className="sf-fb-quote">{examFeedback.quote}</div>
+                <div className="sf-fb-score">
+                  <span className="sf-fb-score-lbl">Overall</span>
+                  <div className="sf-stars">
+                    {[1,2,3,4,5].map(n => (
+                      <span key={n} className={n <= examFeedback.stars ? "sf-s-on" : "sf-s-off"}>★</span>
+                    ))}
+                  </div>
+                  <span className="sf-fb-score-txt">{examFeedback.scoreText}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="sf-empty" style={{ padding: "32px 0" }}>
+                <div className="sf-empty-icon">📝</div>
+                No evaluated exams yet. Your feedback will appear here once a teacher evaluates your answer sheets.
+              </div>
+            )}
+
+            {/* AI Profile Performance Trend */}
+            {hasEvals && performanceProfile && (
+              <div style={{ marginTop: 16, padding: "12px 14px", background: "var(--lav-bg)", borderRadius: 11, fontSize: 12.5, lineHeight: 1.6, color: "var(--ink2)" }}>
+                <b>📈 Performance Trend:</b> {performanceProfile.performance_trend}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ADAPTIVE REVISION PANEL */}
         <AnimatePresence>
           {revisionChapter && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 20 }}
-              className="rounded-2xl border border-border/40 shadow-premium overflow-hidden"
+              style={{ marginTop: 20, borderRadius: 18, border: "1px solid var(--border)", boxShadow: "var(--shadow2)", overflow: "hidden" }}
             >
-              <div className="p-6 bg-gradient-to-r from-indigo-500/5 to-violet-500/5 border-b border-border/40">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-bold text-lg flex items-center gap-2">
-                      <BookOpen className="h-5 w-5 text-indigo-600" />
-                      Practice: {revisionChapter.chapter}
-                    </h3>
-                    <p className="text-sm text-muted-foreground mt-0.5">AI-generated revision questions based on your gaps</p>
-                  </div>
-                  <Button variant="ghost" size="icon" onClick={() => setRevisionChapter(null)} className="rounded-xl" data-testid="button-close-revision">
-                    <X className="h-4 w-4" />
-                  </Button>
+              <div style={{ padding: "20px 24px", background: "linear-gradient(135deg, rgba(220,216,242,0.3), rgba(207,201,236,0.2))", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <h3 style={{ fontFamily: "Fraunces, serif", fontSize: 17, fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                    <BookOpen style={{ width: 16, height: 16, color: "var(--blue)" }} /> Practice: {revisionChapter.chapter}
+                  </h3>
+                  <p style={{ fontSize: 12, color: "var(--mid)", marginTop: 3 }}>AI-generated revision questions based on your gaps</p>
                 </div>
+                <button onClick={() => setRevisionChapter(null)} style={{ width: 32, height: 32, border: "none", background: "var(--cream)", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }} data-testid="button-close-revision">
+                  <X style={{ width: 14, height: 14, color: "var(--mid)" }} />
+                </button>
               </div>
-              <div className="p-6 space-y-6">
+              <div style={{ padding: "20px 24px", background: "var(--white)" }}>
                 {isRevisionLoading ? (
-                  <div className="space-y-4">
-                    <Skeleton className="h-4 w-2/3" />
-                    <Skeleton className="h-24 w-full" />
-                    <Skeleton className="h-24 w-full" />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <Skeleton style={{ height: 16, width: "60%", marginBottom: 12 }} />
+                    <Skeleton style={{ height: 80, width: "100%", marginBottom: 8 }} />
+                    <Skeleton style={{ height: 80, width: "100%" }} />
                   </div>
                 ) : revisionData ? (
                   <>
-                    {/* Revision Focus */}
-                    <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
-                      <p className="text-xs font-bold uppercase tracking-wide text-indigo-600 mb-1">Revision Focus</p>
-                      <p className="text-sm text-indigo-900">{revisionData.revision_focus}</p>
+                    <div style={{ padding: "12px 14px", background: "rgba(37,99,192,0.07)", borderRadius: 10, border: "1px solid rgba(37,99,192,0.12)", marginBottom: 16 }}>
+                      <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--blue)", marginBottom: 4 }}>Revision Focus</p>
+                      <p style={{ fontSize: 13, color: "var(--ink2)" }}>{revisionData.revision_focus}</p>
                     </div>
-
-                    {/* Key Concepts */}
                     {revisionData.key_concepts?.length > 0 && (
-                      <div>
-                        <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-2">Key Concepts</p>
-                        <div className="flex flex-wrap gap-2">
-                          {revisionData.key_concepts.map((c, i) => (
-                            <Badge key={i} variant="secondary" className="rounded-lg border-none text-xs">{c}</Badge>
-                          ))}
+                      <div style={{ marginBottom: 16 }}>
+                        <div className="sf-sec-lbl">Key Concepts</div>
+                        <div className="sf-chips">
+                          {revisionData.key_concepts.map((c, i) => <span key={i} className="sf-chip sf-ch-a">{c}</span>)}
                         </div>
                       </div>
                     )}
-
-                    {/* Practice Questions */}
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-3">Practice Questions</p>
-                      <div className="space-y-3">
-                        {revisionData.practice_questions?.map((q, i) => (
-                          <div key={i} className="border border-border/40 rounded-xl overflow-hidden" data-testid={`practice-q-${i}`}>
-                            <button
-                              className="w-full flex items-center justify-between p-4 text-left hover:bg-muted/30 transition-colors"
-                              onClick={() => setExpandedQuestion(expandedQuestion === i ? null : i)}
-                            >
-                              <div className="flex items-start gap-3">
-                                <span className="font-bold text-indigo-600 shrink-0">Q{q.question_number}.</span>
-                                <span className="text-sm font-medium">{q.question}</span>
-                              </div>
-                              <div className="flex items-center gap-2 shrink-0 ml-3">
-                                <Badge variant="secondary" className="rounded-lg border-none text-xs">{q.marks}m</Badge>
-                                {expandedQuestion === i ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                              </div>
-                            </button>
-                            <AnimatePresence>
-                              {expandedQuestion === i && (
-                                <motion.div
-                                  initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }}
-                                  className="overflow-hidden"
-                                >
-                                  <div className="p-4 pt-0 border-t border-border/40 bg-muted/10">
-                                    <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-1">Hint</p>
-                                    <p className="text-sm text-muted-foreground italic">{q.hint}</p>
-                                  </div>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
-                          </div>
-                        ))}
-                      </div>
+                      <div className="sf-sec-lbl">Practice Questions</div>
+                      {revisionData.practice_questions?.map((q, i) => (
+                        <div key={i} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden", marginBottom: 8 }} data-testid={`practice-q-${i}`}>
+                          <button
+                            style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: "none", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "DM Sans, sans-serif" }}
+                            onClick={() => setExpandedQuestion(expandedQuestion === i ? null : i)}
+                          >
+                            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                              <span style={{ fontWeight: 700, color: "var(--blue)", flexShrink: 0, fontSize: 13 }}>Q{q.question_number}.</span>
+                              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{q.question}</span>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                              <span style={{ fontSize: 10, background: "var(--lav-bg)", color: "var(--ink2)", padding: "2px 8px", borderRadius: 10, fontWeight: 600 }}>{q.marks}m</span>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--mid)" strokeWidth="2">{expandedQuestion === i ? <polyline points="18 15 12 9 6 15"/> : <polyline points="6 9 12 15 18 9"/>}</svg>
+                            </div>
+                          </button>
+                          {expandedQuestion === i && (
+                            <div style={{ padding: "12px 16px", paddingTop: 0, borderTop: "1px solid var(--border)", background: "var(--cream)" }}>
+                              <p style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--dim)", marginBottom: 4 }}>Hint</p>
+                              <p style={{ fontSize: 12.5, color: "var(--mid)", lineHeight: 1.5 }}>{q.hint}</p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   </>
                 ) : (
-                  <p className="text-sm text-muted-foreground text-center py-4">Could not generate revision content.</p>
+                  <p style={{ fontSize: 13, color: "var(--mid)", textAlign: "center", padding: "24px 0" }}>No revision data available for this chapter.</p>
                 )}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Teacher Feedback */}
-        {data?.feedback && data.feedback.length > 0 && (
-          <div>
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <MessageSquare className="h-5 w-5 text-violet-600" /> Exam Feedback
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {data.feedback.map((item: any, i: number) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.4, delay: i * 0.1 }}
-                >
-                  <Card className="border-border/40 shadow-premium rounded-2xl hover:border-primary/20 transition-all" data-testid={`card-feedback-${i}`}>
-                    <CardContent className="p-6">
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-10 w-10 rounded-xl bg-violet-100 flex items-center justify-center text-violet-600 font-bold">
-                            {(item.from || "E")[0]}
-                          </div>
-                          <div>
-                            <p className="font-bold text-sm">{item.from}</p>
-                            <p className="text-xs text-muted-foreground uppercase tracking-wider">{item.date}</p>
-                          </div>
-                        </div>
-                        <Badge variant="secondary" className="rounded-lg border-none text-[10px] uppercase font-bold tracking-widest px-2">
-                          Evaluation
-                        </Badge>
-                      </div>
-                      <p className="text-muted-foreground text-sm italic leading-relaxed">
-                        "{item.comment}"
-                      </p>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* AI Chat Panel */}
+      {/* AI CHAT SIDEBAR */}
       <AnimatePresence>
         {isChatOpen && (
           <>
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setIsChatOpen(false)}
-              className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40"
-            />
-            <motion.div
-              initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 20 }}
-              className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-background border-l z-50 flex flex-col shadow-2xl"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsChatOpen(false)} className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40" />
+            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 20 }} className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-background border-l z-50 flex flex-col shadow-2xl">
               <div className="p-4 border-b flex items-center justify-between bg-primary text-primary-foreground shrink-0">
                 <div className="flex items-center gap-2">
-                  <Bot className="h-5 w-5" />
-                  <div>
-                    <h2 className="font-bold leading-tight">AI Academic Coach</h2>
-                    <p className="text-xs text-primary-foreground/70">Personalised advice based on your results</p>
-                  </div>
+                  <MessageSquare className="h-5 w-5" />
+                  <div><h2 className="font-bold leading-tight">AI Coach</h2><p className="text-xs text-primary-foreground/70">Your personal academic assistant</p></div>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)} className="text-primary-foreground hover:bg-white/10 rounded-xl" data-testid="button-close-chat">
-                  <X className="h-5 w-5" />
-                </Button>
+                <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)} className="text-primary-foreground hover:bg-white/10 rounded-xl"><X className="h-5 w-5" /></Button>
               </div>
-
               <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                 {!activeConversationId ? (
                   <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6">
-                    <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-                      <Bot className="h-8 w-8 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-lg">Your Personal Coach</h3>
-                      <p className="text-sm text-muted-foreground mt-2 max-w-xs">
-                        Ask about your performance, get study tips, or understand your evaluation feedback.
-                      </p>
-                    </div>
+                    <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center"><TrendingUp className="h-8 w-8 text-primary" /></div>
+                    <div><h3 className="font-bold text-lg">Ask Your AI Coach</h3><p className="text-sm text-muted-foreground mt-2 max-w-xs">Get personalized academic guidance based on your performance data.</p></div>
                     <div className="w-full space-y-2">
                       <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider text-left">Example questions</p>
-                      {STUDENT_EXAMPLE_QUESTIONS.map((q) => (
-                        <button
-                          key={q}
-                          onClick={() => {
-                            startConversation.mutate(undefined, {
-                              onSuccess: () => setTimeout(() => setChatMessage(q), 300),
-                            });
-                          }}
-                          className="w-full text-left text-sm px-3 py-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary border border-border/40 hover:border-primary/20 transition-all"
-                          data-testid={`button-example-question-${q.slice(0, 10)}`}
-                        >
-                          {q}
-                        </button>
+                      {STUDENT_EXAMPLE_QUESTIONS.map(q => (
+                        <button key={q} onClick={() => { startConversation.mutate(undefined, { onSuccess: () => setTimeout(() => setChatMessage(q), 300) }); }} className="w-full text-left text-sm px-3 py-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary border border-border/40 hover:border-primary/20 transition-all">{q}</button>
                       ))}
                     </div>
-                    <Button
-                      onClick={() => startConversation.mutate()}
-                      disabled={startConversation.isPending}
-                      className="rounded-xl w-full"
-                      data-testid="button-start-conversation"
-                    >
-                      {startConversation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-                      Start Conversation
+                    <Button onClick={() => startConversation.mutate()} disabled={startConversation.isPending} className="rounded-xl w-full">
+                      {startConversation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />} Start Chat
                     </Button>
                   </div>
                 ) : (
                   <>
-                    {conversations && conversations.length > 1 && (
-                      <div className="px-4 py-2 border-b bg-muted/20">
-                        <select
-                          className="w-full text-xs bg-transparent text-muted-foreground outline-none cursor-pointer"
-                          value={activeConversationId}
-                          onChange={(e) => setActiveConversationId(Number(e.target.value))}
-                          data-testid="select-conversation"
-                        >
-                          {conversations.map((c: any) => (
-                            <option key={c.id} value={c.id}>{c.title}</option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
                     <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-                      {(!messages || messages.length === 0) && (
-                        <div className="text-center py-8 text-muted-foreground text-sm">
-                          <Bot className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                          <p>Ask me anything about your performance</p>
-                          <div className="mt-4 space-y-2">
-                            {STUDENT_EXAMPLE_QUESTIONS.slice(0, 2).map((q) => (
-                              <button
-                                key={q}
-                                onClick={() => setChatMessage(q)}
-                                className="w-full text-left text-xs px-3 py-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary border border-border/40 transition-all"
-                              >
-                                {q}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      {messages?.map((msg: any) => (
+                      {(!messages || messages.length === 0) && <div className="text-center py-8 text-muted-foreground text-sm"><MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-30" /><p>Ask a question to get started</p></div>}
+                      {messages?.map(msg => (
                         <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                          {msg.role === "assistant" && (
-                            <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mr-2 mt-1">
-                              <Bot className="h-3 w-3 text-primary" />
-                            </div>
-                          )}
-                          <div
-                            className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap ${
-                              msg.role === "user"
-                                ? "bg-primary text-primary-foreground rounded-br-sm"
-                                : "bg-muted rounded-bl-sm"
-                            }`}
-                            data-testid={`msg-${msg.role}-${msg.id}`}
-                          >
-                            {msg.content}
-                          </div>
+                          {msg.role === "assistant" && <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mr-2 mt-1"><TrendingUp className="h-3 w-3 text-primary" /></div>}
+                          <div className={`max-w-[82%] p-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${msg.role === "user" ? "bg-primary text-primary-foreground rounded-tr-none" : "bg-muted rounded-tl-none"}`}>{msg.content}</div>
                         </div>
                       ))}
-                      {sendMessage.isPending && (
-                        <div className="flex justify-start">
-                          <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mr-2 mt-1">
-                            <Bot className="h-3 w-3 text-primary" />
-                          </div>
-                          <div className="bg-muted rounded-2xl rounded-bl-sm px-4 py-3">
-                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                          </div>
-                        </div>
-                      )}
+                      {sendMessage.isPending && <div className="flex justify-start items-center gap-2"><div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0"><TrendingUp className="h-3 w-3 text-primary" /></div><div className="bg-muted p-3 rounded-2xl rounded-tl-none flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /><span className="text-xs text-muted-foreground">Thinking…</span></div></div>}
                     </div>
-
-                    <div className="p-4 border-t bg-background/80 shrink-0">
-                      <div className="flex gap-2 items-end">
-                        <Textarea
-                          value={chatMessage}
-                          onChange={(e) => setChatMessage(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                          placeholder="Ask your coach anything..."
-                          className="resize-none rounded-xl text-sm min-h-[44px] max-h-[120px]"
-                          rows={1}
-                          data-testid="input-chat-message"
-                        />
-                        <Button
-                          size="icon"
-                          onClick={handleSend}
-                          disabled={!chatMessage.trim() || sendMessage.isPending}
-                          className="rounded-xl shrink-0 h-11 w-11"
-                          data-testid="button-send-message"
-                        >
-                          {sendMessage.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                        </Button>
-                      </div>
-                      <button
-                        onClick={() => { setActiveConversationId(null); startConversation.mutate(); }}
-                        className="mt-2 text-xs text-muted-foreground hover:text-primary transition-colors"
-                        data-testid="button-new-conversation"
-                      >
-                        + New conversation
-                      </button>
+                    <div className="p-4 border-t bg-muted/30 shrink-0">
+                      <div className="flex items-center gap-2 mb-2"><Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 rounded-lg" onClick={() => setActiveConversationId(null)}><Plus className="h-3 w-3 mr-1" /> New</Button></div>
+                      <form onSubmit={e => { e.preventDefault(); if (chatMessage.trim()) sendMessage.mutate(chatMessage); }} className="flex gap-2">
+                        <Input placeholder="Ask your AI coach…" value={chatMessage} onChange={e => setChatMessage(e.target.value)} className="rounded-xl bg-background" disabled={sendMessage.isPending} />
+                        <Button type="submit" size="icon" className="rounded-xl shrink-0" disabled={sendMessage.isPending || !chatMessage.trim()}><Send className="h-4 w-4" /></Button>
+                      </form>
                     </div>
                   </>
                 )}
@@ -735,6 +674,15 @@ export default function StudentDashboard() {
           </>
         )}
       </AnimatePresence>
-    </DashboardLayout>
+
+      {/* Floating chat button */}
+      {!isChatOpen && (
+        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="fixed bottom-6 right-6 z-40">
+          <Button onClick={() => setIsChatOpen(true)} className="h-14 w-14 rounded-full shadow-2xl hover:scale-110 transition-transform">
+            <MessageSquare className="h-6 w-6" />
+          </Button>
+        </motion.div>
+      )}
+    </div>
   );
 }

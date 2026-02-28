@@ -31,7 +31,7 @@ A full-stack web application for teachers and students to manage exams, process 
 
 ## Running
 
-- Development: `npm run dev` (starts tsx server on port 5000)
+- Development: `npm run dev` (starts tsx server on port 5009)
 - Build: `npm run build`
 - Production: `npm start`
 - DB schema push: `npm run db:push`
@@ -42,7 +42,7 @@ A full-stack web application for teachers and students to manage exams, process 
 - `SESSION_SECRET` — JWT signing secret
 - `AI_INTEGRATIONS_OPENAI_API_KEY` — OpenAI key via Replit AI Integrations
 - `AI_INTEGRATIONS_OPENAI_BASE_URL` — OpenAI base URL via Replit AI Integrations
-- `PORT` — Server port (default: 5000)
+- `PORT` — Server port (default: 5009)
 
 ## Default Seed Data
 
