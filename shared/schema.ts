@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -45,7 +45,7 @@ export const answerSheets = pgTable("answer_sheets", {
   studentId: integer("student_id").references(() => students.id),
   admissionNumber: text("admission_number").notNull(),
   studentName: text("student_name").notNull(),
-  ocrOutput: text("ocr_output").notNull(), // JSON string
+  ocrOutput: text("ocr_output").notNull(),
   status: text("status").notNull().default("processed"),
 });
 
@@ -55,11 +55,10 @@ export const evaluations = pgTable("evaluations", {
   studentName: text("student_name").notNull(),
   admissionNumber: text("admission_number").notNull(),
   totalMarks: integer("total_marks").notNull(),
-  questions: text("questions").notNull(), // JSON string: [{question_number, chapter, marks_awarded, max_marks, deviation_reason, improvement_suggestion}]
+  questions: text("questions").notNull(),
   overallFeedback: text("overall_feedback").notNull(),
 });
 
-// Bulk upload: individual pages uploaded before grouping/merging
 export const answerSheetPages = pgTable("answer_sheet_pages", {
   id: serial("id").primaryKey(),
   examId: integer("exam_id").notNull().references(() => exams.id),
@@ -67,25 +66,23 @@ export const answerSheetPages = pgTable("answer_sheet_pages", {
   studentName: text("student_name"),
   sheetNumber: integer("sheet_number"),
   imageBase64: text("image_base64").notNull(),
-  ocrOutput: text("ocr_output"), // JSON string
-  status: text("status").notNull().default("pending"), // pending | processed
+  ocrOutput: text("ocr_output"),
+  status: text("status").notNull().default("pending"),
   uploadedAt: text("uploaded_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
-// Merged scripts grouped per student per exam
 export const mergedAnswerScripts = pgTable("merged_answer_scripts", {
   id: serial("id").primaryKey(),
   examId: integer("exam_id").notNull().references(() => exams.id),
   admissionNumber: text("admission_number").notNull(),
   studentName: text("student_name").notNull(),
-  mergedAnswers: text("merged_answers").notNull(), // JSON string - merged answers from all pages
-  pageIds: text("page_ids").notNull(), // JSON array of page ids
-  status: text("status").notNull().default("pending"), // pending | evaluated
-  answerSheetId: integer("answer_sheet_id").references(() => answerSheets.id), // set after evaluation
+  mergedAnswers: text("merged_answers").notNull(),
+  pageIds: text("page_ids").notNull(),
+  status: text("status").notNull().default("pending"),
+  answerSheetId: integer("answer_sheet_id").references(() => answerSheets.id),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
-// NCERT reference chapters
 export const ncertChapters = pgTable("ncert_chapters", {
   id: serial("id").primaryKey(),
   class: text("class").notNull(),
@@ -95,7 +92,6 @@ export const ncertChapters = pgTable("ncert_chapters", {
   teacherId: integer("teacher_id").notNull().references(() => teachers.id),
 });
 
-// Per-question deviation logs (extracted for efficient querying)
 export const deviationLogs = pgTable("deviation_logs", {
   id: serial("id").primaryKey(),
   evaluationId: integer("evaluation_id").notNull().references(() => evaluations.id),
@@ -113,12 +109,11 @@ export const deviationLogs = pgTable("deviation_logs", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
-// Cached AI-generated performance profile per student
 export const performanceProfiles = pgTable("performance_profiles", {
   id: serial("id").primaryKey(),
   studentId: integer("student_id").notNull().references(() => students.id),
   admissionNumber: text("admission_number").notNull(),
-  profileData: text("profile_data").notNull(), // JSON
+  profileData: text("profile_data").notNull(),
   generatedAt: text("generated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -133,11 +128,37 @@ export const conversations = pgTable("conversations", {
 export const messages = pgTable("messages", {
   id: serial("id").primaryKey(),
   conversationId: integer("conversation_id").notNull().references(() => conversations.id, { onDelete: "cascade" }),
-  role: text("role").notNull(), // 'user' | 'assistant'
+  role: text("role").notNull(),
   content: text("content").notNull(),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+// Homework assigned by teacher to a class/section
+export const homework = pgTable("homework", {
+  id: serial("id").primaryKey(),
+  teacherId: integer("teacher_id").notNull().references(() => teachers.id),
+  subject: text("subject").notNull(),
+  className: text("class_name").notNull(),
+  section: text("section").notNull(),
+  instruction: text("instruction").notNull(),
+  modelSolutionText: text("model_solution_text"),
+  dueDate: text("due_date").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// Student submissions for homework
+export const homeworkSubmissions = pgTable("homework_submissions", {
+  id: serial("id").primaryKey(),
+  homeworkId: integer("homework_id").notNull().references(() => homework.id),
+  studentId: integer("student_id").notNull().references(() => students.id),
+  admissionNumber: text("admission_number").notNull(),
+  ocrText: text("ocr_text"),
+  score: integer("score"),
+  status: text("status").notNull().default("pending"),
+  submittedAt: text("submitted_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// Relations
 export const conversationsRelations = relations(conversations, ({ many }) => ({
   messages: many(messages),
 }));
@@ -176,12 +197,33 @@ export const examsRelations = relations(exams, ({ one, many }) => ({
   answerSheets: many(answerSheets),
 }));
 
+export const homeworkRelations = relations(homework, ({ one, many }) => ({
+  teacher: one(teachers, {
+    fields: [homework.teacherId],
+    references: [teachers.id],
+  }),
+  submissions: many(homeworkSubmissions),
+}));
+
+export const homeworkSubmissionsRelations = relations(homeworkSubmissions, ({ one }) => ({
+  homework: one(homework, {
+    fields: [homeworkSubmissions.homeworkId],
+    references: [homework.id],
+  }),
+  student: one(students, {
+    fields: [homeworkSubmissions.studentId],
+    references: [students.id],
+  }),
+}));
+
 export const insertTeacherSchema = createInsertSchema(teachers).omit({ id: true });
 export const insertStudentSchema = createInsertSchema(students).omit({ id: true });
 export const insertExamSchema = createInsertSchema(exams).omit({ id: true });
 export const insertAnswerSheetSchema = createInsertSchema(answerSheets).omit({ id: true });
 export const insertEvaluationSchema = createInsertSchema(evaluations).omit({ id: true });
 export const insertNcertChapterSchema = createInsertSchema(ncertChapters).omit({ id: true });
+export const insertHomeworkSchema = createInsertSchema(homework).omit({ id: true, createdAt: true });
+export const insertHomeworkSubmissionSchema = createInsertSchema(homeworkSubmissions).omit({ id: true, submittedAt: true });
 
 export type Teacher = typeof teachers.$inferSelect;
 export type InsertTeacher = z.infer<typeof insertTeacherSchema>;
@@ -210,3 +252,8 @@ export type InsertMessage = typeof messages.$inferInsert;
 
 export type DeviationLog = typeof deviationLogs.$inferSelect;
 export type PerformanceProfile = typeof performanceProfiles.$inferSelect;
+
+export type Homework = typeof homework.$inferSelect;
+export type InsertHomework = z.infer<typeof insertHomeworkSchema>;
+export type HomeworkSubmission = typeof homeworkSubmissions.$inferSelect;
+export type InsertHomeworkSubmission = z.infer<typeof insertHomeworkSubmissionSchema>;

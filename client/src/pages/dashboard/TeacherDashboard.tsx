@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, X, Upload, MessageSquare, TrendingUp, Send, Star, Plus } from "lucide-react";
+import { Loader2, X, Upload, MessageSquare, TrendingUp, Send, Star, Plus, BookOpen, CheckCircle, Clock, Users, FileText } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -176,6 +176,19 @@ export default function TeacherDashboard() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const avaRef = useRef<HTMLDivElement>(null);
 
+  // Homework state
+  const [hwSubject, setHwSubject] = useState("");
+  const [hwClassName, setHwClassName] = useState("");
+  const [hwSection, setHwSection] = useState("");
+  const [hwInstruction, setHwInstruction] = useState("");
+  const [hwModelSolution, setHwModelSolution] = useState("");
+  const [hwDueDate, setHwDueDate] = useState("");
+  const [isCreatingHw, setIsCreatingHw] = useState(false);
+  const [expandedHwId, setExpandedHwId] = useState<number | null>(null);
+  const [hwAnalyticsQuery, setHwAnalyticsQuery] = useState("");
+  const [hwAnalyticsResult, setHwAnalyticsResult] = useState<string | null>(null);
+  const [isHwAnalyticsLoading, setIsHwAnalyticsLoading] = useState(false);
+
   const { data: examsList, isLoading: isLoadingExams } = useQuery<Exam[]>({
     queryKey: [api.exams.list.path],
     queryFn: async () => { const res = await fetchWithAuth(api.exams.list.path); return res.json(); },
@@ -214,6 +227,11 @@ export default function TeacherDashboard() {
   const { data: filterOptions } = useQuery<{ classes: string[]; subjects: string[] }>({
     queryKey: ["/api/analytics/filter-options"],
     queryFn: async () => { const res = await fetchWithAuth("/api/analytics/filter-options"); return res.json(); },
+  });
+
+  const { data: teacherHomework, refetch: refetchHomework, isLoading: isLoadingHomework } = useQuery<any[]>({
+    queryKey: ["/api/teacher/homework"],
+    queryFn: async () => { const res = await fetchWithAuth("/api/teacher/homework"); return res.json(); },
   });
 
   useEffect(() => {
@@ -301,6 +319,54 @@ export default function TeacherDashboard() {
       toast({ title: "Evaluation complete" });
     } catch { toast({ title: "Evaluation failed", variant: "destructive" }); }
     finally { setBulkEvaluatingId(null); }
+  };
+
+  const handleCreateHomework = async () => {
+    if (!hwSubject || !hwClassName || !hwSection || !hwInstruction || !hwDueDate) {
+      toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" });
+      return;
+    }
+    setIsCreatingHw(true);
+    try {
+      const res = await fetchWithAuth("/api/homework", {
+        method: "POST",
+        body: JSON.stringify({
+          subject: hwSubject,
+          className: hwClassName,
+          section: hwSection,
+          instruction: hwInstruction,
+          modelSolutionText: hwModelSolution || null,
+          dueDate: hwDueDate,
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setHwSubject(""); setHwClassName(""); setHwSection("");
+      setHwInstruction(""); setHwModelSolution(""); setHwDueDate("");
+      refetchHomework();
+      toast({ title: "Homework created", description: "Students in the assigned class will see it immediately." });
+    } catch (err: any) {
+      toast({ title: "Failed to create homework", description: err?.message || "Something went wrong.", variant: "destructive" });
+    } finally {
+      setIsCreatingHw(false);
+    }
+  };
+
+  const handleHwAnalyticsQuery = async () => {
+    if (!hwAnalyticsQuery.trim()) return;
+    setIsHwAnalyticsLoading(true);
+    setHwAnalyticsResult(null);
+    try {
+      const res = await fetchWithAuth("/api/teacher/homework-analytics", {
+        method: "POST",
+        body: JSON.stringify({ query: hwAnalyticsQuery }),
+      });
+      const data = await res.json();
+      setHwAnalyticsResult(data.answer || "No response from analytics.");
+    } catch {
+      setHwAnalyticsResult("Could not process query. Please try again.");
+    } finally {
+      setIsHwAnalyticsLoading(false);
+    }
   };
 
   const form = useForm({
@@ -432,24 +498,24 @@ export default function TeacherDashboard() {
             </svg>
             Overview
           </button>
-          <button className="sf-nav-tab" onClick={() => setActiveSection("exams")}>
+          <button className={`sf-nav-tab${activeSection === "homework" ? " on" : ""}`} onClick={() => setActiveSection("homework")} data-testid="tab-teacher-homework">
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>
             </svg>
             Homework
-            <span className="sf-nav-badge sf-nb-amber">{totalExams > 0 ? `${totalExams} active` : "—"}</span>
+            <span className="sf-nav-badge sf-nb-amber">{teacherHomework && teacherHomework.length > 0 ? `${teacherHomework.length} active` : "—"}</span>
           </button>
-          <button className="sf-nav-tab" onClick={() => setIsDialogOpen(true)}>
+          <button className={`sf-nav-tab${activeSection === "exams" ? " on" : ""}`} onClick={() => setActiveSection("exams")} data-testid="tab-teacher-exams">
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="4" width="18" height="18" rx="2"/>
               <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
               <line x1="3" y1="10" x2="21" y2="10"/>
             </svg>
-            Create Exam
-            <span className="sf-nav-badge sf-nb-new">New</span>
+            Exams
+            <span className="sf-nav-badge sf-nb-new">{totalExams > 0 ? `${totalExams}` : "—"}</span>
           </button>
-          <button className={`sf-nav-tab${activeSection === "sheets" ? " on" : ""}`} onClick={() => setActiveSection("sheets")}>
+          <button className={`sf-nav-tab${activeSection === "sheets" ? " on" : ""}`} onClick={() => setActiveSection("sheets")} data-testid="tab-teacher-analytics">
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
             </svg>
@@ -546,6 +612,13 @@ export default function TeacherDashboard() {
               <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
             </svg>
             Overview
+          </button>
+          <button className={`sf-stab${activeSection === "homework" ? " on" : ""}`} onClick={() => setActiveSection("homework")}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            Homework
           </button>
           <button className={`sf-stab${activeSection === "exams" ? " on" : ""}`} onClick={() => setActiveSection("exams")}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -786,6 +859,172 @@ export default function TeacherDashboard() {
               </div>
             </div>
           </>
+        )}
+
+        {/* ── HOMEWORK TAB ── */}
+        {activeSection === "homework" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {/* Create Homework Card */}
+            <div className="sf-card">
+              <div className="sf-card-title" style={{ marginBottom: 4 }}>Assign New Homework</div>
+              <div className="sf-card-sub" style={{ marginBottom: 16 }}>Students in the specified class and section will see this assignment immediately.</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
+                <div>
+                  <label className="sf-label">Subject *</label>
+                  <input className="sf-input" placeholder="e.g. Mathematics" value={hwSubject} onChange={e => setHwSubject(e.target.value)} data-testid="input-hw-subject" />
+                </div>
+                <div>
+                  <label className="sf-label">Class *</label>
+                  <input className="sf-input" placeholder="e.g. 10" value={hwClassName} onChange={e => setHwClassName(e.target.value)} data-testid="input-hw-class" />
+                </div>
+                <div>
+                  <label className="sf-label">Section *</label>
+                  <input className="sf-input" placeholder="e.g. A" value={hwSection} onChange={e => setHwSection(e.target.value)} data-testid="input-hw-section" />
+                </div>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label className="sf-label">Due Date *</label>
+                <input type="date" className="sf-input" value={hwDueDate} onChange={e => setHwDueDate(e.target.value)} data-testid="input-hw-duedate" />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label className="sf-label">Homework Instructions *</label>
+                <textarea className="sf-input" rows={3} placeholder="Describe the homework task clearly…" value={hwInstruction} onChange={e => setHwInstruction(e.target.value)} style={{ resize: "vertical" }} data-testid="input-hw-instruction" />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label className="sf-label">Model Solution / Answer Key <span style={{ color: "var(--mid)", fontWeight: 400 }}>(optional — used by AI grader)</span></label>
+                <textarea className="sf-input" rows={3} placeholder="Provide the ideal answer or key concepts to look for…" value={hwModelSolution} onChange={e => setHwModelSolution(e.target.value)} style={{ resize: "vertical" }} data-testid="input-hw-model-solution" />
+              </div>
+              <button className="sf-btn-primary" onClick={handleCreateHomework} disabled={isCreatingHw} data-testid="button-create-homework" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {isCreatingHw ? <><Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> Creating…</> : <><Plus style={{ width: 15, height: 15 }} /> Assign Homework</>}
+              </button>
+            </div>
+
+            {/* Homework List */}
+            <div className="sf-card">
+              <div className="sf-card-title" style={{ marginBottom: 4 }}>Your Homework Assignments</div>
+              <div className="sf-card-sub" style={{ marginBottom: 16 }}>Click any assignment to view student submissions and AI evaluations.</div>
+              {isLoadingHomework ? (
+                <div style={{ textAlign: "center", padding: 32 }}><div className="sf-spinner" /></div>
+              ) : !teacherHomework || teacherHomework.length === 0 ? (
+                <div className="sf-empty" style={{ padding: "32px 0" }}>
+                  <div className="sf-empty-icon">📚</div>
+                  No homework assigned yet. Use the form above to create your first assignment.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {teacherHomework.map((hw: any) => {
+                    const isExpanded = expandedHwId === hw.id;
+                    const submittedCount = hw.submissions?.length || 0;
+                    const dueDate = hw.dueDate ? new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—";
+                    return (
+                      <div key={hw.id} style={{ border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }} data-testid={`card-homework-${hw.id}`}>
+                        <div
+                          onClick={() => setExpandedHwId(isExpanded ? null : hw.id)}
+                          style={{ padding: "14px 18px", background: isExpanded ? "var(--lav-bg)" : "var(--white)", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}
+                        >
+                          <div style={{ width: 36, height: 36, borderRadius: 9, background: "linear-gradient(135deg, var(--lav), var(--lav2))", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <BookOpen style={{ width: 16, height: 16, color: "var(--ink)" }} />
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>{hw.subject}</div>
+                            <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>Class {hw.className}{hw.section} · Due {dueDate}</div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, background: "var(--cream)", borderRadius: 20, padding: "3px 10px", fontSize: 12, color: "var(--ink2)" }}>
+                              <Users style={{ width: 11, height: 11 }} /> {submittedCount} submitted
+                            </div>
+                            <div style={{ fontSize: 11, color: "var(--mid)" }}>{isExpanded ? "▲" : "▼"}</div>
+                          </div>
+                        </div>
+                        {isExpanded && (
+                          <div style={{ padding: "16px 18px", borderTop: "1px solid var(--border)", background: "var(--white)" }}>
+                            <div style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.6, marginBottom: hw.modelSolutionText ? 12 : 0 }}>
+                              <b>Instructions:</b> {hw.instruction}
+                            </div>
+                            {hw.modelSolutionText && (
+                              <div style={{ fontSize: 12.5, color: "var(--mid)", marginTop: 8, padding: "10px 13px", background: "var(--lav-bg)", borderRadius: 8, lineHeight: 1.6 }}>
+                                <b>Model Answer:</b> {hw.modelSolutionText}
+                              </div>
+                            )}
+                            {submittedCount === 0 ? (
+                              <div style={{ marginTop: 16, textAlign: "center", padding: "20px 0", color: "var(--mid)", fontSize: 13 }}>
+                                <Clock style={{ width: 20, height: 20, display: "block", margin: "0 auto 8px" }} />
+                                No submissions yet.
+                              </div>
+                            ) : (
+                              <div style={{ marginTop: 16 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink2)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>Student Submissions</div>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                  {hw.submissions.map((sub: any) => (
+                                    <div key={sub.id} style={{ padding: "10px 13px", background: "var(--cream)", borderRadius: 10, display: "flex", alignItems: "flex-start", gap: 12 }} data-testid={`submission-${sub.id}`}>
+                                      <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg, var(--lav), var(--lav2))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
+                                        {(sub.studentName || "S").charAt(0).toUpperCase()}
+                                      </div>
+                                      <div style={{ flex: 1 }}>
+                                        <div style={{ fontWeight: 600, fontSize: 13 }}>{sub.studentName || `Student #${sub.studentId}`}</div>
+                                        {sub.aiScore !== null && (
+                                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                                            <CheckCircle style={{ width: 12, height: 12, color: "#22c55e" }} />
+                                            <span style={{ fontSize: 12, color: "#22c55e", fontWeight: 600 }}>Score: {sub.aiScore}/10</span>
+                                            {sub.aiFeedback && <span style={{ fontSize: 11.5, color: "var(--mid)", marginLeft: 4 }}>— {sub.aiFeedback.slice(0, 80)}{sub.aiFeedback.length > 80 ? "…" : ""}</span>}
+                                          </div>
+                                        )}
+                                        {sub.aiScore === null && (
+                                          <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 3 }}>Awaiting evaluation</div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Homework Analytics Query */}
+            <div className="sf-card">
+              <div className="sf-card-title" style={{ marginBottom: 4 }}>
+                <MessageSquare style={{ width: 15, height: 15, display: "inline", marginRight: 6 }} />
+                Homework Analytics
+              </div>
+              <div className="sf-card-sub" style={{ marginBottom: 14 }}>Ask natural-language questions about homework completion, student performance, and trends.</div>
+              <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+                <input
+                  className="sf-input"
+                  style={{ flex: 1 }}
+                  placeholder='e.g. "Which students submitted all homework this week?"'
+                  value={hwAnalyticsQuery}
+                  onChange={e => setHwAnalyticsQuery(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleHwAnalyticsQuery()}
+                  data-testid="input-hw-analytics-query"
+                />
+                <button className="sf-btn-primary" onClick={handleHwAnalyticsQuery} disabled={isHwAnalyticsLoading} data-testid="button-hw-analytics-submit" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {isHwAnalyticsLoading ? <Loader2 className="animate-spin" style={{ width: 15, height: 15 }} /> : <Send style={{ width: 14, height: 14 }} />}
+                  Ask
+                </button>
+              </div>
+              {hwAnalyticsResult && (
+                <div style={{ padding: "14px 16px", background: "var(--lav-bg)", borderRadius: 10, fontSize: 13.5, lineHeight: 1.7, color: "var(--ink2)" }}>
+                  {hwAnalyticsResult}
+                </div>
+              )}
+              {!hwAnalyticsResult && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {["Which students have the best homework regularity?", "Show me students who haven't submitted the latest assignment", "What is the average score across all homework submissions?"].map(q => (
+                    <button key={q} onClick={() => { setHwAnalyticsQuery(q); }} style={{ textAlign: "left", padding: "8px 12px", background: "var(--cream)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12.5, color: "var(--ink2)", cursor: "pointer" }}>
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         )}
 
         {/* ── EXAMS TAB ── */}
