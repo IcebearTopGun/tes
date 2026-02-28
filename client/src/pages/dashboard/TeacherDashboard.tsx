@@ -15,7 +15,6 @@ import {
   MessageSquare,
   Send,
   Star,
-  ChevronDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -54,6 +53,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 import { fetchWithAuth } from "@/lib/fetcher";
 import { z } from "zod";
+import { AnalyticsSection } from "@/components/AnalyticsSection";
 
 interface OcrResult {
   sheetId: number;
@@ -438,6 +438,9 @@ export default function TeacherDashboard() {
             </motion.div>
           ))}
         </div>
+
+        {/* Analytics Charts */}
+        <AnalyticsSection />
 
         {/* Main Content Area */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

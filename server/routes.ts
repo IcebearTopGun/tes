@@ -357,6 +357,20 @@ export async function registerRoutes(
     }
   });
 
+  // ANALYTICS
+  app.get("/api/analytics", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    try {
+      const data = await storage.getAnalytics(req.user.id);
+      res.json(data);
+    } catch (err) {
+      console.error("Analytics Error:", err);
+      res.status(500).json({ message: "Failed to load analytics" });
+    }
+  });
+
   // CHAT ANALYTICS
   app.get("/api/chat/conversations", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
