@@ -13,7 +13,9 @@ import {
   Loader2,
   Upload,
   MessageSquare,
-  Send
+  Send,
+  Star,
+  ChevronDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -52,17 +54,33 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 import { fetchWithAuth } from "@/lib/fetcher";
 import { z } from "zod";
-import { ScrollArea } from "@/components/ui/spinner"; // Assuming ScrollArea might be missing, or use a div
+
+interface OcrResult {
+  sheetId: number;
+  examId: number;
+  admissionNumber: string;
+  studentName: string;
+  answers: Array<{ question_number: number; answer_text: string }>;
+}
+
+const EXAMPLE_QUESTIONS = [
+  "Which students need improvement?",
+  "Who scored highest in the last exam?",
+  "Give me a class performance summary.",
+  "What are the weakest areas across all students?",
+];
 
 export default function TeacherDashboard() {
   const { data, isLoading, error } = useTeacherDashboard();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [processingId, setProcessingId] = useState<number | null>(null);
+  const [evaluatingId, setEvaluatingId] = useState<number | null>(null);
   const [chatMessage, setChatMessage] = useState("");
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  const [ocrResult, setOcrResult] = useState<OcrResult | null>(null);
+  const [isOcrDialogOpen, setIsOcrDialogOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const { data: conversations } = useQuery<any[]>({
@@ -85,22 +103,35 @@ export default function TeacherDashboard() {
 
   const startConversation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/chat/conversations", { title: "New Analysis" });
-      return res;
+      const res = await fetchWithAuth("/api/chat/conversations", {
+        method: "POST",
+        body: JSON.stringify({ title: "New Analysis" }),
+      });
+      return res.json();
     },
     onSuccess: (data) => {
       setActiveConversationId(data.id);
       queryClient.invalidateQueries({ queryKey: ["/api/chat/conversations"] });
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Could not start conversation.", variant: "destructive" });
     }
   });
 
   const sendMessage = useMutation({
     mutationFn: async (content: string) => {
-      return apiRequest("POST", `/api/chat/conversations/${activeConversationId}/messages`, { content });
+      const res = await fetchWithAuth(`/api/chat/conversations/${activeConversationId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      });
+      return res.json();
     },
     onSuccess: () => {
       setChatMessage("");
       refetchMessages();
+    },
+    onError: () => {
+      toast({ title: "Error", description: "Failed to send message.", variant: "destructive" });
     }
   });
 
@@ -119,15 +150,42 @@ export default function TeacherDashboard() {
     reader.onloadend = async () => {
       try {
         const base64 = reader.result as string;
-        await apiRequest("POST", buildUrl(api.exams.processAnswerSheet.path, { id: examId }), { imageBase64: base64 });
-        toast({ title: "Success", description: "Answer sheet processed and mapped to student" });
+        const res = await fetchWithAuth(buildUrl(api.exams.processAnswerSheet.path, { id: examId }), {
+          method: "POST",
+          body: JSON.stringify({ imageBase64: base64 }),
+        });
+        const result = await res.json();
+        setOcrResult({ ...result, sheetId: result.id, examId });
+        setIsOcrDialogOpen(true);
+        toast({ title: "OCR Complete", description: `Mapped to: ${result.studentName} (${result.admissionNumber})` });
       } catch (err) {
         toast({ title: "Error", description: "Failed to process answer sheet", variant: "destructive" });
       } finally {
         setProcessingId(null);
+        e.target.value = "";
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleEvaluate = async (sheetId: number) => {
+    setEvaluatingId(sheetId);
+    try {
+      const res = await fetchWithAuth(buildUrl(api.exams.evaluate.path, { id: sheetId }), {
+        method: "POST",
+      });
+      const result = await res.json();
+      toast({ 
+        title: "Evaluation Complete", 
+        description: `${result.studentName} scored ${result.totalMarks} marks.` 
+      });
+      setIsOcrDialogOpen(false);
+      setOcrResult(null);
+    } catch (err) {
+      toast({ title: "Error", description: "Failed to evaluate answer sheet", variant: "destructive" });
+    } finally {
+      setEvaluatingId(null);
+    }
   };
 
   const { data: examsList, isLoading: isLoadingExams } = useQuery<Exam[]>({
@@ -303,18 +361,40 @@ export default function TeacherDashboard() {
                   />
                   
                   <div className="space-y-3">
-                    <FormLabel className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Uploads (Simulation)</FormLabel>
-                    <div className="grid grid-cols-1 gap-2">
-                      <Button variant="outline" type="button" className="justify-start gap-2 rounded-xl text-xs h-9 border-dashed">
-                        <Upload className="h-3 w-3" /> Question Paper (PDF)
-                      </Button>
-                      <Button variant="outline" type="button" className="justify-start gap-2 rounded-xl text-xs h-9 border-dashed">
-                        <Upload className="h-3 w-3" /> Model Answer
-                      </Button>
-                      <Button variant="outline" type="button" className="justify-start gap-2 rounded-xl text-xs h-9 border-dashed">
-                        <Upload className="h-3 w-3" /> Marking Scheme
-                      </Button>
-                    </div>
+                    <FormLabel className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Uploads (Optional URLs)</FormLabel>
+                    <FormField
+                      control={form.control}
+                      name="questionPaperUrl"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <Input placeholder="Question Paper URL" {...field} className="rounded-xl text-xs" />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="modelAnswerUrl"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <Input placeholder="Model Answer URL" {...field} className="rounded-xl text-xs" />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="markingSchemeUrl"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <Input placeholder="Marking Scheme URL" {...field} className="rounded-xl text-xs" />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
                   </div>
 
                   <Button 
@@ -380,39 +460,17 @@ export default function TeacherDashboard() {
                       <TableHead className="font-bold">Class</TableHead>
                       <TableHead className="font-bold">Subject</TableHead>
                       <TableHead className="font-bold">Marks</TableHead>
+                      <TableHead className="font-bold text-right">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {examsList.map((exam) => (
-                      <TableRow key={exam.id} className="border-border/40 hover:bg-muted/20 transition-colors">
-                        <TableCell className="font-semibold">{exam.examName}</TableCell>
-                        <TableCell>{exam.className}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="rounded-lg font-semibold border-primary/20 text-primary">
-                            {exam.subject}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-medium text-muted-foreground">{exam.totalMarks}</TableCell>
-                        <TableCell className="text-right">
-                          <input 
-                            type="file" 
-                            className="hidden" 
-                            ref={fileInputRef} 
-                            accept="image/*,application/pdf"
-                            onChange={(e) => handleFileUpload(exam.id, e)}
-                          />
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="rounded-lg gap-2"
-                            disabled={processingId === exam.id}
-                            onClick={() => fileInputRef.current?.click()}
-                          >
-                            {processingId === exam.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-                            Upload Sheet
-                          </Button>
-                        </TableCell>
-                      </TableRow>
+                      <ExamRow
+                        key={exam.id}
+                        exam={exam}
+                        processingId={processingId}
+                        onUpload={handleFileUpload}
+                      />
                     ))}
                   </TableBody>
                 </Table>
@@ -435,8 +493,12 @@ export default function TeacherDashboard() {
                 <p className="text-primary-foreground/80 text-sm leading-relaxed">
                   Class average performance has increased by 4% compared to the last assessment. Keep focusing on Chapter 4 review.
                 </p>
-                <Button variant="secondary" className="w-full mt-4 rounded-xl font-bold bg-white/20 hover:bg-white/30 text-white border-none shadow-none">
-                  Detailed Report
+                <Button 
+                  variant="secondary" 
+                  className="w-full mt-4 rounded-xl font-bold bg-white/20 hover:bg-white/30 text-white border-none shadow-none"
+                  onClick={() => setIsChatOpen(true)}
+                >
+                  Ask AI Analyst
                 </Button>
               </CardContent>
             </Card>
@@ -459,6 +521,66 @@ export default function TeacherDashboard() {
         </div>
       </div>
 
+      {/* OCR Result Dialog */}
+      <Dialog open={isOcrDialogOpen} onOpenChange={setIsOcrDialogOpen}>
+        <DialogContent className="sm:max-w-[560px] rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle className="h-5 w-5 text-emerald-600" /> OCR Result
+            </DialogTitle>
+          </DialogHeader>
+          {ocrResult && (
+            <div className="space-y-4 pt-2">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 bg-muted/30 rounded-xl">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-bold">Student</p>
+                  <p className="font-semibold mt-1">{ocrResult.studentName}</p>
+                </div>
+                <div className="p-3 bg-muted/30 rounded-xl">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-bold">Admission No.</p>
+                  <p className="font-semibold mt-1">{ocrResult.admissionNumber}</p>
+                </div>
+              </div>
+              <div className="border border-border/40 rounded-xl overflow-hidden">
+                <div className="bg-muted/30 px-4 py-2 flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Extracted Answers ({ocrResult.answers?.length || 0})
+                  </span>
+                </div>
+                <div className="divide-y divide-border/30 max-h-48 overflow-y-auto">
+                  {ocrResult.answers?.map((ans) => (
+                    <div key={ans.question_number} className="px-4 py-2 flex gap-4 text-sm">
+                      <span className="font-bold text-primary shrink-0">Q{ans.question_number}</span>
+                      <span className="text-muted-foreground line-clamp-2">{ans.answer_text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 rounded-xl"
+                  onClick={() => { setIsOcrDialogOpen(false); setOcrResult(null); }}
+                >
+                  Close
+                </Button>
+                <Button
+                  className="flex-1 rounded-xl gap-2"
+                  disabled={evaluatingId === ocrResult.sheetId}
+                  onClick={() => handleEvaluate(ocrResult.sheetId)}
+                >
+                  {evaluatingId === ocrResult.sheetId ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" /> Evaluating...</>
+                  ) : (
+                    <><Star className="h-4 w-4" /> Evaluate with AI</>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* AI Chat Sidebar */}
       <AnimatePresence>
         {isChatOpen && (
@@ -475,41 +597,106 @@ export default function TeacherDashboard() {
               animate={{ x: 0 }}
               exit={{ x: "100%" }}
               transition={{ type: "spring", damping: 20 }}
-              className="fixed right-0 top-0 h-screen w-full sm:w-[400px] bg-background border-l z-50 flex flex-col shadow-2xl"
+              className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-background border-l z-50 flex flex-col shadow-2xl"
             >
-              <div className="p-4 border-b flex items-center justify-between bg-primary text-primary-foreground">
+              {/* Header */}
+              <div className="p-4 border-b flex items-center justify-between bg-primary text-primary-foreground shrink-0">
                 <div className="flex items-center gap-2">
                   <MessageSquare className="h-5 w-5" />
-                  <h2 className="font-bold">AI Performance Analyst</h2>
+                  <div>
+                    <h2 className="font-bold leading-tight">AI Performance Analyst</h2>
+                    <p className="text-xs text-primary-foreground/70">RAG-powered analytics</p>
+                  </div>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)} className="text-primary-foreground hover:bg-white/10">
+                <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)} className="text-primary-foreground hover:bg-white/10 rounded-xl">
                   <Plus className="h-5 w-5 rotate-45" />
                 </Button>
               </div>
 
-              <div className="flex-1 overflow-hidden flex flex-col">
+              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
                 {!activeConversationId ? (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6">
                     <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center">
                       <TrendingUp className="h-8 w-8 text-primary" />
                     </div>
                     <div>
                       <h3 className="font-bold text-lg">Analyze Class Performance</h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        Ask questions about student progress, weak areas, and performance trends.
+                      <p className="text-sm text-muted-foreground mt-2 max-w-xs">
+                        Ask any question about student progress, weak areas, or performance trends. The AI only uses your real evaluation data.
                       </p>
                     </div>
-                    <Button onClick={() => startConversation.mutate()} disabled={startConversation.isPending}>
+
+                    <div className="w-full space-y-2">
+                      <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider text-left">Example questions</p>
+                      {EXAMPLE_QUESTIONS.map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => {
+                            startConversation.mutate(undefined, {
+                              onSuccess: () => {
+                                setTimeout(() => setChatMessage(q), 300);
+                              }
+                            });
+                          }}
+                          className="w-full text-left text-sm px-3 py-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary border border-border/40 hover:border-primary/20 transition-all"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
+
+                    <Button 
+                      onClick={() => startConversation.mutate()} 
+                      disabled={startConversation.isPending}
+                      className="rounded-xl w-full"
+                    >
                       {startConversation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
                       Start New Analysis
                     </Button>
                   </div>
                 ) : (
                   <>
-                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {/* Conversation history selector */}
+                    {conversations && conversations.length > 1 && (
+                      <div className="px-4 py-2 border-b bg-muted/20">
+                        <select
+                          className="w-full text-xs bg-transparent text-muted-foreground outline-none cursor-pointer"
+                          value={activeConversationId}
+                          onChange={(e) => setActiveConversationId(Number(e.target.value))}
+                        >
+                          {conversations.map((c: any) => (
+                            <option key={c.id} value={c.id}>{c.title}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
+                      {(!messages || messages.length === 0) && (
+                        <div className="text-center py-8 text-muted-foreground text-sm">
+                          <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                          <p>Ask a question to get started</p>
+                          <div className="mt-4 space-y-2">
+                            {EXAMPLE_QUESTIONS.slice(0, 2).map((q) => (
+                              <button
+                                key={q}
+                                onClick={() => { setChatMessage(q); }}
+                                className="w-full text-left text-xs px-3 py-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary border border-border/40 transition-all"
+                              >
+                                {q}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {messages?.map((msg) => (
                         <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${
+                          {msg.role === 'assistant' && (
+                            <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mr-2 mt-1">
+                              <TrendingUp className="h-3 w-3 text-primary" />
+                            </div>
+                          )}
+                          <div className={`max-w-[82%] p-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
                             msg.role === 'user' 
                               ? 'bg-primary text-primary-foreground rounded-tr-none' 
                               : 'bg-muted rounded-tl-none'
@@ -519,14 +706,29 @@ export default function TeacherDashboard() {
                         </div>
                       ))}
                       {sendMessage.isPending && (
-                        <div className="flex justify-start">
-                          <div className="bg-muted p-3 rounded-2xl rounded-tl-none">
+                        <div className="flex justify-start items-center gap-2">
+                          <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                            <TrendingUp className="h-3 w-3 text-primary" />
+                          </div>
+                          <div className="bg-muted p-3 rounded-2xl rounded-tl-none flex items-center gap-2">
                             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">Analyzing data...</span>
                           </div>
                         </div>
                       )}
                     </div>
-                    <div className="p-4 border-t bg-muted/30">
+
+                    <div className="p-4 border-t bg-muted/30 shrink-0">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-muted-foreground h-7 rounded-lg"
+                          onClick={() => setActiveConversationId(null)}
+                        >
+                          <Plus className="h-3 w-3 mr-1" /> New
+                        </Button>
+                      </div>
                       <form 
                         onSubmit={(e) => {
                           e.preventDefault();
@@ -535,12 +737,18 @@ export default function TeacherDashboard() {
                         className="flex gap-2"
                       >
                         <Input 
-                          placeholder="Ask about John's performance..." 
+                          placeholder="Ask about student performance..." 
                           value={chatMessage}
                           onChange={(e) => setChatMessage(e.target.value)}
                           className="rounded-xl bg-background"
+                          disabled={sendMessage.isPending}
                         />
-                        <Button type="submit" size="icon" className="rounded-xl shrink-0" disabled={sendMessage.isPending || !chatMessage.trim()}>
+                        <Button 
+                          type="submit" 
+                          size="icon" 
+                          className="rounded-xl shrink-0" 
+                          disabled={sendMessage.isPending || !chatMessage.trim()}
+                        >
                           <Send className="h-4 w-4" />
                         </Button>
                       </form>
@@ -555,13 +763,65 @@ export default function TeacherDashboard() {
 
       {/* Floating Chat Button */}
       {!isChatOpen && (
-        <Button 
-          onClick={() => setIsChatOpen(true)}
-          className="fixed bottom-6 right-6 h-14 w-14 rounded-full shadow-2xl z-40 hover:scale-110 transition-transform"
+        <motion.div
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          className="fixed bottom-6 right-6 z-40"
         >
-          <MessageSquare className="h-6 w-6" />
-        </Button>
+          <Button 
+            onClick={() => setIsChatOpen(true)}
+            className="h-14 w-14 rounded-full shadow-2xl hover:scale-110 transition-transform"
+          >
+            <MessageSquare className="h-6 w-6" />
+          </Button>
+        </motion.div>
       )}
     </DashboardLayout>
+  );
+}
+
+function ExamRow({ 
+  exam, 
+  processingId, 
+  onUpload 
+}: { 
+  exam: Exam; 
+  processingId: number | null; 
+  onUpload: (examId: number, e: React.ChangeEvent<HTMLInputElement>) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <TableRow className="border-border/40 hover:bg-muted/20 transition-colors">
+      <TableCell className="font-semibold">{exam.examName}</TableCell>
+      <TableCell>{exam.className}</TableCell>
+      <TableCell>
+        <Badge variant="outline" className="rounded-lg font-semibold border-primary/20 text-primary">
+          {exam.subject}
+        </Badge>
+      </TableCell>
+      <TableCell className="font-medium text-muted-foreground">{exam.totalMarks}</TableCell>
+      <TableCell className="text-right">
+        <input 
+          type="file" 
+          className="hidden" 
+          ref={fileInputRef} 
+          accept="image/*,application/pdf"
+          onChange={(e) => onUpload(exam.id, e)}
+        />
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          className="rounded-lg gap-2"
+          disabled={processingId === exam.id}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          {processingId === exam.id 
+            ? <><Loader2 className="h-3 w-3 animate-spin" /> Processing...</> 
+            : <><Upload className="h-3 w-3" /> Upload Sheet</>
+          }
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }

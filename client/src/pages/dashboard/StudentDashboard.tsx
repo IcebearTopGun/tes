@@ -13,6 +13,7 @@ import {
 import { motion } from "framer-motion";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 export default function StudentDashboard() {
   const { data, isLoading, error } = useStudentDashboard();
