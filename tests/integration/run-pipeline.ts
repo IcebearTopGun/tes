@@ -3,7 +3,7 @@
  * Tests the full pipeline: OCR extraction → Evaluation → DB storage → Chat
  *
  * Run with:  npx tsx tests/integration/run-pipeline.ts
- * Requires:  Server running at http://localhost:5009
+ * Requires:  Server running at http://localhost:5000
  */
 
 import { generateAnswerSheet } from "./generate-sheet";

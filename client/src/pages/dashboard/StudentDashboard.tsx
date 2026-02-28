@@ -4,11 +4,11 @@ import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, X, Plus, Send, TrendingUp, MessageSquare, BookOpen, Upload, CheckCircle, Clock, AlertCircle } from "lucide-react";
+import { Loader2, X, Plus, Send, TrendingUp, MessageSquare, BookOpen } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
 
@@ -106,55 +106,6 @@ export default function StudentDashboard() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: homeworkList, isLoading: isHomeworkLoading, refetch: refetchHomework } = useQuery<any[]>({
-    queryKey: ["/api/student/homework"],
-    queryFn: () => fetchWithAuth("/api/student/homework"),
-    staleTime: 2 * 60 * 1000,
-  });
-
-  const { data: regularityData } = useQuery<{ assigned: number; submitted: number; score: number; rating: string }>({
-    queryKey: ["/api/student/homework-regularity"],
-    queryFn: () => fetchWithAuth("/api/student/homework-regularity"),
-    staleTime: 2 * 60 * 1000,
-  });
-
-  const [uploadingHomeworkId, setUploadingHomeworkId] = useState<number | null>(null);
-  const hwInputRef = useRef<{ [key: number]: HTMLInputElement | null }>({});
-
-  const submitHomework = useMutation({
-    mutationFn: async ({ id, imageBase64 }: { id: number; imageBase64: string }) =>
-      fetchWithAuth(`/api/student/homework/${id}/submit`, { method: "POST", body: JSON.stringify({ imageBase64 }) }),
-    onSuccess: () => {
-      refetchHomework();
-      queryClient.invalidateQueries({ queryKey: ["/api/student/homework-regularity"] });
-      toast({ title: "Homework submitted", description: "Your homework was submitted and is being evaluated." });
-    },
-    onError: () => toast({ title: "Upload failed", description: "Could not submit homework. Please try again.", variant: "destructive" }),
-  });
-
-  const handleHomeworkFileUpload = useCallback(async (hwId: number, file: File) => {
-    if (!file.type.startsWith("image/") && file.type !== "application/pdf") {
-      toast({ title: "Invalid file", description: "Please upload an image file.", variant: "destructive" });
-      return;
-    }
-    setUploadingHomeworkId(hwId);
-    try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const imageBase64 = reader.result as string;
-        await submitHomework.mutateAsync({ id: hwId, imageBase64 });
-        setUploadingHomeworkId(null);
-      };
-      reader.onerror = () => {
-        toast({ title: "Read error", description: "Could not read file.", variant: "destructive" });
-        setUploadingHomeworkId(null);
-      };
-      reader.readAsDataURL(file);
-    } catch {
-      setUploadingHomeworkId(null);
-    }
-  }, [submitHomework, toast]);
-
   const startConversation = useMutation({
     mutationFn: () => fetchWithAuth("/api/student/chat/conversations", { method: "POST", body: JSON.stringify({ title: "Academic Chat" }) }),
     onSuccess: (d) => { setActiveConversationId(d.id); queryClient.invalidateQueries({ queryKey: ["/api/student/chat/conversations"] }); },
@@ -199,8 +150,6 @@ export default function StudentDashboard() {
   const avgScore = marksOverview.length > 0
     ? Math.round(marksOverview.reduce((sum: number, m: any) => sum + (m.score / m.total) * 100, 0) / marksOverview.length)
     : 0;
-
-  const pendingHomeworkCount = (homeworkList || []).filter((hw: any) => hw.status === "pending").length;
 
   const classRank = 3;
   const classTotal = 32;
@@ -283,22 +232,36 @@ export default function StudentDashboard() {
         </div>
 
         <div className="sf-nav-tabs">
-          <button className={`sf-nav-tab${activeTab === "overview" ? " on" : ""}`} onClick={() => setActiveTab("overview")} data-testid="tab-overview">
+          <button className={`sf-nav-tab${activeTab === "overview" ? " on" : ""}`} onClick={() => setActiveTab("overview")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
               <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
             </svg>
             Overview
           </button>
-          <button className={`sf-nav-tab${activeTab === "homework" ? " on" : ""}`} onClick={() => setActiveTab("homework")} data-testid="tab-homework">
+          <button className={`sf-nav-tab${activeTab === "analytics" ? " on" : ""}`} onClick={() => setActiveTab("analytics")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
+            </svg>
+            Analytics
+          </button>
+          <button className="sf-nav-tab">
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
             </svg>
             Homework
-            {pendingHomeworkCount > 0 && <span className="sf-nav-badge sf-nb-amber">{pendingHomeworkCount} due</span>}
+            <span className="sf-nav-badge sf-nb-amber">2 due</span>
           </button>
-          <button className="sf-nav-tab" onClick={() => setIsChatOpen(true)} data-testid="tab-ai-coach">
+          <button className="sf-nav-tab">
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+            Community
+          </button>
+          <button className="sf-nav-tab" onClick={() => setIsChatOpen(true)}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
             </svg>
@@ -369,17 +332,11 @@ export default function StudentDashboard() {
             <div className="sf-f-delta sf-d-flat">✓ Evaluated</div>
             <div className="sf-f-desc">{examsCount || 1} exam{examsCount !== 1 ? "s" : ""} graded by AI this term.</div>
           </div>
-          <div className="sf-f-col" style={{ cursor: "pointer" }} onClick={() => setActiveTab("homework")}>
+          <div className="sf-f-col">
             <div className="sf-f-cat">Homework</div>
-            <div className="sf-f-num">{regularityData ? `${regularityData.score}%` : "—"}</div>
-            <div className={`sf-f-delta ${regularityData?.rating === "Regular" ? "sf-d-up" : regularityData?.rating === "Moderate" ? "sf-d-flat" : "sf-d-dn"}`}>
-              {regularityData ? `${regularityData.submitted} of ${regularityData.assigned} done` : "Loading…"}
-            </div>
-            <div className="sf-f-desc">
-              {regularityData
-                ? <><b>{regularityData.rating}</b> — {pendingHomeworkCount > 0 ? `${pendingHomeworkCount} task${pendingHomeworkCount !== 1 ? "s" : ""} pending` : "All up to date"}</>
-                : "Click Homework tab to view tasks."}
-            </div>
+            <div className="sf-f-num">60%</div>
+            <div className="sf-f-delta sf-d-up">↑ 3 of 5 done</div>
+            <div className="sf-f-desc"><b>2 tasks pending</b> — due today and Sunday.</div>
           </div>
           <div className="sf-f-col">
             <div className="sf-f-cat">Focus Areas</div>
@@ -389,145 +346,6 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        {/* HOMEWORK TAB */}
-        {activeTab === "homework" && (
-          <div className="sf-panel" style={{ marginTop: 20 }}>
-            <div className="sf-panel-title">My Homework</div>
-            <div className="sf-panel-sub">Auto-synced daily from your class &amp; section</div>
-
-            {/* Regularity Score Card */}
-            {regularityData && (
-              <div style={{ display: "flex", gap: 16, marginBottom: 24, padding: "16px 20px", background: "var(--lav-bg)", borderRadius: 14, border: "1px solid var(--border)" }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--dim)", marginBottom: 4 }}>Homework Regularity Score</div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: "var(--ink)", fontFamily: "Fraunces, serif" }}>{regularityData.score}%</div>
-                  <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>{regularityData.submitted} of {regularityData.assigned} submitted</div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{
-                    padding: "6px 16px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-                    background: regularityData.rating === "Regular" ? "var(--green-bg)" : regularityData.rating === "Moderate" ? "var(--amber-bg)" : "var(--red-bg)",
-                    color: regularityData.rating === "Regular" ? "var(--green)" : regularityData.rating === "Moderate" ? "var(--amber)" : "var(--red)",
-                    border: `1px solid ${regularityData.rating === "Regular" ? "rgba(42,157,110,.3)" : regularityData.rating === "Moderate" ? "rgba(196,122,30,.3)" : "rgba(212,65,126,.3)"}`,
-                  }} data-testid="text-regularity-rating">
-                    {regularityData.rating === "Regular" ? "✓ Regular" : regularityData.rating === "Moderate" ? "~ Moderate" : "↓ Irregular"}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {isHomeworkLoading ? (
-              <div style={{ textAlign: "center", padding: "32px 0" }}><div className="sf-spinner" /></div>
-            ) : !homeworkList || homeworkList.length === 0 ? (
-              <div className="sf-empty">
-                <div className="sf-empty-icon">📚</div>
-                No homework assigned yet. Homework assigned by your teacher will appear here automatically.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                {homeworkList.map((hw: any) => {
-                  const isPending = hw.status === "pending";
-                  const isCompleted = hw.status === "completed";
-                  const isNeedsImprovement = hw.status === "needs_improvement";
-                  const isUploading = uploadingHomeworkId === hw.id;
-                  const isDueToday = hw.dueDate === new Date().toISOString().split("T")[0];
-                  const isPastDue = hw.dueDate < new Date().toISOString().split("T")[0];
-
-                  return (
-                    <div key={hw.id} style={{
-                      border: "1px solid var(--border)", borderRadius: 14, overflow: "hidden",
-                      boxShadow: isPending ? "0 2px 8px rgba(0,0,0,0.04)" : "none",
-                    }} data-testid={`card-homework-${hw.id}`}>
-                      <div style={{ padding: "16px 20px", background: "var(--white)" }}>
-                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                              <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--blue)", background: "var(--blue-bg)", padding: "2px 8px", borderRadius: 8 }}>{hw.subject}</span>
-                              <span style={{ fontSize: 10, color: "var(--dim)" }}>{hw.className}-{hw.section}</span>
-                            </div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", lineHeight: 1.5, marginBottom: 6 }}>{hw.instruction}</div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11, color: "var(--dim)" }}>
-                              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                                <Clock style={{ width: 11, height: 11 }} />
-                                Due: {hw.dueDate}
-                                {isDueToday && <span style={{ color: "var(--amber)", fontWeight: 700 }}> · Today!</span>}
-                                {isPastDue && isPending && <span style={{ color: "var(--red)", fontWeight: 700 }}> · Overdue</span>}
-                              </span>
-                            </div>
-                          </div>
-                          <div style={{ flexShrink: 0 }}>
-                            {isCompleted && (
-                              <div style={{ textAlign: "center" }}>
-                                <CheckCircle style={{ width: 20, height: 20, color: "var(--green)" }} />
-                                {hw.score !== null && <div style={{ fontSize: 10, color: "var(--green)", fontWeight: 700, marginTop: 2 }}>{hw.score}/100</div>}
-                              </div>
-                            )}
-                            {isNeedsImprovement && (
-                              <div style={{ textAlign: "center" }}>
-                                <AlertCircle style={{ width: 20, height: 20, color: "var(--amber)" }} />
-                                {hw.score !== null && <div style={{ fontSize: 10, color: "var(--amber)", fontWeight: 700, marginTop: 2 }}>{hw.score}/100</div>}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Status / Upload */}
-                        {isPending ? (
-                          <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
-                            <input
-                              ref={el => { hwInputRef.current[hw.id] = el; }}
-                              type="file"
-                              accept="image/*"
-                              style={{ display: "none" }}
-                              onChange={e => {
-                                const file = e.target.files?.[0];
-                                if (file) handleHomeworkFileUpload(hw.id, file);
-                                e.target.value = "";
-                              }}
-                              data-testid={`input-hw-upload-${hw.id}`}
-                            />
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="rounded-xl gap-2 w-full"
-                              disabled={isUploading}
-                              onClick={() => hwInputRef.current[hw.id]?.click()}
-                              data-testid={`button-hw-submit-${hw.id}`}
-                            >
-                              {isUploading ? (
-                                <><Loader2 className="h-3 w-3 animate-spin" /> Uploading & evaluating…</>
-                              ) : (
-                                <><Upload style={{ width: 13, height: 13 }} /> Upload Handwritten Homework</>
-                              )}
-                            </Button>
-                          </div>
-                        ) : (
-                          <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{
-                              fontSize: 11, fontWeight: 700, padding: "3px 12px", borderRadius: 20,
-                              background: isCompleted ? "var(--green-bg)" : "var(--amber-bg)",
-                              color: isCompleted ? "var(--green)" : "var(--amber)",
-                              border: `1px solid ${isCompleted ? "rgba(42,157,110,.3)" : "rgba(196,122,30,.3)"}`,
-                            }}>
-                              {isCompleted ? "✓ Completed" : "⚠ Needs Improvement"}
-                            </span>
-                            {hw.submission?.submittedAt && (
-                              <span style={{ fontSize: 11, color: "var(--dim)" }}>
-                                Submitted {new Date(hw.submission.submittedAt).toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === "overview" && <>
         {/* RANKING CARD */}
         <div className="sf-rank-card">
           <span className="sf-rank-trophy">🏆</span>
@@ -800,7 +618,6 @@ export default function StudentDashboard() {
             </motion.div>
           )}
         </AnimatePresence>
-        </>}
       </div>
 
       {/* AI CHAT SIDEBAR */}

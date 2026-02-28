@@ -12,6 +12,7 @@ import Home from "./pages/Home";
 import AuthPage from "./pages/auth/AuthPage";
 import TeacherDashboard from "./pages/dashboard/TeacherDashboard";
 import StudentDashboard from "./pages/dashboard/StudentDashboard";
+import NcertChapters from "./pages/NcertChapters";
 import NotFound from "./pages/not-found";
 
 /**
@@ -70,6 +71,10 @@ function Router() {
       <Route path="/student-dashboard">
         {() => <ProtectedRoute component={StudentDashboard} allowedRole="student" />}
       </Route>
+      <Route path="/ncert-chapters">
+        {() => <ProtectedRoute component={NcertChapters} allowedRole="teacher" />}
+      </Route>
+
       <Route component={NotFound} />
     </Switch>
   );
