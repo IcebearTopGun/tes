@@ -65,7 +65,8 @@ export const evaluationsRelations = relations(evaluations, ({ one }) => ({
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
-  teacherId: integer("teacher_id").notNull().references(() => teachers.id),
+  teacherId: integer("teacher_id").references(() => teachers.id),
+  studentId: integer("student_id").references(() => students.id),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

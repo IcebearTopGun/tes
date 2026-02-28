@@ -24,10 +24,12 @@ export interface IStorage {
   getExam(id: number): Promise<Exam | undefined>;
   createEvaluation(evaluation: any): Promise<any>;
   getEvaluationByAnswerSheetId(answerSheetId: number): Promise<any>;
+  getEvaluationsByStudent(admissionNumber: string): Promise<any[]>;
   
   // Chat
-  createConversation(title: string, teacherId: number): Promise<any>;
+  createConversation(title: string, ownerId: number, role: "teacher" | "student"): Promise<any>;
   getConversationsByTeacher(teacherId: number): Promise<any[]>;
+  getConversationsByStudent(studentId: number): Promise<any[]>;
   getMessagesByConversation(conversationId: number): Promise<any[]>;
   createMessage(message: any): Promise<any>;
   getEvaluationsByTeacher(teacherId: number): Promise<any[]>;
@@ -106,13 +108,35 @@ export class DatabaseStorage implements IStorage {
     return evaluation;
   }
 
-  async createConversation(title: string, teacherId: number): Promise<any> {
-    const [created] = await db.insert(conversations).values({ title, teacherId }).returning();
+  async getEvaluationsByStudent(admissionNumber: string): Promise<any[]> {
+    return await db.select({
+      subject: exams.subject,
+      examName: exams.examName,
+      totalMarks: evaluations.totalMarks,
+      maxMarks: exams.totalMarks,
+      overallFeedback: evaluations.overallFeedback,
+      questions: evaluations.questions,
+    })
+    .from(evaluations)
+    .innerJoin(answerSheets, eq(evaluations.answerSheetId, answerSheets.id))
+    .innerJoin(exams, eq(answerSheets.examId, exams.id))
+    .where(eq(answerSheets.admissionNumber, admissionNumber));
+  }
+
+  async createConversation(title: string, ownerId: number, role: "teacher" | "student"): Promise<any> {
+    const values = role === "teacher"
+      ? { title, teacherId: ownerId }
+      : { title, studentId: ownerId };
+    const [created] = await db.insert(conversations).values(values).returning();
     return created;
   }
 
   async getConversationsByTeacher(teacherId: number): Promise<any[]> {
     return await db.select().from(conversations).where(eq(conversations.teacherId, teacherId));
+  }
+
+  async getConversationsByStudent(studentId: number): Promise<any[]> {
+    return await db.select().from(conversations).where(eq(conversations.studentId, studentId));
   }
 
   async getMessagesByConversation(conversationId: number): Promise<any[]> {

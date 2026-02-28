@@ -240,19 +240,57 @@ export async function registerRoutes(
     if (req.user?.role !== "student") {
       return res.status(401).json({ message: "Unauthorized" });
     }
-    res.json({ 
-      assignments: 3, 
+    const student = await storage.getStudent(req.user.id);
+    if (!student) return res.status(404).json({ message: "Student not found" });
+
+    const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
+
+    // Build marks overview per subject (latest eval per subject wins)
+    const subjectMap = new Map<string, { score: number; total: number; exam: string }>();
+    for (const e of evals) {
+      subjectMap.set(e.subject, { score: e.totalMarks, total: e.maxMarks, exam: e.examName });
+    }
+    const marksOverview = Array.from(subjectMap.entries()).map(([subject, d]) => ({
+      subject,
+      score: d.score,
+      total: d.total,
+    }));
+
+    // Improvement areas from questions JSON across all evals
+    const improvementAreas: string[] = [];
+    for (const e of evals) {
+      try {
+        const qs = JSON.parse(e.questions);
+        for (const q of qs) {
+          if (q.improvement_suggestion && improvementAreas.length < 4) {
+            improvementAreas.push(q.improvement_suggestion);
+          }
+        }
+      } catch {}
+    }
+
+    // Feedback from overall feedback per exam
+    const feedback = evals.map(e => ({
+      from: e.examName,
+      comment: e.overallFeedback,
+      date: new Date().toISOString().split("T")[0],
+    }));
+
+    // Overall summary
+    const avgPct = evals.length
+      ? Math.round(evals.reduce((acc, e) => acc + (e.totalMarks / e.maxMarks) * 100, 0) / evals.length)
+      : 0;
+    const performanceSummary = evals.length
+      ? `You have completed ${evals.length} evaluated exam(s) with an average score of ${avgPct}%.`
+      : "No evaluated exams found yet. Submit your answer sheets to see your performance here.";
+
+    res.json({
+      assignments: evals.length,
       attendance: 95,
-      performanceSummary: "Your performance has been consistently high this semester, with a notable strength in STEM subjects.",
-      marksOverview: [
-        { subject: "Mathematics", score: 92, total: 100 },
-        { subject: "Science", score: 88, total: 100 },
-        { subject: "History", score: 75, total: 100 }
-      ],
-      improvementAreas: ["Time management in exams", "Citation accuracy in essays"],
-      feedback: [
-        { from: "Prof. Miller", comment: "Excellent work on the calculus assignment.", date: "2026-02-15" }
-      ]
+      performanceSummary,
+      marksOverview,
+      improvementAreas: improvementAreas.length ? improvementAreas : ["No improvement areas recorded yet."],
+      feedback: feedback.length ? feedback : [{ from: "System", comment: "No evaluated exams yet.", date: new Date().toISOString().split("T")[0] }],
     });
   });
 
@@ -516,7 +554,7 @@ Return ONLY valid JSON with this exact structure:
 
   app.post("/api/chat/conversations", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
-    const conv = await storage.createConversation(req.body.title || "New Analysis", req.user.id);
+    const conv = await storage.createConversation(req.body.title || "New Analysis", req.user.id, "teacher");
     res.status(201).json(conv);
   });
 
@@ -570,6 +608,73 @@ Return ONLY valid JSON with this exact structure:
     } catch (err) {
       console.error("Chat Error:", err);
       res.status(500).json({ message: "Analysis failed" });
+    }
+  });
+
+  // STUDENT CHAT
+  app.get("/api/student/chat/conversations", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+    const convs = await storage.getConversationsByStudent(req.user.id);
+    res.json(convs);
+  });
+
+  app.post("/api/student/chat/conversations", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+    const conv = await storage.createConversation(req.body.title || "New Chat", req.user.id, "student");
+    res.status(201).json(conv);
+  });
+
+  app.get("/api/student/chat/conversations/:id/messages", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+    const msgs = await storage.getMessagesByConversation(parseInt(req.params.id));
+    res.json(msgs);
+  });
+
+  app.post("/api/student/chat/conversations/:id/messages", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+
+    const conversationId = parseInt(req.params.id);
+    const { content } = req.body;
+
+    try {
+      const student = await storage.getStudent(req.user.id);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
+      const context = evals.length
+        ? JSON.stringify(evals.map(e => ({
+            subject: e.subject,
+            exam: e.examName,
+            score: e.totalMarks,
+            maxScore: e.maxMarks,
+            feedback: e.overallFeedback,
+          })))
+        : "No evaluation data available yet.";
+
+      await storage.createMessage({ conversationId, role: "user", content });
+
+      const history = await storage.getMessagesByConversation(conversationId);
+      const chatHistory = history.slice(-10).map((m: any) => ({ role: m.role, content: m.content }));
+
+      const response = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          {
+            role: "system",
+            content: `You are a personal academic coach for a student. Use the student's evaluation data to give personalised, encouraging advice.
+Be concise, supportive, and specific. Reference their actual scores and subjects when relevant.
+Student's evaluation data: ${context}`,
+          },
+          ...chatHistory,
+        ],
+      });
+
+      const aiContent = response.choices[0].message.content || "I couldn't process that. Please try again.";
+      const msg = await storage.createMessage({ conversationId, role: "assistant", content: aiContent });
+      res.json(msg);
+    } catch (err) {
+      console.error("Student Chat Error:", err);
+      res.status(500).json({ message: "Chat failed" });
     }
   });
 
