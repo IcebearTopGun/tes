@@ -2,9 +2,11 @@ import { db } from "./db";
 import {
   teachers, students, exams, answerSheets, evaluations, conversations, messages,
   answerSheetPages, mergedAnswerScripts, ncertChapters, deviationLogs, performanceProfiles,
+  homework, homeworkSubmissions,
   type Teacher, type Student, type Exam,
   type InsertTeacher, type InsertStudent, type InsertExam,
   type NcertChapter, type InsertNcertChapter,
+  type Homework, type InsertHomework, type HomeworkSubmission, type InsertHomeworkSubmission,
 } from "@shared/schema";
 import { eq, and, desc, sql as drizzleSql } from "drizzle-orm";
 
@@ -60,6 +62,16 @@ export interface IStorage {
   // Performance profile
   savePerformanceProfile(studentId: number, admissionNumber: string, profileData: object): Promise<any>;
   getPerformanceProfile(studentId: number): Promise<any>;
+
+  // Homework
+  createHomework(hw: InsertHomework): Promise<Homework>;
+  getHomeworkByTeacher(teacherId: number): Promise<Homework[]>;
+  getHomeworkForStudent(className: string, section: string): Promise<Homework[]>;
+  createHomeworkSubmission(sub: InsertHomeworkSubmission): Promise<HomeworkSubmission>;
+  getHomeworkSubmission(homeworkId: number, studentId: number): Promise<HomeworkSubmission | undefined>;
+  updateHomeworkSubmission(id: number, data: Partial<HomeworkSubmission>): Promise<HomeworkSubmission>;
+  getHomeworkSubmissionsByStudent(studentId: number): Promise<any[]>;
+  getHomeworkSubmissionsByTeacher(teacherId: number): Promise<any[]>;
 
   // Analytics
   getTeacherStats(teacherId: number): Promise<{
@@ -320,6 +332,81 @@ export class DatabaseStorage implements IStorage {
   async getPerformanceProfile(studentId: number): Promise<any> {
     const [profile] = await db.select().from(performanceProfiles).where(eq(performanceProfiles.studentId, studentId));
     return profile;
+  }
+
+  // Homework implementations
+  async createHomework(hw: InsertHomework): Promise<Homework> {
+    const [created] = await db.insert(homework).values(hw).returning();
+    return created;
+  }
+
+  async getHomeworkByTeacher(teacherId: number): Promise<Homework[]> {
+    return await db.select().from(homework).where(eq(homework.teacherId, teacherId)).orderBy(desc(homework.id));
+  }
+
+  async getHomeworkForStudent(className: string, section: string): Promise<Homework[]> {
+    return await db.select().from(homework).where(
+      and(eq(homework.className, className), eq(homework.section, section))
+    ).orderBy(desc(homework.id));
+  }
+
+  async createHomeworkSubmission(sub: InsertHomeworkSubmission): Promise<HomeworkSubmission> {
+    const [created] = await db.insert(homeworkSubmissions).values(sub).returning();
+    return created;
+  }
+
+  async getHomeworkSubmission(homeworkId: number, studentId: number): Promise<HomeworkSubmission | undefined> {
+    const [sub] = await db.select().from(homeworkSubmissions).where(
+      and(eq(homeworkSubmissions.homeworkId, homeworkId), eq(homeworkSubmissions.studentId, studentId))
+    );
+    return sub;
+  }
+
+  async updateHomeworkSubmission(id: number, data: Partial<HomeworkSubmission>): Promise<HomeworkSubmission> {
+    const [updated] = await db.update(homeworkSubmissions).set(data as any).where(eq(homeworkSubmissions.id, id)).returning();
+    return updated;
+  }
+
+  async getHomeworkSubmissionsByStudent(studentId: number): Promise<any[]> {
+    return await db.select({
+      submissionId: homeworkSubmissions.id,
+      homeworkId: homeworkSubmissions.homeworkId,
+      status: homeworkSubmissions.status,
+      correctnessScore: homeworkSubmissions.correctnessScore,
+      aiFeedback: homeworkSubmissions.aiFeedback,
+      submittedAt: homeworkSubmissions.submittedAt,
+      isOnTime: homeworkSubmissions.isOnTime,
+      subject: homework.subject,
+      description: homework.description,
+      dueDate: homework.dueDate,
+      className: homework.className,
+      section: homework.section,
+    })
+    .from(homeworkSubmissions)
+    .innerJoin(homework, eq(homeworkSubmissions.homeworkId, homework.id))
+    .where(eq(homeworkSubmissions.studentId, studentId))
+    .orderBy(desc(homeworkSubmissions.submittedAt));
+  }
+
+  async getHomeworkSubmissionsByTeacher(teacherId: number): Promise<any[]> {
+    return await db.select({
+      submissionId: homeworkSubmissions.id,
+      homeworkId: homeworkSubmissions.homeworkId,
+      admissionNumber: homeworkSubmissions.admissionNumber,
+      status: homeworkSubmissions.status,
+      correctnessScore: homeworkSubmissions.correctnessScore,
+      submittedAt: homeworkSubmissions.submittedAt,
+      isOnTime: homeworkSubmissions.isOnTime,
+      subject: homework.subject,
+      description: homework.description,
+      dueDate: homework.dueDate,
+      className: homework.className,
+      section: homework.section,
+    })
+    .from(homeworkSubmissions)
+    .innerJoin(homework, eq(homeworkSubmissions.homeworkId, homework.id))
+    .where(eq(homework.teacherId, teacherId))
+    .orderBy(desc(homeworkSubmissions.submittedAt));
   }
 
   // Real teacher stats from DB

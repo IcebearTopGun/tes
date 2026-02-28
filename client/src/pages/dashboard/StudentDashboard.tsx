@@ -8,7 +8,7 @@ import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, X, Plus, Send, TrendingUp, MessageSquare, BookOpen } from "lucide-react";
+import { Loader2, X, Plus, Send, TrendingUp, MessageSquare, BookOpen, Upload } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
 
@@ -77,6 +77,9 @@ export default function StudentDashboard() {
   const [expandedQuestion, setExpandedQuestion] = useState<number | null>(null);
   const [showAvaMenu, setShowAvaMenu] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
+  const [uploadingHwId, setUploadingHwId] = useState<number | null>(null);
+  const hwFileRef = useRef<HTMLInputElement>(null);
+  const [pendingHwId, setPendingHwId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const avaRef = useRef<HTMLDivElement>(null);
 
@@ -105,6 +108,42 @@ export default function StudentDashboard() {
     enabled: !!revisionChapter,
     staleTime: 5 * 60 * 1000,
   });
+
+  const { data: homeworkList, refetch: refetchHomework } = useQuery<any[]>({
+    queryKey: ["/api/student/homework"],
+    queryFn: () => fetchWithAuth("/api/student/homework").then(r => r.json()),
+    enabled: activeTab === "homework",
+  });
+
+  const { data: hwAnalytics, refetch: refetchHwAnalytics } = useQuery<any>({
+    queryKey: ["/api/student/homework/analytics"],
+    queryFn: () => fetchWithAuth("/api/student/homework/analytics").then(r => r.json()),
+    enabled: activeTab === "homework",
+  });
+
+  const submitHomework = useMutation({
+    mutationFn: ({ hwId, fileBase64 }: { hwId: number; fileBase64: string }) =>
+      fetchWithAuth(`/api/student/homework/${hwId}/submit`, { method: "POST", body: JSON.stringify({ fileBase64 }) }),
+    onSuccess: () => {
+      toast({ title: "Homework submitted", description: "Your work has been evaluated by AI." });
+      refetchHomework();
+      refetchHwAnalytics();
+    },
+    onError: () => toast({ title: "Submission failed", description: "Could not submit homework.", variant: "destructive" }),
+    onSettled: () => { setUploadingHwId(null); setPendingHwId(null); },
+  });
+
+  const handleHwFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || pendingHwId === null) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setUploadingHwId(pendingHwId);
+      submitHomework.mutate({ hwId: pendingHwId, fileBase64: reader.result as string });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
 
   const startConversation = useMutation({
     mutationFn: () => fetchWithAuth("/api/student/chat/conversations", { method: "POST", body: JSON.stringify({ title: "Academic Chat" }) }),
@@ -239,21 +278,20 @@ export default function StudentDashboard() {
             </svg>
             Overview
           </button>
-          <button className={`sf-nav-tab${activeTab === "analytics" ? " on" : ""}`} onClick={() => setActiveTab("analytics")}>
+          <button className={`sf-nav-tab${activeTab === "analytics" ? " on" : ""}`} onClick={() => setActiveTab("analytics")} style={{ display: "none" }}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
             </svg>
             Analytics
           </button>
-          <button className="sf-nav-tab">
+          <button className={`sf-nav-tab${activeTab === "homework" ? " on" : ""}`} onClick={() => setActiveTab("homework")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
             </svg>
             Homework
-            <span className="sf-nav-badge sf-nb-amber">2 due</span>
           </button>
-          <button className="sf-nav-tab">
+          <button className="sf-nav-tab" style={{ display: "none" }}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
               <circle cx="9" cy="7" r="4"/>
@@ -543,8 +581,92 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        {/* ADAPTIVE REVISION PANEL */}
-        <AnimatePresence>
+        {/* Hidden file input for homework upload */}
+        <input ref={hwFileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={handleHwFileChange} />
+
+        {/* HOMEWORK TAB */}
+        {activeTab === "homework" && (
+          <div>
+            {/* Regularity stats */}
+            {hwAnalytics && (
+              <div className="sf-rank-card" style={{ marginBottom: 16 }}>
+                <span className="sf-rank-trophy">📋</span>
+                <div className="sf-rank-info">
+                  <div className="sf-rank-label">Homework Regularity</div>
+                  <div className="sf-rank-num" style={{ fontSize: 22 }}>{hwAnalytics.regularityClass}</div>
+                  <div className="sf-rank-sub">{hwAnalytics.totalSubmitted} of {hwAnalytics.totalAssigned} submitted &nbsp;·&nbsp; {hwAnalytics.onTimePct}% on time</div>
+                </div>
+                <div className="sf-rank-divider" />
+                <div className="sf-rank-stat">
+                  <div className="sf-rank-stat-num">{hwAnalytics.streak}</div>
+                  <div className="sf-rank-stat-lbl">Streak</div>
+                </div>
+                <div className="sf-rank-divider" />
+                <div className="sf-rank-stat">
+                  <div className="sf-rank-stat-num">{hwAnalytics.onTimePct}%</div>
+                  <div className="sf-rank-stat-lbl">On-time</div>
+                </div>
+                <div className="sf-rank-divider" />
+                <div className="sf-rank-stat">
+                  <div className="sf-rank-stat-num">{hwAnalytics.avgCorrectness}%</div>
+                  <div className="sf-rank-stat-lbl">Correctness</div>
+                </div>
+              </div>
+            )}
+
+            {/* Homework list */}
+            <div className="sf-panel">
+              <div className="sf-panel-title">My Homework</div>
+              <div className="sf-panel-sub">Daily sync from your class — submit to get AI evaluation</div>
+              {!homeworkList ? (
+                <div style={{ padding: "24px 0", textAlign: "center" }}><Spinner size="sm" /></div>
+              ) : homeworkList.length === 0 ? (
+                <div className="sf-empty"><div className="sf-empty-icon">📚</div>No homework assigned yet for your class and section.</div>
+              ) : (
+                homeworkList.map((hw: any) => {
+                  const sub = hw.submission;
+                  const isOverdue = !sub && new Date() > new Date(hw.dueDate);
+                  const statusLabel = sub ? (sub.status === "needs_improvement" ? "Needs Improvement" : "Completed") : isOverdue ? "Overdue" : "Pending";
+                  const statusCls = sub ? (sub.status === "needs_improvement" ? "sf-es-draft" : "sf-es-done") : isOverdue ? "sf-es-draft" : "";
+                  const isUploading = uploadingHwId === hw.id;
+                  return (
+                    <div key={hw.id} className="sf-exam-item" style={{ cursor: "default", alignItems: "flex-start", flexDirection: "column", gap: 8 }}>
+                      <div style={{ display: "flex", alignItems: "center", width: "100%", gap: 12 }}>
+                        <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", flexShrink: 0 }}>📝</div>
+                        <div className="sf-exam-info" style={{ flex: 1 }}>
+                          <div className="sf-exam-name">{hw.subject}</div>
+                          <div className="sf-exam-meta">{hw.description}</div>
+                          <div className="sf-exam-meta">Due: {new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+                        </div>
+                        <span className={`sf-exam-status ${statusCls}`} style={{ flexShrink: 0 }}>{statusLabel}</span>
+                        {!sub && (
+                          <Button
+                            size="sm"
+                            className="rounded-xl gap-1"
+                            disabled={isUploading}
+                            onClick={() => { setPendingHwId(hw.id); hwFileRef.current?.click(); }}
+                            data-testid={`button-submit-hw-${hw.id}`}
+                          >
+                            {isUploading ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <><Upload className="h-3 w-3" /> Submit</>}
+                          </Button>
+                        )}
+                      </div>
+                      {sub?.aiFeedback && (
+                        <div style={{ width: "100%", padding: "10px 14px", background: "var(--lav-bg)", borderRadius: 10, fontSize: 12.5, color: "var(--ink2)", lineHeight: 1.6 }}>
+                          <b>AI Feedback:</b> {sub.aiFeedback}
+                          {sub.correctnessScore != null && <span style={{ marginLeft: 8, fontWeight: 700, color: sub.correctnessScore >= 70 ? "var(--green)" : "var(--amber)" }}>{sub.correctnessScore}% correct</span>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ADAPTIVE REVISION PANEL — only in overview */}
+        {activeTab === "overview" && <AnimatePresence>
           {revisionChapter && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -617,7 +739,7 @@ export default function StudentDashboard() {
               </div>
             </motion.div>
           )}
-        </AnimatePresence>
+        </AnimatePresence>}
       </div>
 
       {/* AI CHAT SIDEBAR */}

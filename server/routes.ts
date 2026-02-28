@@ -617,9 +617,9 @@ Return ONLY valid JSON with this exact structure:
     const { content } = req.body;
 
     try {
-      // 1. Get context (RAG)
+      // 1. Get context (RAG) — exams + homework analytics
       const evals = await storage.getEvaluationsByTeacher(req.user.id);
-      const context = JSON.stringify(evals.map(e => ({
+      const evalContext = JSON.stringify(evals.map(e => ({
         student: e.studentName,
         admission: e.admissionNumber,
         marks: e.totalMarks,
@@ -627,6 +627,20 @@ Return ONLY valid JSON with this exact structure:
         exam: e.examName,
         feedback: e.overallFeedback
       })));
+
+      const hwSubmissions = await storage.getHomeworkSubmissionsByTeacher(req.user.id);
+      const hwContext = hwSubmissions.length > 0
+        ? JSON.stringify(hwSubmissions.map(s => ({
+            student: s.admissionNumber,
+            subject: s.subject,
+            homework: s.description,
+            status: s.status,
+            correctness: s.correctnessScore,
+            onTime: s.isOnTime === 1,
+            submittedAt: s.submittedAt,
+            dueDate: s.dueDate,
+          })))
+        : "No homework submission data yet.";
 
       // 2. Save user message
       await storage.createMessage({ conversationId, role: "user", content });
@@ -637,9 +651,12 @@ Return ONLY valid JSON with this exact structure:
         messages: [
           { 
             role: "system", 
-            content: `You are an educational data analyst. Use the following student evaluation data to answer the teacher's questions. 
+            content: `You are an educational data analyst. Use the following student evaluation data and homework analytics to answer the teacher's questions. 
             ONLY use the provided data. Do NOT hallucinate. If data is missing, say so.
-            Data: ${context}` 
+            
+            EXAM EVALUATION DATA: ${evalContext}
+            
+            HOMEWORK ANALYTICS DATA: ${hwContext}` 
           },
           { role: "user", content }
         ]
@@ -932,6 +949,208 @@ Return ONLY valid JSON:
     }
   });
 
+  // ─── HOMEWORK ─────────────────────────────────────────────────────────────
+
+  // Teacher: create homework
+  app.post("/api/homework", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const hw = await storage.createHomework({ ...req.body, teacherId: req.user.id });
+      res.status(201).json(hw);
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to create homework", detail: err?.message });
+    }
+  });
+
+  // Teacher: list homework
+  app.get("/api/homework", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const hws = await storage.getHomeworkByTeacher(req.user.id);
+      res.json(hws);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load homework" });
+    }
+  });
+
+  // Student: list homework assigned to their class/section
+  app.get("/api/student/homework", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const student = await storage.getStudent(req.user.id);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+      const hws = await storage.getHomeworkForStudent(student.studentClass, student.section);
+      // Attach submission status for each homework
+      const withStatus = await Promise.all(hws.map(async (hw) => {
+        const sub = await storage.getHomeworkSubmission(hw.id, req.user!.id);
+        return { ...hw, submission: sub || null };
+      }));
+      res.json(withStatus);
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to load homework", detail: err?.message });
+    }
+  });
+
+  // Student: submit homework (upload image/pdf, run OCR, AI evaluate)
+  app.post("/api/student/homework/:id/submit", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+    const homeworkId = parseInt(req.params.id);
+    const { fileBase64 } = req.body;
+    if (!fileBase64) return res.status(400).json({ message: "fileBase64 is required" });
+
+    try {
+      const student = await storage.getStudent(req.user.id);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      // Get the homework
+      const hws = await storage.getHomeworkByTeacher(0); // placeholder — we need a getHomework(id) method
+      // Actually fetch directly via DB approach — get all for student's class/section and find matching
+      const allHw = await storage.getHomeworkForStudent(student.studentClass, student.section);
+      const hw = allHw.find(h => h.id === homeworkId);
+      if (!hw) return res.status(404).json({ message: "Homework not found" });
+
+      // Check if already submitted
+      const existing = await storage.getHomeworkSubmission(homeworkId, req.user.id);
+
+      // Determine on-time
+      const now = new Date();
+      const due = new Date(hw.dueDate);
+      const isOnTime = now <= due ? 1 : 0;
+
+      // OCR extraction
+      let ocrText = "";
+      try {
+        ocrText = await extractDocumentText(fileBase64, "homework submission");
+      } catch (ocrErr) {
+        console.warn("[HW SUBMIT] OCR failed:", ocrErr);
+      }
+
+      // AI evaluation of correctness
+      let correctnessScore = 0;
+      let aiFeedback = "";
+      let status = "completed";
+
+      if (ocrText && hw.modelSolutionText) {
+        try {
+          const evalResp = await getOpenAIClient().chat.completions.create({
+            model: "gpt-4o",
+            messages: [{
+              role: "user",
+              content: `You are evaluating a student's handwritten homework submission.
+
+Homework description: ${hw.description}
+Subject: ${hw.subject}
+
+Model solution:
+${hw.modelSolutionText}
+
+Student's submitted answer (extracted via OCR):
+${ocrText}
+
+Rate the student's answer on a scale of 0–100 for correctness and completeness. Also give brief feedback.
+
+Return JSON:
+{
+  "correctness_score": <0-100>,
+  "status": "completed" | "needs_improvement",
+  "feedback": "<2-3 sentence feedback>"
+}`
+            }],
+            response_format: { type: "json_object" },
+          });
+          const evalData = JSON.parse(evalResp.choices[0].message.content || "{}");
+          correctnessScore = evalData.correctness_score ?? 0;
+          status = evalData.status === "needs_improvement" ? "needs_improvement" : "completed";
+          aiFeedback = evalData.feedback || "";
+        } catch (evalErr) {
+          console.warn("[HW SUBMIT] AI eval failed:", evalErr);
+          status = "completed";
+        }
+      } else if (ocrText) {
+        status = "completed";
+        correctnessScore = 70;
+        aiFeedback = "Submission received. No model solution available for detailed evaluation.";
+      }
+
+      let submission;
+      if (existing) {
+        submission = await storage.updateHomeworkSubmission(existing.id, {
+          fileBase64,
+          ocrText,
+          correctnessScore,
+          status,
+          aiFeedback,
+          isOnTime,
+          submittedAt: new Date().toISOString(),
+        } as any);
+      } else {
+        submission = await storage.createHomeworkSubmission({
+          homeworkId,
+          studentId: req.user.id,
+          admissionNumber: student.admissionNumber,
+          fileBase64,
+          ocrText,
+          correctnessScore,
+          status,
+          aiFeedback,
+          isOnTime,
+        });
+      }
+
+      res.json(submission);
+    } catch (err: any) {
+      console.error("[HW SUBMIT] Error:", err?.message);
+      res.status(500).json({ message: "Submission failed", detail: err?.message });
+    }
+  });
+
+  // Student: homework regularity analytics
+  app.get("/api/student/homework/analytics", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const student = await storage.getStudent(req.user.id);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      const submissions = await storage.getHomeworkSubmissionsByStudent(req.user.id);
+      const totalAssigned = (await storage.getHomeworkForStudent(student.studentClass, student.section)).length;
+      const totalSubmitted = submissions.length;
+      const onTimeCount = submissions.filter(s => s.isOnTime === 1).length;
+      const completedCount = submissions.filter(s => s.status === "completed").length;
+      const needsImprovementCount = submissions.filter(s => s.status === "needs_improvement").length;
+      const avgCorrectness = submissions.length > 0
+        ? Math.round(submissions.reduce((sum, s) => sum + (s.correctnessScore || 0), 0) / submissions.length)
+        : 0;
+
+      const onTimePct = totalSubmitted > 0 ? Math.round((onTimeCount / totalSubmitted) * 100) : 0;
+      const completionPct = totalAssigned > 0 ? Math.round((totalSubmitted / totalAssigned) * 100) : 0;
+
+      let regularityClass = "Irregular";
+      if (completionPct >= 80 && onTimePct >= 75) regularityClass = "Regular";
+      else if (completionPct >= 60 && onTimePct >= 50) regularityClass = "Mostly Regular";
+
+      // Submission streak: count consecutive recent on-time submissions
+      let streak = 0;
+      for (const s of submissions) {
+        if (s.isOnTime === 1) streak++;
+        else break;
+      }
+
+      res.json({
+        totalAssigned,
+        totalSubmitted,
+        completionPct,
+        onTimePct,
+        avgCorrectness,
+        regularityClass,
+        streak,
+        completedCount,
+        needsImprovementCount,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to load homework analytics" });
+    }
+  });
+
   // NCERT CHAPTERS
   app.get("/api/ncert-chapters", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
@@ -999,7 +1218,7 @@ Return ONLY valid JSON:
       if (!student) return res.status(404).json({ message: "Student not found" });
 
       const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
-      const context = evals.length
+      const evalContext = evals.length
         ? JSON.stringify(evals.map(e => ({
             subject: e.subject,
             exam: e.examName,
@@ -1008,6 +1227,19 @@ Return ONLY valid JSON:
             feedback: e.overallFeedback,
           })))
         : "No evaluation data available yet.";
+
+      // Include homework analytics in AI context
+      const hwSubmissions = await storage.getHomeworkSubmissionsByStudent(req.user.id);
+      const hwContext = hwSubmissions.length > 0
+        ? JSON.stringify(hwSubmissions.map(s => ({
+            subject: s.subject,
+            homework: s.description,
+            status: s.status,
+            correctness: s.correctnessScore,
+            onTime: s.isOnTime === 1,
+            submittedAt: s.submittedAt,
+          })))
+        : "No homework submissions yet.";
 
       await storage.createMessage({ conversationId, role: "user", content });
 
@@ -1019,9 +1251,10 @@ Return ONLY valid JSON:
         messages: [
           {
             role: "system",
-            content: `You are a personal academic coach for a student. Use the student's evaluation data to give personalised, encouraging advice.
-Be concise, supportive, and specific. Reference their actual scores and subjects when relevant.
-Student's evaluation data: ${context}`,
+            content: `You are a personal academic coach for a student. Use the student's evaluation data and homework submission history to give personalised, encouraging advice.
+Be concise, supportive, and specific. Reference their actual scores, subjects, and homework patterns when relevant.
+Student's evaluation data: ${evalContext}
+Student's homework history: ${hwContext}`,
           },
           ...chatHistory,
         ],

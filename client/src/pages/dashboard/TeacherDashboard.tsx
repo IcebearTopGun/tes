@@ -175,6 +175,14 @@ export default function TeacherDashboard() {
   const bulkInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const avaRef = useRef<HTMLDivElement>(null);
+  const [isHwDialogOpen, setIsHwDialogOpen] = useState(false);
+  const [hwSubject, setHwSubject] = useState("");
+  const [hwClass, setHwClass] = useState("");
+  const [hwSection, setHwSection] = useState("");
+  const [hwDescription, setHwDescription] = useState("");
+  const [hwModelSolution, setHwModelSolution] = useState("");
+  const [hwDueDate, setHwDueDate] = useState("");
+  const [isCreatingHw, setIsCreatingHw] = useState(false);
 
   const { data: examsList, isLoading: isLoadingExams } = useQuery<Exam[]>({
     queryKey: [api.exams.list.path],
@@ -203,6 +211,27 @@ export default function TeacherDashboard() {
     queryKey: ["/api/chat/messages", activeConversationId],
     queryFn: async () => { const res = await fetchWithAuth(`/api/chat/conversations/${activeConversationId}/messages`); return res.json(); },
     enabled: !!activeConversationId,
+  });
+
+  const { data: teacherHomework, refetch: refetchTeacherHw } = useQuery<any[]>({
+    queryKey: ["/api/teacher/homework"],
+    queryFn: () => fetchWithAuth("/api/teacher/homework").then(r => r.json ? r.json() : r),
+    enabled: activeSection === "homework",
+  });
+
+  const createHomework = useMutation({
+    mutationFn: () => fetchWithAuth("/api/teacher/homework", {
+      method: "POST",
+      body: JSON.stringify({ subject: hwSubject, studentClass: hwClass, section: hwSection, description: hwDescription, modelSolution: hwModelSolution, dueDate: hwDueDate }),
+    }),
+    onSuccess: () => {
+      toast({ title: "Homework assigned!", description: "Students in the class can now submit." });
+      setIsHwDialogOpen(false);
+      setHwSubject(""); setHwClass(""); setHwSection(""); setHwDescription(""); setHwModelSolution(""); setHwDueDate("");
+      refetchTeacherHw();
+    },
+    onError: () => toast({ title: "Error", description: "Could not create homework.", variant: "destructive" }),
+    onSettled: () => setIsCreatingHw(false),
   });
 
   const analyticsUrl = `/api/analytics${classFilter || subjectFilter ? `?class=${classFilter}&subject=${subjectFilter}` : ""}`;
@@ -432,13 +461,12 @@ export default function TeacherDashboard() {
             </svg>
             Overview
           </button>
-          <button className="sf-nav-tab" onClick={() => setActiveSection("exams")}>
+          <button className={`sf-nav-tab${activeSection === "homework" ? " on" : ""}`} onClick={() => setActiveSection("homework")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>
             </svg>
             Homework
-            <span className="sf-nav-badge sf-nb-amber">{totalExams > 0 ? `${totalExams} active` : "—"}</span>
           </button>
           <button className="sf-nav-tab" onClick={() => setIsDialogOpen(true)}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -553,6 +581,13 @@ export default function TeacherDashboard() {
               <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
             </svg>
             Exams
+          </button>
+          <button className={`sf-stab${activeSection === "homework" ? " on" : ""}`} onClick={() => setActiveSection("homework")}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            Homework
           </button>
           <button className={`sf-stab${activeSection === "sheets" ? " on" : ""}`} onClick={() => setActiveSection("sheets")}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -786,6 +821,87 @@ export default function TeacherDashboard() {
               </div>
             </div>
           </>
+        )}
+
+        {/* ── HOMEWORK TAB ── */}
+        {activeSection === "homework" && (
+          <div>
+            <div className="sf-panel" style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <div>
+                  <div className="sf-panel-title">Homework Assignments</div>
+                  <div className="sf-panel-sub">Assign homework to a class — students submit photos for AI evaluation</div>
+                </div>
+                <Button size="sm" className="rounded-xl gap-1" onClick={() => setIsHwDialogOpen(true)} data-testid="button-assign-homework">
+                  <Plus className="h-3 w-3" /> Assign Homework
+                </Button>
+              </div>
+
+              {!teacherHomework ? (
+                <div style={{ padding: "24px 0", textAlign: "center" }}><Spinner /></div>
+              ) : teacherHomework.length === 0 ? (
+                <div className="sf-empty"><div className="sf-empty-icon">📋</div>No homework assigned yet. Click "Assign Homework" to get started.</div>
+              ) : (
+                teacherHomework.map((hw: any) => (
+                  <div key={hw.id} className="sf-exam-item" style={{ cursor: "default", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", width: "100%", gap: 12 }}>
+                      <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", flexShrink: 0 }}>📝</div>
+                      <div className="sf-exam-info" style={{ flex: 1 }}>
+                        <div className="sf-exam-name">{hw.subject} — Class {hw.studentClass}{hw.section ? ` (${hw.section})` : ""}</div>
+                        <div className="sf-exam-meta">{hw.description}</div>
+                        <div className="sf-exam-meta">Due: {new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+                      </div>
+                      <span className="sf-exam-status sf-es-done" style={{ flexShrink: 0 }}>{hw.submissionCount ?? 0} submitted</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Create Homework Dialog */}
+            <Dialog open={isHwDialogOpen} onOpenChange={setIsHwDialogOpen}>
+              <DialogContent style={{ maxWidth: 520 }}>
+                <DialogHeader>
+                  <DialogTitle>Assign Homework</DialogTitle>
+                </DialogHeader>
+                <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div>
+                      <label className="sf-fld-lbl">Subject *</label>
+                      <Input placeholder="e.g. Mathematics" value={hwSubject} onChange={e => setHwSubject(e.target.value)} data-testid="input-hw-subject" />
+                    </div>
+                    <div>
+                      <label className="sf-fld-lbl">Class *</label>
+                      <Input placeholder="e.g. 10" value={hwClass} onChange={e => setHwClass(e.target.value)} data-testid="input-hw-class" />
+                    </div>
+                    <div>
+                      <label className="sf-fld-lbl">Section</label>
+                      <Input placeholder="e.g. A" value={hwSection} onChange={e => setHwSection(e.target.value)} data-testid="input-hw-section" />
+                    </div>
+                    <div>
+                      <label className="sf-fld-lbl">Due Date *</label>
+                      <Input type="date" value={hwDueDate} onChange={e => setHwDueDate(e.target.value)} data-testid="input-hw-due" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="sf-fld-lbl">Description / Task *</label>
+                    <Textarea placeholder="Describe what students need to do…" value={hwDescription} onChange={e => setHwDescription(e.target.value)} data-testid="input-hw-description" rows={3} />
+                  </div>
+                  <div>
+                    <label className="sf-fld-lbl">Model Solution (for AI grading)</label>
+                    <Textarea placeholder="Provide the expected answer for AI to compare student submissions against…" value={hwModelSolution} onChange={e => setHwModelSolution(e.target.value)} data-testid="input-hw-solution" rows={4} />
+                  </div>
+                  <Button
+                    disabled={isCreatingHw || !hwSubject || !hwClass || !hwDescription || !hwDueDate}
+                    onClick={() => { setIsCreatingHw(true); createHomework.mutate(); }}
+                    data-testid="button-create-homework"
+                  >
+                    {isCreatingHw ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Creating…</> : "Assign Homework"}
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
         )}
 
         {/* ── EXAMS TAB ── */}

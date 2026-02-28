@@ -122,6 +122,32 @@ export const performanceProfiles = pgTable("performance_profiles", {
   generatedAt: text("generated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+export const homework = pgTable("homework", {
+  id: serial("id").primaryKey(),
+  teacherId: integer("teacher_id").notNull().references(() => teachers.id),
+  subject: text("subject").notNull(),
+  className: text("class_name").notNull(),
+  section: text("section").notNull(),
+  description: text("description").notNull(),
+  modelSolutionText: text("model_solution_text"),
+  dueDate: text("due_date").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const homeworkSubmissions = pgTable("homework_submissions", {
+  id: serial("id").primaryKey(),
+  homeworkId: integer("homework_id").notNull().references(() => homework.id),
+  studentId: integer("student_id").notNull().references(() => students.id),
+  admissionNumber: text("admission_number").notNull(),
+  fileBase64: text("file_base64"),
+  ocrText: text("ocr_text"),
+  correctnessScore: integer("correctness_score"),
+  status: text("status").notNull().default("pending"),
+  aiFeedback: text("ai_feedback"),
+  submittedAt: text("submitted_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  isOnTime: integer("is_on_time").notNull().default(1),
+});
+
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
@@ -210,3 +236,11 @@ export type InsertMessage = typeof messages.$inferInsert;
 
 export type DeviationLog = typeof deviationLogs.$inferSelect;
 export type PerformanceProfile = typeof performanceProfiles.$inferSelect;
+
+export const insertHomeworkSchema = createInsertSchema(homework).omit({ id: true, createdAt: true });
+export const insertHomeworkSubmissionSchema = createInsertSchema(homeworkSubmissions).omit({ id: true, submittedAt: true });
+
+export type Homework = typeof homework.$inferSelect;
+export type InsertHomework = z.infer<typeof insertHomeworkSchema>;
+export type HomeworkSubmission = typeof homeworkSubmissions.$inferSelect;
+export type InsertHomeworkSubmission = z.infer<typeof insertHomeworkSubmissionSchema>;
