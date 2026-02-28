@@ -1,0 +1,476 @@
+You are extending an EXISTING School Exam Evaluation Platform.
+
+====================================================
+CRITICAL GLOBAL RULE — UI FREEZE & CONSISTENCY LOCK
+====================================================
+
+Student, Teacher and Admin dashboards already exist
+and are APPROVED.
+
+YOU MUST NOT:
+
+- redesign dashboards
+- recreate pages
+- modify layouts or spacing
+- change CSS
+- regenerate navigation
+- move components
+- rebuild dashboard UI
+- introduce new design systems
+
+Admin UI MUST reuse existing
+Student/Teacher dashboard components.
+
+ONLY extend:
+
+✔ backend logic
+✔ permissions
+✔ analytics
+✔ aggregation services
+✔ AI context
+
+Treat UI as DESIGN LOCKED.
+
+
+====================================================
+OBJECTIVE
+====================================================
+
+Build a COMPLETE SCHOOL GOVERNANCE
+AND INTELLIGENCE LAYER including:
+
+1. Admin Login (Third Role)
+2. Role-Based Academic Access Control
+3. Admin Governance Dataset
+4. Class & Subject Filtered Dashboards
+5. School-Level Conversational Intelligence
+6. Dynamic Admin Analytics Graphs
+7. Ecosystem Intelligence derived from
+   Student + Teacher behaviour
+
+Goal:
+Enable Admin to identify academic pain areas
+and improve overall school productivity.
+
+
+====================================================
+1. ROLE BASED LOGIN SYSTEM
+====================================================
+
+System supports:
+
+✓ Student Login
+✓ Teacher Login
+✓ Admin Login
+
+Authentication assigns role:
+
+role =
+    STUDENT
+    TEACHER
+    ADMIN
+
+Routing:
+
+Student → /student/dashboard
+Teacher → /teacher/dashboard
+Admin   → /admin/dashboard
+
+
+====================================================
+2. ADMIN DASHBOARD STRUCTURE
+====================================================
+
+Create:
+
+/admin/dashboard
+
+Admin dashboard MUST visually match
+Student and Teacher dashboards.
+
+Reuse:
+
+- DashboardLayout
+- Navbar
+- Sidebar
+- KPI Cards
+- Graph Containers
+- Insight Panels
+- AI Assistant Panel
+
+NO new layout styles allowed.
+
+
+====================================================
+3. ADMIN MASTER DATA GOVERNANCE
+====================================================
+
+Admin manages SCHOOL MASTER DATA.
+
+
+-----------------------------
+STUDENT MASTER DATASET
+-----------------------------
+
+Fields:
+
+- student_id
+- name
+- class
+- section
+- phone_number
+- email_id
+
+Only students present here
+may signup/login.
+
+
+-----------------------------
+TEACHER MASTER DATASET
+-----------------------------
+
+Fields:
+
+- teacher_id
+- teacher_name
+- email
+- phone
+- subjects_assigned[]
+- classes_assigned[]
+- is_class_teacher
+- class_teacher_of
+
+Teacher login allowed ONLY
+if present in admin dataset.
+
+
+====================================================
+4. ROLE BASED PERMISSION CONTROL
+====================================================
+
+TEACHER may ONLY:
+
+✓ upload exams
+✓ assign homework
+✓ evaluate sheets
+✓ view analytics
+
+FOR assigned:
+
+- subjects
+- classes
+
+Backend validation mandatory.
+
+
+====================================================
+5. CLASS TEACHER CAPABILITY
+====================================================
+
+If:
+
+is_class_teacher = TRUE
+
+Teacher gains CLASS VIEW access.
+
+Can see:
+
+✓ full class performance
+✓ attendance trends
+✓ homework trends
+✓ student comparisons
+
+Logical toggle:
+
+[ Subject View ] | [ Class View ]
+
+Reuse existing UI container.
+
+
+====================================================
+6. DASHBOARD FILTERING
+====================================================
+
+Selecting:
+
+- Class
+- Section
+- Subject
+
+must dynamically update dashboard stats.
+
+Metrics affected:
+
+- Total Students
+- Papers Submitted
+- Evaluated Sheets
+- Average Marks
+- Median Marks
+- Homework Completion
+- Pending Students
+
+Filtering occurs backend-side.
+
+
+====================================================
+7. ADMIN PERFORMANCE MONITORING
+====================================================
+
+ADMIN views:
+
+
+TEACHER INSIGHTS:
+
+- teacher performance improvement
+- test frequency
+- evaluation efficiency
+- class outcome trends
+
+
+CLASS INSIGHTS:
+
+- class performance trends
+- weak performing classes
+- subject comparison
+- yearly academic progress
+
+
+====================================================
+8. ADMIN CONVERSATIONAL AI
+====================================================
+
+IMPORTANT:
+
+DO NOT build new conversational system.
+
+Reuse EXISTING AI Assistant.
+
+Admin assistant receives SCHOOL-WIDE context.
+
+
+AI CONTEXT INCLUDES:
+
+✓ exams conducted
+✓ class performance trends
+✓ homework frequency
+✓ homework completion consistency
+✓ homework correctness
+✓ attendance behaviour
+✓ subject difficulty patterns
+✓ question variety across exams
+✓ teacher assessment frequency
+✓ improvement or decline trends
+
+
+Admin queries supported:
+
+- Which class needs intervention?
+- Which teacher performance improving?
+- Homework effectiveness?
+- Weak academic areas?
+
+
+====================================================
+9. ADMIN DYNAMIC ANALYTICS GRAPHS
+====================================================
+
+Reuse existing graph containers.
+
+
+CLASS INSIGHT GRAPHS:
+
+✓ class-wise performance trend
+✓ homework completion comparison
+✓ submission rate trends
+✓ ranking distribution
+
+
+TEACHER INSIGHT GRAPHS:
+
+✓ teacher vs class improvement
+✓ tests conducted
+✓ evaluation turnaround time
+✓ learning growth
+
+
+ASSESSMENT QUALITY:
+
+✓ question diversity
+✓ assessment frequency
+✓ concept coverage
+
+
+====================================================
+10. ANALYTICS DATA PIPELINE
+====================================================
+
+Create services:
+
+SchoolAnalyticsService
+TeacherPerformanceService
+ClassPerformanceService
+
+
+Aggregate from:
+
+- Exams
+- Homework
+- Evaluations
+- Attendance
+- Rankings
+
+
+Expose analytics to:
+
+✓ dashboards
+✓ AI assistant context
+
+
+====================================================
+11. ECOSYSTEM CONTEXT ENRICHMENT
+====================================================
+
+Generate additional intelligence automatically.
+
+
+--------------------------------
+STUDENT CONTEXT
+--------------------------------
+
+Derived from:
+
+- exam history
+- ranking movement
+- homework consistency
+- correctness trends
+- attendance
+- submission punctuality
+
+Create indicators:
+
+- learning_consistency_score
+- practice_regularit y_index
+- improvement_velocity
+- engagement_level
+- risk_of_underperformance
+
+
+--------------------------------
+TEACHER CONTEXT
+--------------------------------
+
+Derived from:
+
+- test frequency
+- homework consistency
+- student improvement
+- evaluation turnaround
+- class engagement
+
+Create metrics:
+
+- teacher_effectiveness_index
+- assessment_frequency_score
+- evaluation_efficiency
+- class_improvement_rate
+
+
+--------------------------------
+SCHOOL ECOSYSTEM INTELLIGENCE
+--------------------------------
+
+Combine signals to produce:
+
+- class learning health
+- academic stability index
+- intervention necessity score
+- practice adequacy indicator
+
+
+====================================================
+12. AI CONTEXT INJECTION
+====================================================
+
+Extend:
+
+AdminAnalyticsContextProvider
+
+Provide:
+
+- class_performance_summary
+- teacher_effectiveness_scores
+- ecosystem_health_metrics
+- student_context_summary
+- teacher_context_summary
+
+AI must provide DATA-BACKED reasoning.
+
+
+====================================================
+13. ROLE DATA VISIBILITY
+====================================================
+
+ADMIN:
+Full school visibility.
+
+TEACHER:
+Assigned classes/subjects only.
+
+CLASS TEACHER:
+Entire class analytics.
+
+STUDENT:
+Personal data only.
+
+
+====================================================
+14. DATABASE REQUIREMENTS
+====================================================
+
+Ensure relations:
+
+AdminStudentMaster
+AdminTeacherMaster
+TeacherClassMapping
+TeacherSubjectMapping
+StudentClassMapping
+Exam
+Homework
+Submission
+Evaluation
+Attendance
+Ranking
+
+
+====================================================
+STRICT IMPLEMENTATION RULE
+====================================================
+
+Allowed:
+
+✔ backend aggregation
+✔ role middleware
+✔ analytics APIs
+✔ AI context enrichment
+
+NOT allowed:
+
+✗ UI redesign
+✗ layout modification
+✗ CSS changes
+✗ new chat systems
+
+
+====================================================
+FINAL ACCEPTANCE CONDITIONS
+====================================================
+
+✓ Admin login operational
+✓ Admin dashboard matches existing UI
+✓ Dataset-controlled access enforced
+✓ Dashboard filtering works
+✓ Admin conversational AI functional
+✓ Dynamic analytics graphs visible
+✓ Ecosystem intelligence generated
+✓ School pain areas identifiable
+✓ Student & Teacher UI unchanged

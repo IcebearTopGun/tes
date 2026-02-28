@@ -1,6 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { db } from "./db";
+import { sql as drizzleSql } from "drizzle-orm";
 import { api } from "@shared/routes";
 import { z } from "zod";
 import jwt from "jsonwebtoken";
@@ -65,127 +67,225 @@ async function extractDocumentText(dataUrl: string, label: string): Promise<stri
   return "";
 }
 
+// Deterministic pseudo-random 0-1 from integer seed
+function drand(seed: number): number {
+  const x = Math.sin(seed * 9301 + 49297) * 233280;
+  return x - Math.floor(x);
+}
+
 async function seedDatabase() {
-  const hashedPassword = await bcrypt.hash("password123", 10);
-
-  // Ensure teacher exists
-  let teacher = await storage.getTeacherByEmployeeId("T001");
-  if (!teacher) {
-    teacher = await storage.createTeacher({
-      employeeId: "T001",
-      name: "Ramesh Sharma",
-      email: "ramesh.sharma@school.edu",
-      password: hashedPassword,
-    });
+  // Skip if already seeded (50 students + admin exist)
+  const allStudents = await storage.getAllStudents();
+  const existingAdmin = await storage.getAdminByEmployeeId("A001");
+  if (allStudents.length >= 50 && existingAdmin) {
+    console.log("[seed] Already seeded — skipping.");
+    return;
   }
 
-  // Seed students (skip if already exists)
-  const seedStudents = [
-    { admissionNumber: "S001", name: "Jane Smith", studentClass: "10", section: "A" },
-    { admissionNumber: "S002", name: "Arjun Mehta", studentClass: "10", section: "A" },
-    { admissionNumber: "S003", name: "Priya Rao", studentClass: "10", section: "A" },
-    { admissionNumber: "S004", name: "Rahul Kumar", studentClass: "10", section: "A" },
-    { admissionNumber: "S005", name: "Ananya Patel", studentClass: "10", section: "B" },
-    { admissionNumber: "S006", name: "Kavya Reddy", studentClass: "10", section: "B" },
-    { admissionNumber: "S007", name: "Siddharth Nair", studentClass: "10", section: "B" },
-    { admissionNumber: "S008", name: "Rohan Gupta", studentClass: "11", section: "A" },
-    { admissionNumber: "S009", name: "Deepa Singh", studentClass: "11", section: "A" },
-    { admissionNumber: "S010", name: "Karthik Reddy", studentClass: "11", section: "A" },
+  console.log("[seed] Seeding school data (50 students, 5 teachers, 1 admin)...");
+
+  // Wipe everything in FK-safe order
+  await db.execute(drizzleSql`TRUNCATE TABLE homework_submissions, messages, deviation_logs, performance_profiles, evaluations, merged_answer_scripts, answer_sheet_pages, answer_sheets, ncert_chapters, conversations, homework, exams, students, teachers, admins RESTART IDENTITY CASCADE`);
+
+  const hp = await bcrypt.hash("123", 10);
+
+  // ── 5 TEACHERS ──────────────────────────────────────────────────────────────
+  const teacherDefs = [
+    { employeeId: "T001", name: "Ramesh Sharma",   email: "ramesh@school.edu",   subjects: ["Mathematics"],    classes: ["9", "10"], isClass: 1, classOf: "10-A" },
+    { employeeId: "T002", name: "Sunita Patel",    email: "sunita@school.edu",   subjects: ["Science"],        classes: ["9", "10"], isClass: 0, classOf: "" },
+    { employeeId: "T003", name: "Vikram Iyer",     email: "vikram@school.edu",   subjects: ["English"],        classes: ["9", "10"], isClass: 0, classOf: "" },
+    { employeeId: "T004", name: "Meena Krishnan",  email: "meena@school.edu",    subjects: ["Social Studies"], classes: ["9", "10"], isClass: 1, classOf: "9-A" },
+    { employeeId: "T005", name: "Rajan Singh",     email: "rajan@school.edu",    subjects: ["Hindi"],          classes: ["9", "10"], isClass: 0, classOf: "" },
   ];
-  for (const s of seedStudents) {
-    const existing = await storage.getStudentByAdmissionNumber(s.admissionNumber);
-    if (!existing) {
-      await storage.createStudent({ ...s, password: hashedPassword });
-    }
+  const createdTeachers: any[] = [];
+  for (const td of teacherDefs) {
+    const t = await storage.createTeacher({
+      employeeId: td.employeeId, name: td.name, email: td.email, password: hp,
+      subjectsAssigned: JSON.stringify(td.subjects),
+      classesAssigned: JSON.stringify(td.classes),
+      isClassTeacher: td.isClass,
+      classTeacherOf: td.classOf,
+    });
+    createdTeachers.push({ ...td, id: t.id });
   }
 
-  // Seed exams + evaluations only if teacher has none
-  const existingExams = await storage.getExamsByTeacher(teacher.id);
-  if (existingExams.length === 0) {
-    const mathExam = await storage.createExam({
-      teacherId: teacher.id,
-      subject: "Mathematics",
-      className: "10",
-      examName: "Mathematics Unit Test — Class 10",
-      category: "unit_test",
-      totalMarks: 50,
-      questionText: "Q1 (5 marks): Solve: 2x + 3 = 7.\nQ2 (10 marks): Find the area of a circle with radius 7 cm.\nQ3 (10 marks): Factorize: x² + 5x + 6.\nQ4 (15 marks): Solve the quadratic equation: x² – 5x + 6 = 0.\nQ5 (10 marks): Simplify: (a + b)² – (a – b)².",
-      modelAnswerText: "Q1: x = 2.\nQ2: Area = 154 cm².\nQ3: (x + 2)(x + 3).\nQ4: x = 2 or x = 3.\nQ5: 4ab.",
+  // ── 50 STUDENTS ─────────────────────────────────────────────────────────────
+  const studentDefs = [
+    // Class 9A — S001–S012 (12 students)
+    { id: "S001", name: "Aarav Sharma",     class: "9", sec: "A" },
+    { id: "S002", name: "Priya Nair",       class: "9", sec: "A" },
+    { id: "S003", name: "Rahul Gupta",      class: "9", sec: "A" },
+    { id: "S004", name: "Ananya Singh",     class: "9", sec: "A" },
+    { id: "S005", name: "Karan Mehta",      class: "9", sec: "A" },
+    { id: "S006", name: "Diya Patel",       class: "9", sec: "A" },
+    { id: "S007", name: "Arjun Reddy",      class: "9", sec: "A" },
+    { id: "S008", name: "Sneha Kumar",      class: "9", sec: "A" },
+    { id: "S009", name: "Rohit Joshi",      class: "9", sec: "A" },
+    { id: "S010", name: "Kavya Iyer",       class: "9", sec: "A" },
+    { id: "S011", name: "Siddharth Rao",    class: "9", sec: "A" },
+    { id: "S012", name: "Pooja Bhat",       class: "9", sec: "A" },
+    // Class 9B — S013–S025 (13 students)
+    { id: "S013", name: "Akash Verma",      class: "9", sec: "B" },
+    { id: "S014", name: "Riya Krishnan",    class: "9", sec: "B" },
+    { id: "S015", name: "Arnav Das",        class: "9", sec: "B" },
+    { id: "S016", name: "Nikita Tiwari",    class: "9", sec: "B" },
+    { id: "S017", name: "Vivek Pillai",     class: "9", sec: "B" },
+    { id: "S018", name: "Meera Jain",       class: "9", sec: "B" },
+    { id: "S019", name: "Harsh Agarwal",    class: "9", sec: "B" },
+    { id: "S020", name: "Shruti Mishra",    class: "9", sec: "B" },
+    { id: "S021", name: "Yash Saxena",      class: "9", sec: "B" },
+    { id: "S022", name: "Tanvi Chanda",     class: "9", sec: "B" },
+    { id: "S023", name: "Kunal Shah",       class: "9", sec: "B" },
+    { id: "S024", name: "Ritika Bansal",    class: "9", sec: "B" },
+    { id: "S025", name: "Madhav Malhotra",  class: "9", sec: "B" },
+    // Class 10A — S026–S038 (13 students)
+    { id: "S026", name: "Ishaan Chopra",    class: "10", sec: "A" },
+    { id: "S027", name: "Neha Srivastava",  class: "10", sec: "A" },
+    { id: "S028", name: "Varun Dubey",      class: "10", sec: "A" },
+    { id: "S029", name: "Anjali Kapoor",    class: "10", sec: "A" },
+    { id: "S030", name: "Nikhil Pandey",    class: "10", sec: "A" },
+    { id: "S031", name: "Aditi Chauhan",    class: "10", sec: "A" },
+    { id: "S032", name: "Kartik Nanda",     class: "10", sec: "A" },
+    { id: "S033", name: "Sanya Ahuja",      class: "10", sec: "A" },
+    { id: "S034", name: "Dev Bajaj",        class: "10", sec: "A" },
+    { id: "S035", name: "Riya Thakur",      class: "10", sec: "A" },
+    { id: "S036", name: "Amit Ranawat",     class: "10", sec: "A" },
+    { id: "S037", name: "Preethi Suresh",   class: "10", sec: "A" },
+    { id: "S038", name: "Krish Goel",       class: "10", sec: "A" },
+    // Class 10B — S039–S050 (12 students)
+    { id: "S039", name: "Ajay Mohan",       class: "10", sec: "B" },
+    { id: "S040", name: "Deepika Rao",      class: "10", sec: "B" },
+    { id: "S041", name: "Sumit Yadav",      class: "10", sec: "B" },
+    { id: "S042", name: "Shreya Choudhary", class: "10", sec: "B" },
+    { id: "S043", name: "Rajesh Bhatt",     class: "10", sec: "B" },
+    { id: "S044", name: "Swathi Nambiar",   class: "10", sec: "B" },
+    { id: "S045", name: "Pranav Sethi",     class: "10", sec: "B" },
+    { id: "S046", name: "Jyoti Soni",       class: "10", sec: "B" },
+    { id: "S047", name: "Manish Tripathi",  class: "10", sec: "B" },
+    { id: "S048", name: "Ritu Deshpande",   class: "10", sec: "B" },
+    { id: "S049", name: "Sanket Parekh",    class: "10", sec: "B" },
+    { id: "S050", name: "Divya Raghavan",   class: "10", sec: "B" },
+  ];
+  const createdStudents: any[] = [];
+  for (const sd of studentDefs) {
+    const s = await storage.createStudent({ admissionNumber: sd.id, name: sd.name, studentClass: sd.class, section: sd.sec, password: hp });
+    createdStudents.push({ ...sd, dbId: s.id });
+  }
+
+  // ── 1 ADMIN ─────────────────────────────────────────────────────────────────
+  await storage.createAdmin({ employeeId: "A001", name: "Principal Admin", email: "admin@school.edu", password: hp });
+
+  // ── EXAM DEFINITIONS ─────────────────────────────────────────────────────────
+  const today = new Date();
+  const daysFromNow = (n: number) => new Date(today.getTime() + n * 86400000).toISOString().split("T")[0];
+
+  type ExamDef = {
+    tIdx: number; subject: string; class_: string;
+    name: string; marks: number; cat: string;
+    q: string; ans: string; difficulty: number;
+  };
+  const examDefs: ExamDef[] = [
+    { tIdx: 0, subject: "Mathematics", class_: "9",  name: "Mathematics Unit Test — Class 9",       marks: 50,  cat: "unit_test",  difficulty: 0.7,
+      q: "Q1 (10m): Solve: 3x − 7 = 14.\nQ2 (15m): Find prime factorisation of 1260.\nQ3 (15m): In △ABC, AB=5, BC=12. Find AC.\nQ4 (10m): Evaluate: 4³ + √144.",
+      ans: "Q1: x=7.\nQ2: 2²×3²×5×7.\nQ3: 13.\nQ4: 76." },
+    { tIdx: 0, subject: "Mathematics", class_: "10", name: "Mathematics Unit Test — Class 10",      marks: 50,  cat: "unit_test",  difficulty: 0.72,
+      q: "Q1 (10m): Factorize x²+5x+6.\nQ2 (15m): Solve x²−5x+6=0.\nQ3 (15m): Area of circle with r=7cm.\nQ4 (10m): Simplify (a+b)²−(a−b)².",
+      ans: "Q1: (x+2)(x+3).\nQ2: x=2 or x=3.\nQ3: 154 cm².\nQ4: 4ab." },
+    { tIdx: 1, subject: "Science",      class_: "9",  name: "Science Mid Term — Class 9",          marks: 100, cat: "mid_term",   difficulty: 0.65,
+      q: "Q1 (20m): Define cell and list its parts.\nQ2 (20m): Explain photosynthesis.\nQ3 (20m): State Newton's Laws.\nQ4 (20m): Describe water cycle.\nQ5 (20m): Acids vs Bases.",
+      ans: "Q1: Cell is basic unit of life. Parts: nucleus, cytoplasm, cell membrane.\nQ2: 6CO₂+6H₂O→C₆H₁₂O₆+6O₂.\nQ3: Inertia, F=ma, Action-Reaction.\nQ4: Evaporation→Condensation→Precipitation→Collection.\nQ5: Acids taste sour, turn litmus red; Bases taste bitter, turn litmus blue." },
+    { tIdx: 1, subject: "Science",      class_: "10", name: "Science Mid Term — Class 10",         marks: 100, cat: "mid_term",   difficulty: 0.68,
+      q: "Q1 (20m): Define heredity and variation.\nQ2 (20m): Explain refraction of light.\nQ3 (20m): Electric circuit components.\nQ4 (20m): Human digestive system.\nQ5 (20m): Periodic table trends.",
+      ans: "Q1: Heredity = transmission of traits; Variation = differences in traits.\nQ2: Bending of light at interface due to change in speed.\nQ3: Battery, resistor, switch, ammeter, voltmeter.\nQ4: Mouth→Oesophagus→Stomach→Small intestine→Large intestine.\nQ5: Atomic radius decreases across period; increases down group." },
+    { tIdx: 2, subject: "English",      class_: "9",  name: "English Class Test — Class 9",        marks: 25,  cat: "class_test", difficulty: 0.5,
+      q: "Q1 (10m): Write a paragraph on Environmental Conservation.\nQ2 (10m): Correct the grammar in 5 sentences.\nQ3 (5m): Identify nouns and verbs.",
+      ans: "Q1: Well-structured paragraph on deforestation, pollution, and sustainable practices.\nQ2: Corrected sentences.\nQ3: Correctly identified parts of speech." },
+    { tIdx: 2, subject: "English",      class_: "10", name: "English Class Test — Class 10",       marks: 25,  cat: "class_test", difficulty: 0.52,
+      q: "Q1 (10m): Write a descriptive paragraph on the importance of nature.\nQ2 (10m): Fill in correct verb forms.\nQ3 (5m): Identify parts of speech.",
+      ans: "Q1: Descriptive writing touching ecosystem, biodiversity, sustainability.\nQ2: am, is, are, was, were, has, have, had, will, would.\nQ3: Noun, pronoun, verb, adjective, adverb, preposition, conjunction, interjection." },
+    { tIdx: 3, subject: "Social Studies", class_: "9",  name: "Social Studies Unit Test — Class 9",  marks: 50,  cat: "unit_test", difficulty: 0.55,
+      q: "Q1 (15m): Causes of French Revolution.\nQ2 (15m): Geography of India.\nQ3 (20m): Democracy and its importance.",
+      ans: "Q1: Social inequality, economic crisis, Enlightenment ideas, weak monarchy.\nQ2: Himalayan ranges, Indo-Gangetic plains, Deccan plateau, coastal plains.\nQ3: Democracy ensures equality, liberty, and fraternity through elected representation." },
+    { tIdx: 3, subject: "Social Studies", class_: "10", name: "Social Studies Unit Test — Class 10", marks: 50,  cat: "unit_test", difficulty: 0.57,
+      q: "Q1 (15m): Nationalism in India.\nQ2 (15m): Federalism in India.\nQ3 (20m): Economic sectors and development.",
+      ans: "Q1: Non-cooperation, Civil Disobedience, Quit India movements led by Gandhi.\nQ2: Centre-State division of powers; Concurrent, State and Union Lists.\nQ3: Primary, Secondary, Tertiary sectors contribute to GDP and employment." },
+    { tIdx: 4, subject: "Hindi",        class_: "9",  name: "Hindi Unit Test — Class 9",           marks: 50,  cat: "unit_test", difficulty: 0.45,
+      q: "Q1 (15m): किसी एक कहानी का सारांश लिखिए।\nQ2 (15m): व्याकरण: संधि विच्छेद।\nQ3 (20m): निबंध: पर्यावरण प्रदूषण।",
+      ans: "Q1: कहानी का सारांश सटीक और सरल भाषा में।\nQ2: संधि विच्छेद के उदाहरण।\nQ3: प्रदूषण के कारण, प्रभाव और समाधान पर निबंध।" },
+    { tIdx: 4, subject: "Hindi",        class_: "10", name: "Hindi Unit Test — Class 10",          marks: 50,  cat: "unit_test", difficulty: 0.47,
+      q: "Q1 (15m): कबीर के दोहों की व्याख्या।\nQ2 (15m): व्याकरण: वाक्य-भेद।\nQ3 (20m): निबंध: आधुनिक जीवन में मोबाइल।",
+      ans: "Q1: दोहों का अर्थ और संदर्भ।\nQ2: सरल, मिश्र, संयुक्त वाक्य के उदाहरण।\nQ3: मोबाइल के लाभ-हानि पर संतुलित निबंध।" },
+  ];
+
+  // Create exams
+  const createdExams: any[] = [];
+  for (const ed of examDefs) {
+    const teacher = createdTeachers[ed.tIdx];
+    const exam = await storage.createExam({
+      teacherId: teacher.id, subject: ed.subject, className: ed.class_,
+      examName: ed.name, category: ed.cat, totalMarks: ed.marks,
+      questionText: ed.q, modelAnswerText: ed.ans,
     });
+    createdExams.push({ ...ed, dbId: exam.id, exam });
+  }
 
-    const scienceExam = await storage.createExam({
-      teacherId: teacher.id,
-      subject: "Science",
-      className: "10",
-      examName: "Science Mid Term — Class 10",
-      category: "mid_term",
-      totalMarks: 100,
-      questionText: "Q1 (10 marks): Define photosynthesis and write its equation.\nQ2 (20 marks): Explain Newton's three laws of motion with examples.\nQ3 (15 marks): What is the periodic table? How are elements arranged?\nQ4 (25 marks): Describe the water cycle with a labelled diagram.\nQ5 (30 marks): Distinguish between acids and bases. Give 5 examples each.",
-      modelAnswerText: "Q1: Process by which plants make food using sunlight, CO₂ and water. Equation: 6CO₂ + 6H₂O → C₆H₁₂O₆ + 6O₂.\nQ2: Law 1 – Inertia; Law 2 – F = ma; Law 3 – Every action has an equal and opposite reaction.\nQ3: Arrangement of elements by increasing atomic number in periods and groups.\nQ4: Evaporation → Condensation → Precipitation → Collection.\nQ5: Acids: HCl, H₂SO₄, HNO₃, CH₃COOH, H₃PO₄. Bases: NaOH, KOH, Ca(OH)₂, NH₃, Mg(OH)₂.",
-    });
+  // ── EVALUATIONS ──────────────────────────────────────────────────────────────
+  // For each exam, find all students in that class and create evaluations
+  for (let ei = 0; ei < createdExams.length; ei++) {
+    const ed = createdExams[ei];
+    const classStudents = createdStudents.filter(s => s.class === ed.class_);
+    for (let si = 0; si < classStudents.length; si++) {
+      const st = classStudents[si];
+      // Deterministic but varied marks: ability based on position in class + subject difficulty
+      const ability = 1 - (si / classStudents.length) * 0.5; // top student = 1.0, bottom = 0.5
+      const variance = drand(si * 17 + ei * 31) * 0.15 - 0.075; // ±7.5%
+      const pct = Math.min(0.98, Math.max(0.35, (1 - ed.difficulty) * 0.3 + ability * 0.55 + 0.15 + variance));
+      const marks = Math.round(ed.marks * pct);
+      const q1m = Math.round(marks * 0.4), q2m = Math.round(marks * 0.35), q3m = marks - q1m - q2m;
+      const q1max = Math.round(ed.marks * 0.4), q2max = Math.round(ed.marks * 0.35), q3max = ed.marks - q1max - q2max;
 
-    const englishExam = await storage.createExam({
-      teacherId: teacher.id,
-      subject: "English",
-      className: "11",
-      examName: "English Class Test — Class 11",
-      category: "class_test",
-      totalMarks: 25,
-      questionText: "Q1 (10 marks): Write a descriptive paragraph on the importance of nature.\nQ2 (10 marks): Fill in the blanks with correct verb forms.\nQ3 (5 marks): Identify parts of speech in the given sentences.",
-      modelAnswerText: "Q1: Nature is the foundation of all life. A well-written paragraph touching on ecosystem, biodiversity, sustainability, and human wellbeing expected.\nQ2: am, is, are, was, were, has, have, had, will, would.\nQ3: Noun, pronoun, verb, adjective, adverb, preposition, conjunction, interjection.",
-    });
-
-    // Seed evaluations via answer sheets
-    const evalSeeds = [
-      { exam: mathExam, admissionNumber: "S001", name: "Jane Smith", marks: 38 },
-      { exam: mathExam, admissionNumber: "S002", name: "Arjun Mehta", marks: 45 },
-      { exam: mathExam, admissionNumber: "S003", name: "Priya Rao", marks: 41 },
-      { exam: mathExam, admissionNumber: "S004", name: "Rahul Kumar", marks: 30 },
-      { exam: mathExam, admissionNumber: "S005", name: "Ananya Patel", marks: 35 },
-      { exam: scienceExam, admissionNumber: "S001", name: "Jane Smith", marks: 78 },
-      { exam: scienceExam, admissionNumber: "S002", name: "Arjun Mehta", marks: 88 },
-      { exam: scienceExam, admissionNumber: "S003", name: "Priya Rao", marks: 92 },
-      { exam: scienceExam, admissionNumber: "S004", name: "Rahul Kumar", marks: 65 },
-      { exam: scienceExam, admissionNumber: "S005", name: "Ananya Patel", marks: 72 },
-      { exam: scienceExam, admissionNumber: "S006", name: "Kavya Reddy", marks: 58 },
-      { exam: englishExam, admissionNumber: "S008", name: "Rohan Gupta", marks: 18 },
-      { exam: englishExam, admissionNumber: "S009", name: "Deepa Singh", marks: 22 },
-      { exam: englishExam, admissionNumber: "S010", name: "Karthik Reddy", marks: 15 },
-    ];
-
-    for (const d of evalSeeds) {
       const sheet = await storage.createAnswerSheet({
-        examId: d.exam.id,
-        studentId: null,
-        admissionNumber: d.admissionNumber,
-        studentName: d.name,
-        ocrOutput: JSON.stringify({ admission_number: d.admissionNumber, student_name: d.name, answers: [] }),
+        examId: ed.dbId, studentId: st.dbId, admissionNumber: st.id,
+        studentName: st.name,
+        ocrOutput: JSON.stringify({ admission_number: st.id, student_name: st.name, answers: [] }),
         status: "evaluated",
       });
       await storage.createEvaluation({
-        answerSheetId: sheet.id,
-        studentName: d.name,
-        admissionNumber: d.admissionNumber,
-        totalMarks: d.marks,
+        answerSheetId: sheet.id, studentName: st.name, admissionNumber: st.id,
+        totalMarks: marks,
         questions: JSON.stringify([
-          { question_number: 1, chapter: "General", marks_awarded: Math.round(d.marks * 0.4), max_marks: Math.round(d.exam.totalMarks * 0.4), deviation_reason: "Satisfactory answer", improvement_suggestion: "Review key concepts" },
-          { question_number: 2, chapter: "General", marks_awarded: Math.round(d.marks * 0.3), max_marks: Math.round(d.exam.totalMarks * 0.3), deviation_reason: "Partially correct", improvement_suggestion: "Practice more examples" },
-          { question_number: 3, chapter: "General", marks_awarded: Math.round(d.marks * 0.3), max_marks: Math.round(d.exam.totalMarks * 0.3), deviation_reason: "Good understanding", improvement_suggestion: "Work on depth of explanation" },
+          { question_number: 1, chapter: ed.subject, marks_awarded: q1m, max_marks: q1max, deviation_reason: pct > 0.75 ? "Excellent response" : pct > 0.55 ? "Satisfactory" : "Needs improvement", improvement_suggestion: "Review core concepts" },
+          { question_number: 2, chapter: ed.subject, marks_awarded: q2m, max_marks: q2max, deviation_reason: pct > 0.7 ? "Good understanding" : "Partially correct", improvement_suggestion: "Practice more examples" },
+          { question_number: 3, chapter: ed.subject, marks_awarded: q3m, max_marks: q3max, deviation_reason: "Attempted", improvement_suggestion: "Work on depth" },
         ]),
-        overallFeedback: `Good effort. Scored ${d.marks}/${d.exam.totalMarks} marks. Keep practising to improve further.`,
+        overallFeedback: `${st.name} scored ${marks}/${ed.marks} (${Math.round(pct * 100)}%). ${pct >= 0.8 ? "Excellent performance!" : pct >= 0.6 ? "Good effort — keep practising." : "Needs more revision. Focus on key concepts."}`,
       });
     }
-
-    // Seed homework
-    const today = new Date();
-    const in7 = new Date(today.getTime() + 7 * 86400000).toISOString().split("T")[0];
-    const in3 = new Date(today.getTime() + 3 * 86400000).toISOString().split("T")[0];
-    const yesterday = new Date(today.getTime() - 86400000).toISOString().split("T")[0];
-
-    await storage.createHomework({ teacherId: teacher.id, subject: "Mathematics", className: "10", section: "A", description: "Solve exercises 1–20 from Chapter 4: Quadratic Equations. Show all working steps.", modelSolutionText: "Detailed solutions using factorisation, completing the square, and the quadratic formula.", dueDate: in7 });
-    await storage.createHomework({ teacherId: teacher.id, subject: "Science", className: "10", section: "A", description: "Prepare a labelled diagram of the human digestive system and describe the function of each organ.", modelSolutionText: "Diagram should include: mouth, oesophagus, stomach, small intestine, large intestine, rectum, liver, pancreas, and gallbladder with correct labels and functions.", dueDate: in3 });
-    await storage.createHomework({ teacherId: teacher.id, subject: "Mathematics", className: "10", section: "B", description: "Practice problems on linear equations — worksheet attached. Attempt all 15 questions.", modelSolutionText: "Solutions to all 15 linear equation problems from the worksheet.", dueDate: yesterday });
   }
+
+  // ── HOMEWORK ─────────────────────────────────────────────────────────────────
+  const hwDefs = [
+    { tIdx: 0, sub: "Mathematics", cls: "9",  sec: "A", desc: "Solve Chapter 3 exercises 1–15: Number Systems. Show all steps.", sol: "Factor trees and division method for each problem.", due: daysFromNow(5) },
+    { tIdx: 0, sub: "Mathematics", cls: "9",  sec: "B", desc: "Practice polynomial factorisation — worksheet Q1–Q20.", sol: "Factorisation by grouping and common factors.", due: daysFromNow(4) },
+    { tIdx: 0, sub: "Mathematics", cls: "10", sec: "A", desc: "Solve quadratic equations from Chapter 4, Ex 4.3, Q1–Q10.", sol: "Using factorisation, completing the square, and quadratic formula.", due: daysFromNow(7) },
+    { tIdx: 0, sub: "Mathematics", cls: "10", sec: "B", desc: "Trigonometric identities practice: prove 10 identities from list.", sol: "Standard proofs using sin²θ+cos²θ=1 and reciprocal identities.", due: daysFromNow(3) },
+    { tIdx: 1, sub: "Science",     cls: "9",  sec: "A", desc: "Draw and label the human cell. Write functions of each organelle.", sol: "Cell membrane, nucleus, mitochondria, ER, Golgi, lysosome with functions.", due: daysFromNow(6) },
+    { tIdx: 1, sub: "Science",     cls: "9",  sec: "B", desc: "Write a report on Newton's three laws with real-life examples.", sol: "Law 1: seatbelts; Law 2: F=ma in sports; Law 3: rocket propulsion.", due: daysFromNow(5) },
+    { tIdx: 1, sub: "Science",     cls: "10", sec: "A", desc: "Prepare a diagram of the human digestive system with organ functions.", sol: "Mouth→Oesophagus→Stomach→Small intestine→Large intestine with enzyme details.", due: daysFromNow(4) },
+    { tIdx: 1, sub: "Science",     cls: "10", sec: "B", desc: "Explain refraction with ray diagrams for concave and convex lenses.", sol: "Snell's law, focal length concept, and lens formula 1/v−1/u=1/f.", due: daysFromNow(8) },
+    { tIdx: 2, sub: "English",     cls: "9",  sec: "A", desc: "Write a 200-word essay on 'The Role of Youth in Nation Building'.", sol: "Introduction, body covering education/innovation/civic duty, conclusion.", due: daysFromNow(6) },
+    { tIdx: 2, sub: "English",     cls: "10", sec: "A", desc: "Read Chapter 5 of the textbook and answer comprehension questions.", sol: "Answers based on the given passage focusing on inference and vocabulary.", due: daysFromNow(5) },
+    { tIdx: 3, sub: "Social Studies", cls: "9",  sec: "A", desc: "Timeline of French Revolution events (1789–1799). Draw and label.", sol: "1789 Estates General, Bastille storming, 1793 execution of Louis XVI, 1799 Napoleon.", due: daysFromNow(7) },
+    { tIdx: 3, sub: "Social Studies", cls: "10", sec: "A", desc: "Draw India's political map and mark 5 major river systems.", sol: "Ganga, Yamuna, Brahmaputra, Godavari, Krishna with tributaries.", due: daysFromNow(6) },
+    { tIdx: 4, sub: "Hindi",      cls: "9",  sec: "A", desc: "कबीर के किन्हीं 5 दोहों की व्याख्या कीजिए।", sol: "प्रत्येक दोहे का शाब्दिक अर्थ और भावार्थ।", due: daysFromNow(4) },
+    { tIdx: 4, sub: "Hindi",      cls: "10", sec: "A", desc: "पर्यावरण प्रदूषण पर 250 शब्दों का निबंध लिखिए।", sol: "कारण, प्रभाव और उपाय तीनों भागों में निबंध।", due: daysFromNow(5) },
+  ];
+  for (const hd of hwDefs) {
+    const teacher = createdTeachers[hd.tIdx];
+    await storage.createHomework({ teacherId: teacher.id, subject: hd.sub, className: hd.cls, section: hd.sec, description: hd.desc, modelSolutionText: hd.sol, dueDate: hd.due });
+  }
+
+  console.log(`[seed] Done: 5 teachers, 50 students, 1 admin, ${createdExams.length} exams, ${createdStudents.length * createdExams.length / 2} evaluations (approx), ${hwDefs.length} homework assignments.`);
 }
 
 // Middleware to extract token from Header
@@ -295,6 +395,67 @@ export async function registerRoutes(
     }
   });
 
+  // ─── ADMIN LOGIN ──────────────────────────────────────────────────────────
+  app.post("/api/auth/admin/login", async (req, res) => {
+    try {
+      const { employeeId, password } = req.body;
+      if (!employeeId || !password) return res.status(400).json({ message: "Employee ID and password required" });
+      const admin = await storage.getAdminByEmployeeId(employeeId);
+      if (!admin || !(await bcrypt.compare(password, admin.password))) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+      const token = jwt.sign({ id: admin.id, role: "admin" }, JWT_SECRET, { expiresIn: "1d" });
+      const { password: _, ...adminWithoutPassword } = admin;
+      res.json({ token, role: "admin", user: adminWithoutPassword });
+    } catch (err) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ─── ADMIN: SCHOOL STATS ───────────────────────────────────────────────────
+  app.get("/api/admin/stats", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const stats = await storage.getSchoolStats();
+      res.json(stats);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load school stats" });
+    }
+  });
+
+  // ─── ADMIN: SCHOOL ANALYTICS ────────────────────────────────────────────────
+  app.get("/api/admin/analytics", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const analytics = await storage.getSchoolAnalytics();
+      res.json(analytics);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load school analytics" });
+    }
+  });
+
+  // ─── ADMIN: ALL STUDENTS ────────────────────────────────────────────────────
+  app.get("/api/admin/students", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const allStudents = await storage.getAllStudents();
+      res.json(allStudents.map(({ password, ...s }) => s));
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load students" });
+    }
+  });
+
+  // ─── ADMIN: ALL TEACHERS ────────────────────────────────────────────────────
+  app.get("/api/admin/teachers", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const allTeachers = await storage.getAllTeachers();
+      res.json(allTeachers.map(({ password, ...t }) => t));
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load teachers" });
+    }
+  });
+
   // GET ME
   app.get(api.auth.me.path, authMiddleware, async (req: AuthRequest, res) => {
     try {
@@ -303,6 +464,11 @@ export async function registerRoutes(
         const teacher = await storage.getTeacher(id);
         if (!teacher) return res.status(401).json({ message: "User not found" });
         const { password, ...user } = teacher;
+        return res.json({ role, user });
+      } else if (role === "admin") {
+        const admin = await storage.getAdmin(id);
+        if (!admin) return res.status(401).json({ message: "User not found" });
+        const { password, ...user } = admin;
         return res.json({ role, user });
       } else {
         const student = await storage.getStudent(id);

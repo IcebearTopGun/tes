@@ -16,28 +16,31 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
-  const [role, setRole] = useState<"teacher" | "student">("student");
-  const { teacherLogin, studentLogin, teacherSignup, studentSignup } = useAuth();
+  const [role, setRole] = useState<"teacher" | "student" | "admin">("student");
+  const { teacherLogin, studentLogin, adminLogin, teacherSignup, studentSignup } = useAuth();
 
-  const isPending = teacherLogin.isPending || studentLogin.isPending || teacherSignup.isPending || studentSignup.isPending;
+  const isPending =
+    teacherLogin.isPending || studentLogin.isPending || adminLogin.isPending ||
+    teacherSignup.isPending || studentSignup.isPending;
 
-  // Derive form schemas based on mode and role
+  const adminLoginSchema = z.object({ employeeId: z.string().min(1, "Employee ID required"), password: z.string().min(1, "Password required") });
   const teacherLoginSchema = z.object({ employeeId: z.string().min(1, "Employee ID required"), password: z.string().min(1, "Password required") });
   const studentLoginSchema = z.object({ admissionNumber: z.string().min(1, "Admission Number required"), password: z.string().min(1, "Password required") });
 
-  const currentSchema = mode === "login" 
-    ? (role === "teacher" ? teacherLoginSchema : studentLoginSchema)
-    : (role === "teacher" ? insertTeacherSchema : insertStudentSchema);
+  const currentSchema =
+    role === "admin" ? adminLoginSchema :
+    mode === "login" ? (role === "teacher" ? teacherLoginSchema : studentLoginSchema) :
+    (role === "teacher" ? insertTeacherSchema : insertStudentSchema);
 
   const form = useForm({
     resolver: zodResolver(currentSchema),
-    defaultValues: {
-      employeeId: "", admissionNumber: "", name: "", email: "", studentClass: "", section: "", password: ""
-    }
+    defaultValues: { employeeId: "", admissionNumber: "", name: "", email: "", studentClass: "", section: "", password: "" }
   });
 
   const onSubmit = (data: any) => {
-    if (mode === "login") {
+    if (role === "admin") {
+      adminLogin.mutate({ employeeId: data.employeeId, password: data.password });
+    } else if (mode === "login") {
       if (role === "teacher") teacherLogin.mutate({ employeeId: data.employeeId, password: data.password });
       else studentLogin.mutate({ admissionNumber: data.admissionNumber, password: data.password });
     } else {
@@ -72,9 +75,12 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
           </CardHeader>
           <CardContent>
             <Tabs value={role} onValueChange={(v) => { setRole(v as any); form.reset(); }} className="w-full mb-8">
-              <TabsList className="grid w-full grid-cols-2 p-1 bg-muted/50 rounded-xl">
+              <TabsList className={`grid w-full p-1 bg-muted/50 rounded-xl ${mode === "login" ? "grid-cols-3" : "grid-cols-2"}`}>
                 <TabsTrigger value="student" className="rounded-lg font-medium data-[state=active]:shadow-sm">Student</TabsTrigger>
                 <TabsTrigger value="teacher" className="rounded-lg font-medium data-[state=active]:shadow-sm">Teacher</TabsTrigger>
+                {mode === "login" && (
+                  <TabsTrigger value="admin" className="rounded-lg font-medium data-[state=active]:shadow-sm">Admin</TabsTrigger>
+                )}
               </TabsList>
             </Tabs>
 
@@ -88,11 +94,25 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
                   transition={{ duration: 0.2 }}
                   className="space-y-4"
                 >
-                  {/* TEACHER SPECIFIC FIELDS */}
+                  {/* ADMIN FIELDS */}
+                  {role === "admin" && (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="employeeId">Admin Employee ID</Label>
+                        <Input id="employeeId" {...form.register("employeeId")} className="bg-background/50 h-11 rounded-xl" placeholder="A001" data-testid="input-admin-id" />
+                        {form.formState.errors.employeeId && <p className="text-xs text-destructive">{form.formState.errors.employeeId.message as string}</p>}
+                      </div>
+                      <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-300">
+                        Admin accounts are pre-provisioned by the system. Contact your administrator for access credentials.
+                      </div>
+                    </>
+                  )}
+
+                  {/* TEACHER FIELDS */}
                   {role === "teacher" && (
                     <div className="space-y-2">
                       <Label htmlFor="employeeId">Employee ID</Label>
-                      <Input id="employeeId" {...form.register("employeeId")} className="bg-background/50 h-11 rounded-xl" placeholder="TCH-1234" />
+                      <Input id="employeeId" {...form.register("employeeId")} className="bg-background/50 h-11 rounded-xl" placeholder="T001" data-testid="input-teacher-id" />
                       {form.formState.errors.employeeId && <p className="text-xs text-destructive">{form.formState.errors.employeeId.message as string}</p>}
                     </div>
                   )}
@@ -101,22 +121,22 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
                     <>
                       <div className="space-y-2">
                         <Label htmlFor="name">Full Name</Label>
-                        <Input id="name" {...form.register("name")} className="bg-background/50 h-11 rounded-xl" placeholder="Jane Doe" />
+                        <Input id="name" {...form.register("name")} className="bg-background/50 h-11 rounded-xl" placeholder="Ramesh Sharma" />
                         {form.formState.errors.name && <p className="text-xs text-destructive">{form.formState.errors.name.message as string}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="email">Email Address</Label>
-                        <Input id="email" type="email" {...form.register("email")} className="bg-background/50 h-11 rounded-xl" placeholder="jane@school.edu" />
+                        <Input id="email" type="email" {...form.register("email")} className="bg-background/50 h-11 rounded-xl" placeholder="ramesh@school.edu" />
                         {form.formState.errors.email && <p className="text-xs text-destructive">{form.formState.errors.email.message as string}</p>}
                       </div>
                     </>
                   )}
 
-                  {/* STUDENT SPECIFIC FIELDS */}
+                  {/* STUDENT FIELDS */}
                   {role === "student" && (
                     <div className="space-y-2">
                       <Label htmlFor="admissionNumber">Admission Number</Label>
-                      <Input id="admissionNumber" {...form.register("admissionNumber")} className="bg-background/50 h-11 rounded-xl" placeholder="STU-2024-001" />
+                      <Input id="admissionNumber" {...form.register("admissionNumber")} className="bg-background/50 h-11 rounded-xl" placeholder="S001" data-testid="input-student-id" />
                       {form.formState.errors.admissionNumber && <p className="text-xs text-destructive">{form.formState.errors.admissionNumber.message as string}</p>}
                     </div>
                   )}
@@ -125,18 +145,24 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
                     <>
                       <div className="space-y-2">
                         <Label htmlFor="studentName">Full Name</Label>
-                        <Input id="studentName" {...form.register("name")} className="bg-background/50 h-11 rounded-xl" placeholder="John Smith" />
+                        <Input id="studentName" {...form.register("name")} className="bg-background/50 h-11 rounded-xl" placeholder="Aarav Sharma" />
                         {form.formState.errors.name && <p className="text-xs text-destructive">{form.formState.errors.name.message as string}</p>}
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label htmlFor="studentClass">Class/Grade</Label>
-                          <Input id="studentClass" {...form.register("studentClass")} className="bg-background/50 h-11 rounded-xl" placeholder="10" />
+                          <Label>Class</Label>
+                          <select {...form.register("studentClass")} className="w-full h-11 rounded-xl border border-input bg-background/50 px-3 text-sm">
+                            <option value="">Select class</option>
+                            {["9", "10", "11", "12"].map(c => <option key={c} value={c}>Class {c}</option>)}
+                          </select>
                           {form.formState.errors.studentClass && <p className="text-xs text-destructive">{form.formState.errors.studentClass.message as string}</p>}
                         </div>
                         <div className="space-y-2">
-                          <Label htmlFor="section">Section</Label>
-                          <Input id="section" {...form.register("section")} className="bg-background/50 h-11 rounded-xl" placeholder="A" />
+                          <Label>Section</Label>
+                          <select {...form.register("section")} className="w-full h-11 rounded-xl border border-input bg-background/50 px-3 text-sm">
+                            <option value="">Select section</option>
+                            {["A", "B", "C", "D"].map(s => <option key={s} value={s}>Section {s}</option>)}
+                          </select>
                           {form.formState.errors.section && <p className="text-xs text-destructive">{form.formState.errors.section.message as string}</p>}
                         </div>
                       </div>
@@ -144,29 +170,49 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
                   )}
 
                   {/* COMMON PASSWORD FIELD */}
-                  <div className="space-y-2 pb-2">
-                    <Label htmlFor="password">Password</Label>
-                    <Input id="password" type="password" {...form.register("password")} className="bg-background/50 h-11 rounded-xl" placeholder="••••••••" />
-                    {form.formState.errors.password && <p className="text-xs text-destructive">{form.formState.errors.password.message as string}</p>}
-                  </div>
+                  {role !== "admin" && (
+                    <div className="space-y-2 pb-2">
+                      <Label htmlFor="password">Password</Label>
+                      <Input id="password" type="password" {...form.register("password")} className="bg-background/50 h-11 rounded-xl" placeholder="••••••••" data-testid="input-password" />
+                      {form.formState.errors.password && <p className="text-xs text-destructive">{form.formState.errors.password.message as string}</p>}
+                    </div>
+                  )}
+
+                  {role === "admin" && (
+                    <div className="space-y-2 pb-2">
+                      <Label htmlFor="password">Password</Label>
+                      <Input id="password" type="password" {...form.register("password")} className="bg-background/50 h-11 rounded-xl" placeholder="••••••••" data-testid="input-admin-password" />
+                    </div>
+                  )}
 
                 </motion.div>
               </AnimatePresence>
 
-              <Button type="submit" disabled={isPending} className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all">
-                {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : (mode === "login" ? "Sign In" : "Create Account")}
+              <Button type="submit" disabled={isPending} className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all" data-testid="button-login">
+                {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+                  role === "admin" ? "Admin Sign In" :
+                  mode === "login" ? "Sign In" : "Create Account"
+                )}
               </Button>
             </form>
 
-            <div className="mt-8 text-center text-sm text-muted-foreground">
-              {mode === "login" ? (
-                <p>Don't have an account? <Link href="/signup" className="text-primary font-semibold hover:underline">Sign up</Link></p>
-              ) : (
-                <p>Already have an account? <Link href="/login" className="text-primary font-semibold hover:underline">Log in</Link></p>
-              )}
-            </div>
+            {role !== "admin" && (
+              <div className="mt-8 text-center text-sm text-muted-foreground">
+                {mode === "login" ? (
+                  <p>Don't have an account? <Link href="/signup" className="text-primary font-semibold hover:underline">Sign up</Link></p>
+                ) : (
+                  <p>Already have an account? <Link href="/login" className="text-primary font-semibold hover:underline">Log in</Link></p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
+
+        {mode === "login" && (
+          <div className="mt-4 text-center text-xs text-muted-foreground space-y-1">
+            <p>Demo: Teacher <strong>T001</strong> · Student <strong>S001</strong> · Admin <strong>A001</strong> — password: <strong>123</strong></p>
+          </div>
+        )}
       </motion.div>
     </div>
   );

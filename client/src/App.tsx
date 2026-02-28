@@ -12,6 +12,7 @@ import Home from "./pages/Home";
 import AuthPage from "./pages/auth/AuthPage";
 import TeacherDashboard from "./pages/dashboard/TeacherDashboard";
 import StudentDashboard from "./pages/dashboard/StudentDashboard";
+import AdminDashboard from "./pages/dashboard/AdminDashboard";
 import NcertChapters from "./pages/NcertChapters";
 import NotFound from "./pages/not-found";
 
@@ -23,7 +24,7 @@ function ProtectedRoute({
   allowedRole 
 }: { 
   component: React.ComponentType, 
-  allowedRole: "teacher" | "student" 
+  allowedRole: "teacher" | "student" | "admin"
 }) {
   const { user, role, isLoading } = useAuth();
   const [, setLocation] = useLocation();
@@ -33,7 +34,9 @@ function ProtectedRoute({
       if (!user) {
         setLocation("/login");
       } else if (role !== allowedRole) {
-        setLocation(role === "teacher" ? "/teacher-dashboard" : "/student-dashboard");
+        if (role === "teacher") setLocation("/teacher-dashboard");
+        else if (role === "admin") setLocation("/admin-dashboard");
+        else setLocation("/student-dashboard");
       }
     }
   }, [user, role, isLoading, allowedRole, setLocation]);
@@ -73,6 +76,9 @@ function Router() {
       </Route>
       <Route path="/ncert-chapters">
         {() => <ProtectedRoute component={NcertChapters} allowedRole="teacher" />}
+      </Route>
+      <Route path="/admin-dashboard">
+        {() => <ProtectedRoute component={AdminDashboard} allowedRole="admin" />}
       </Route>
 
       <Route component={NotFound} />

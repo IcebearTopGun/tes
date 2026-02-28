@@ -2,13 +2,13 @@ import { db } from "./db";
 import {
   teachers, students, exams, answerSheets, evaluations, conversations, messages,
   answerSheetPages, mergedAnswerScripts, ncertChapters, deviationLogs, performanceProfiles,
-  homework, homeworkSubmissions,
-  type Teacher, type Student, type Exam,
-  type InsertTeacher, type InsertStudent, type InsertExam,
+  homework, homeworkSubmissions, admins,
+  type Teacher, type Student, type Exam, type Admin,
+  type InsertTeacher, type InsertStudent, type InsertExam, type InsertAdmin,
   type NcertChapter, type InsertNcertChapter,
   type Homework, type InsertHomework, type HomeworkSubmission, type InsertHomeworkSubmission,
 } from "@shared/schema";
-import { eq, and, desc, sql as drizzleSql } from "drizzle-orm";
+import { eq, and, desc, sql as drizzleSql, count } from "drizzle-orm";
 
 export interface IStorage {
   getTeacher(id: number): Promise<Teacher | undefined>;
@@ -72,6 +72,31 @@ export interface IStorage {
   updateHomeworkSubmission(id: number, data: Partial<HomeworkSubmission>): Promise<HomeworkSubmission>;
   getHomeworkSubmissionsByStudent(studentId: number): Promise<any[]>;
   getHomeworkSubmissionsByTeacher(teacherId: number): Promise<any[]>;
+
+  // Admin
+  getAdmin(id: number): Promise<Admin | undefined>;
+  getAdminByEmployeeId(employeeId: string): Promise<Admin | undefined>;
+  createAdmin(admin: InsertAdmin): Promise<Admin>;
+  getAllStudents(): Promise<Student[]>;
+  getAllTeachers(): Promise<Teacher[]>;
+  getAllExams(): Promise<Exam[]>;
+  getSchoolStats(): Promise<{
+    totalStudents: number;
+    totalTeachers: number;
+    totalExams: number;
+    sheetsEvaluated: number;
+    avgPerformance: number;
+    activeClasses: number;
+    homeworkAssigned: number;
+    homeworkSubmitted: number;
+  }>;
+  getSchoolAnalytics(): Promise<{
+    classPerformance: { className: string; section: string; avgPct: number; studentCount: number; examCount: number }[];
+    subjectPerformance: { subject: string; avgPct: number; examCount: number }[];
+    teacherStats: { teacherId: number; teacherName: string; examsCreated: number; sheetsEvaluated: number; avgClassPct: number }[];
+    homeworkStats: { className: string; totalAssigned: number; totalSubmitted: number; completionPct: number }[];
+    marksDistribution: { range: string; count: number }[];
+  }>;
 
   // Analytics
   getTeacherStats(teacherId: number): Promise<{
@@ -611,6 +636,193 @@ export class DatabaseStorage implements IStorage {
       .slice(0, 10);
 
     return { classAverages, studentPerformance, marksDistribution, improvementTrends, chapterWeakness };
+  }
+
+  // ─── ADMIN METHODS ──────────────────────────────────────────────────────────
+
+  async getAdmin(id: number): Promise<Admin | undefined> {
+    const [admin] = await db.select().from(admins).where(eq(admins.id, id));
+    return admin;
+  }
+
+  async getAdminByEmployeeId(employeeId: string): Promise<Admin | undefined> {
+    const [admin] = await db.select().from(admins).where(eq(admins.employeeId, employeeId));
+    return admin;
+  }
+
+  async createAdmin(admin: InsertAdmin): Promise<Admin> {
+    const [created] = await db.insert(admins).values(admin).returning();
+    return created;
+  }
+
+  async getAllStudents(): Promise<Student[]> {
+    return db.select().from(students).orderBy(students.studentClass, students.section, students.name);
+  }
+
+  async getAllTeachers(): Promise<Teacher[]> {
+    return db.select().from(teachers).orderBy(teachers.name);
+  }
+
+  async getAllExams(): Promise<Exam[]> {
+    return db.select().from(exams).orderBy(desc(exams.id));
+  }
+
+  async getSchoolStats(): Promise<{
+    totalStudents: number;
+    totalTeachers: number;
+    totalExams: number;
+    sheetsEvaluated: number;
+    avgPerformance: number;
+    activeClasses: number;
+    homeworkAssigned: number;
+    homeworkSubmitted: number;
+  }> {
+    const [studentCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(students);
+    const [teacherCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(teachers);
+    const [examCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(exams);
+    const [hwCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(homework);
+    const [hwSubCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(homeworkSubmissions);
+
+    const allEvals = await db.select({
+      totalMarks: evaluations.totalMarks,
+      answerSheetId: evaluations.answerSheetId,
+    }).from(evaluations);
+
+    const sheetsEvaluated = allEvals.length;
+
+    // Get max marks per evaluation by joining with answer sheets and exams
+    const evalData = await db
+      .select({ marks: evaluations.totalMarks, maxMarks: exams.totalMarks })
+      .from(evaluations)
+      .innerJoin(answerSheets, eq(evaluations.answerSheetId, answerSheets.id))
+      .innerJoin(exams, eq(answerSheets.examId, exams.id));
+
+    const avgPerformance = evalData.length > 0
+      ? Math.round(evalData.reduce((sum, e) => sum + (e.maxMarks > 0 ? e.marks / e.maxMarks : 0), 0) / evalData.length * 100)
+      : 0;
+
+    const classSet = new Set<string>();
+    const allStudents = await db.select({ cls: students.studentClass, sec: students.section }).from(students);
+    allStudents.forEach(s => classSet.add(`${s.cls}-${s.sec}`));
+
+    return {
+      totalStudents: Number(studentCount.count),
+      totalTeachers: Number(teacherCount.count),
+      totalExams: Number(examCount.count),
+      sheetsEvaluated,
+      avgPerformance,
+      activeClasses: classSet.size,
+      homeworkAssigned: Number(hwCount.count),
+      homeworkSubmitted: Number(hwSubCount.count),
+    };
+  }
+
+  async getSchoolAnalytics(): Promise<{
+    classPerformance: { className: string; section: string; avgPct: number; studentCount: number; examCount: number }[];
+    subjectPerformance: { subject: string; avgPct: number; examCount: number }[];
+    teacherStats: { teacherId: number; teacherName: string; examsCreated: number; sheetsEvaluated: number; avgClassPct: number }[];
+    homeworkStats: { className: string; totalAssigned: number; totalSubmitted: number; completionPct: number }[];
+    marksDistribution: { range: string; count: number }[];
+  }> {
+    const evalData = await db
+      .select({
+        marks: evaluations.totalMarks,
+        maxMarks: exams.totalMarks,
+        subject: exams.subject,
+        className: exams.className,
+        teacherId: exams.teacherId,
+        admissionNumber: evaluations.admissionNumber,
+        examId: exams.id,
+      })
+      .from(evaluations)
+      .innerJoin(answerSheets, eq(evaluations.answerSheetId, answerSheets.id))
+      .innerJoin(exams, eq(answerSheets.examId, exams.id));
+
+    // Class performance (aggregate by className + section from students)
+    const studentData = await db.select({ admNo: students.admissionNumber, cls: students.studentClass, sec: students.section }).from(students);
+    const studentMap = new Map(studentData.map(s => [s.admNo, { cls: s.cls, sec: s.sec }]));
+
+    const classAccum = new Map<string, { total: number; count: number; students: Set<string>; exams: Set<number> }>();
+    for (const e of evalData) {
+      const studentInfo = studentMap.get(e.admissionNumber);
+      const sec = studentInfo?.sec || "A";
+      const key = `${e.className}-${sec}`;
+      const cur = classAccum.get(key) || { total: 0, count: 0, students: new Set(), exams: new Set() };
+      cur.total += e.maxMarks > 0 ? e.marks / e.maxMarks : 0;
+      cur.count++;
+      cur.students.add(e.admissionNumber);
+      cur.exams.add(e.examId);
+      classAccum.set(key, cur);
+    }
+    const classPerformance = Array.from(classAccum.entries())
+      .map(([key, d]) => {
+        const [className, section] = key.split("-");
+        return { className, section, avgPct: Math.round((d.total / d.count) * 100), studentCount: d.students.size, examCount: d.exams.size };
+      })
+      .sort((a, b) => b.avgPct - a.avgPct);
+
+    // Subject performance
+    const subjAccum = new Map<string, { total: number; count: number; exams: Set<number> }>();
+    for (const e of evalData) {
+      const cur = subjAccum.get(e.subject) || { total: 0, count: 0, exams: new Set() };
+      cur.total += e.maxMarks > 0 ? e.marks / e.maxMarks : 0;
+      cur.count++;
+      cur.exams.add(e.examId);
+      subjAccum.set(e.subject, cur);
+    }
+    const subjectPerformance = Array.from(subjAccum.entries())
+      .map(([subject, d]) => ({ subject, avgPct: Math.round((d.total / d.count) * 100), examCount: d.exams.size }))
+      .sort((a, b) => b.avgPct - a.avgPct);
+
+    // Teacher stats
+    const allTeachers = await db.select().from(teachers);
+    const teacherStats = await Promise.all(allTeachers.map(async (t) => {
+      const tEvals = evalData.filter(e => e.teacherId === t.id);
+      const examSet = new Set(tEvals.map(e => e.examId));
+      const avgPct = tEvals.length > 0 ? Math.round(tEvals.reduce((s, e) => s + (e.maxMarks > 0 ? e.marks / e.maxMarks : 0), 0) / tEvals.length * 100) : 0;
+      return { teacherId: t.id, teacherName: t.name, examsCreated: examSet.size, sheetsEvaluated: tEvals.length, avgClassPct: avgPct };
+    }));
+
+    // Homework stats
+    const hwData = await db.select().from(homework);
+    const hwSubs = await db.select().from(homeworkSubmissions);
+    const hwClassAccum = new Map<string, { assigned: number; submitted: number }>();
+    for (const hw of hwData) {
+      const key = `${hw.className}-${hw.section}`;
+      const cur = hwClassAccum.get(key) || { assigned: 0, submitted: 0 };
+      cur.assigned++;
+      hwClassAccum.set(key, cur);
+    }
+    for (const sub of hwSubs) {
+      const hw = hwData.find(h => h.id === sub.homeworkId);
+      if (hw) {
+        const key = `${hw.className}-${hw.section}`;
+        const cur = hwClassAccum.get(key);
+        if (cur) cur.submitted++;
+      }
+    }
+    const homeworkStats = Array.from(hwClassAccum.entries())
+      .map(([key, d]) => ({
+        className: key,
+        totalAssigned: d.assigned,
+        totalSubmitted: d.submitted,
+        completionPct: d.assigned > 0 ? Math.round((d.submitted / d.assigned) * 100) : 0,
+      }));
+
+    // Marks distribution
+    const dist = [
+      { range: "0–25%", count: 0 }, { range: "26–50%", count: 0 },
+      { range: "51–75%", count: 0 }, { range: "76–100%", count: 0 },
+    ];
+    for (const e of evalData) {
+      const pct = e.maxMarks > 0 ? (e.marks / e.maxMarks) * 100 : 0;
+      if (pct <= 25) dist[0].count++;
+      else if (pct <= 50) dist[1].count++;
+      else if (pct <= 75) dist[2].count++;
+      else dist[3].count++;
+    }
+
+    return { classPerformance, subjectPerformance, teacherStats, homeworkStats, marksDistribution: dist };
   }
 }
 

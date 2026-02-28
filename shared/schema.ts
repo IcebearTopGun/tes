@@ -3,12 +3,24 @@ import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+export const admins = pgTable("admins", {
+  id: serial("id").primaryKey(),
+  employeeId: text("employee_id").notNull().unique(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  password: text("password").notNull(),
+});
+
 export const teachers = pgTable("teachers", {
   id: serial("id").primaryKey(),
   employeeId: text("employee_id").notNull().unique(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
+  subjectsAssigned: text("subjects_assigned"),
+  classesAssigned: text("classes_assigned"),
+  isClassTeacher: integer("is_class_teacher").notNull().default(0),
+  classTeacherOf: text("class_teacher_of"),
 });
 
 export const students = pgTable("students", {
@@ -244,3 +256,7 @@ export type Homework = typeof homework.$inferSelect;
 export type InsertHomework = z.infer<typeof insertHomeworkSchema>;
 export type HomeworkSubmission = typeof homeworkSubmissions.$inferSelect;
 export type InsertHomeworkSubmission = z.infer<typeof insertHomeworkSubmissionSchema>;
+
+export const insertAdminSchema = createInsertSchema(admins).omit({ id: true });
+export type Admin = typeof admins.$inferSelect;
+export type InsertAdmin = z.infer<typeof insertAdminSchema>;

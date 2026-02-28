@@ -30,11 +30,10 @@ export function useAuth() {
   const handleAuthSuccess = (data: AuthResponse) => {
     localStorage.setItem("token", data.token);
     queryClient.setQueryData([api.auth.me.path], { role: data.role, user: data.user });
-    toast({
-      title: "Welcome back!",
-      description: "Successfully authenticated.",
-    });
-    setLocation(data.role === "teacher" ? "/teacher-dashboard" : "/student-dashboard");
+    toast({ title: "Welcome back!", description: "Successfully authenticated." });
+    if (data.role === "teacher") setLocation("/teacher-dashboard");
+    else if (data.role === "admin") setLocation("/admin-dashboard");
+    else setLocation("/student-dashboard");
   };
 
   const handleAuthError = (err: Error) => {
@@ -93,6 +92,20 @@ export function useAuth() {
     onError: handleAuthError,
   });
 
+  const adminLogin = useMutation({
+    mutationFn: async (credentials: { employeeId: string; password: string }) => {
+      const res = await fetchWithAuth("/api/auth/admin/login", {
+        method: "POST",
+        body: JSON.stringify(credentials),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "Login failed");
+      return json as AuthResponse;
+    },
+    onSuccess: handleAuthSuccess,
+    onError: handleAuthError,
+  });
+
   const logout = () => {
     localStorage.removeItem("token");
     queryClient.setQueryData([api.auth.me.path], null);
@@ -106,6 +119,7 @@ export function useAuth() {
     isLoading,
     teacherLogin,
     studentLogin,
+    adminLogin,
     teacherSignup,
     studentSignup,
     logout,
