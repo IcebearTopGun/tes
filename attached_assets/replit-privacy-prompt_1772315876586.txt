@@ -1,0 +1,496 @@
+BEFORE YOU WRITE A SINGLE LINE OF CODE, stop and ask me:
+
+1. What is the backend language and framework?
+2. What files already exist in this project?
+3. What are the actual database table names and column names
+   that store student names, teacher names, emails, phone
+   numbers, roll numbers and any other student identifiers?
+4. How is OpenAI currently being called — show me the existing
+   file and function where the API call happens.
+5. What is the authentication system — how is the logged-in
+   user and their role available in a request?
+
+Do NOT assume any table names, column names, file names,
+folder structures, or frameworks.
+Do NOT install any new packages until I confirm the stack.
+Do NOT modify any existing file until I approve it.
+
+---
+
+Once I answer those questions, implement the following
+privacy and security layer. The goal is simple:
+
+NOTHING that identifies a real student or teacher should
+ever be sent to OpenAI in readable form.
+
+---
+
+BUILD THESE COMPONENTS IN ORDER:
+
+===========================================================
+COMPONENT 1 — PII DETECTOR
+===========================================================
+
+A function that scans any text string and finds:
+- Student names (look them up from the real students table)
+- Teacher names (look them up from the real teachers table)
+- Email addresses (use regex)
+- Phone numbers (use regex)
+- Roll numbers or admission IDs (use regex + context)
+
+Ask me for the exact table and column names before writing
+any database query.
+
+Cache the name list in memory with a 5 minute expiry so
+you are not hitting the database on every AI call.
+
+Return a list of everything found, with the exact position
+in the string where each match starts and ends.
+
+---
+
+===========================================================
+COMPONENT 2 — TOKENIZER
+===========================================================
+
+A function that takes the findings from the detector and
+replaces each one with a short readable token like:
+  STUDENT_A91F
+  TEACHER_C22B
+  EMAIL_F301
+  PHONE_9A12
+
+Generate the token using HMAC-SHA256 with a secret key
+from environment variables so the same person always gets
+the same token within a session.
+
+Keep a temporary in-memory map of token to original value.
+This map must never be written to the database, cache,
+logs, or any file. It lives only for the duration of
+one request and is discarded after.
+
+Also write the reverse function that takes a response
+from OpenAI and swaps the tokens back to real values.
+
+---
+
+===========================================================
+COMPONENT 3 — OCR SANITIZER
+===========================================================
+
+A function specifically for answer sheet text extracted
+by OCR before it is sent to OpenAI for evaluation.
+
+Students often write their name, roll number, or class
+at the top of their answer sheet. Strip all of that.
+
+Remove patterns like:
+  "My name is ..."
+  "Roll No ..."
+  "Class 10A ..."
+  "I am ..."
+  Any name found in the students table
+
+Replace removed text with [STUDENT_IDENTIFIER].
+
+Then run the full PII detector on the remaining text as
+a second pass.
+
+---
+
+===========================================================
+COMPONENT 4 — PRIVACY GUARD
+===========================================================
+
+A central orchestrator that all AI calls must pass through.
+
+For a conversational query:
+  1. Run PII detector on the user's prompt
+  2. Replace PII with tokens
+  3. Send the safe prompt to OpenAI
+  4. Receive the response
+  5. Check the user's role before unmasking
+  6. Swap tokens back to real values
+  7. Return the response
+  8. Discard the token map
+
+For an OCR evaluation:
+  Same flow but run the OCR sanitizer in step 1 instead.
+
+Role rules for unmasking:
+  Student  ->  can only see their own name unmasked
+  Teacher  ->  can see names of students in their classes
+  Admin    ->  can see everything
+
+If a role tries to unmask data it is not allowed to see,
+throw an access denied error and return nothing.
+
+---
+
+===========================================================
+COMPONENT 5 — CENTRAL LLM REGISTRY
+===========================================================
+
+This is the most important architectural rule in the system.
+
+Create one central registry file that is the single source
+of truth for everything related to LLM configuration.
+
+No model name, temperature, token limit, or system prompt
+should exist anywhere in the codebase except this file.
+If any other file hardcodes these values, that is a bug.
+
+This registry must define the following call types:
+  QUERY       conversational analytics questions
+  EVALUATE    answer sheet OCR evaluation
+  INSIGHT     class-wide insight generation
+
+For each call type define:
+  - model name
+  - temperature
+  - max input tokens
+  - max output tokens
+  - timeout in seconds
+  - the full system prompt text
+
+Example system prompts to use as a starting point:
+
+  QUERY system prompt:
+  "You are an educational analytics assistant. Respond only
+  with insights about academic performance and trends. Use
+  only the identifiers given to you. Never invent or assume
+  any identity."
+
+  EVALUATE system prompt:
+  "You are an exam evaluator. Evaluate the answer based on
+  content quality only. The rubric will be provided with
+  each request. Never reference student identity."
+
+  INSIGHT system prompt:
+  "You are a class performance analyst. Identify trends
+  and areas needing attention from the data provided.
+  Use only aggregated data and masked identifiers."
+
+Ask me what model name and token limits to set before
+writing the registry values.
+
+---
+
+===========================================================
+COMPONENT 6 — AI GATEWAY
+===========================================================
+
+The ONLY file in the entire codebase allowed to import
+or call the OpenAI library directly.
+
+Every other part of the system calls this gateway.
+The gateway reads ALL config from the Central LLM Registry.
+The gateway calls the Privacy Guard before every request.
+
+Responsibilities:
+
+  - Read model, temperature, max tokens from the registry
+    for the specific call type being made
+  - Read system prompt from the registry for that call type
+  - Before sending: run one final regex sweep on the masked
+    prompt to catch anything the detector missed
+    If anything suspicious is found, block the request
+    and throw a named error called UNSAFE_PAYLOAD
+  - Enforce max input token limit from the registry
+  - Make the OpenAI API call using registry config
+  - Write a safe audit log after every call containing
+    ONLY these fields:
+      request_id, timestamp, call_type, model,
+      token_usage, latency_ms
+    NEVER log the prompt, response, OCR text, or token map
+  - If OpenAI returns an error, wrap it in a generic
+    message before returning to the caller — never expose
+    raw OpenAI error messages to the client
+
+Expose only these public functions:
+  askQuestion(prompt, userContext)
+  evaluateAnswerSheet(ocrText, rubric, userContext)
+  generateClassInsight(analyticsData, userContext)
+
+No route or service anywhere may call OpenAI any other way.
+
+---
+
+===========================================================
+COMPONENT 7 — REQUEST MIDDLEWARE
+===========================================================
+
+A small middleware function that attaches the current
+user's role and ID to every incoming request before it
+reaches any AI route.
+
+Ask me how the authenticated user is currently available
+in a request before writing this.
+
+---
+
+===========================================================
+WIRING
+===========================================================
+
+After all components are built, show me a minimal example
+of how to connect these to ONE existing route.
+Do not modify any existing route automatically.
+Let me review the example first and tell me which routes
+to apply it to.
+
+---
+
+===========================================================
+ENVIRONMENT VARIABLES
+===========================================================
+
+Add these to .env and ask me if any already exist before
+adding duplicates:
+
+  OPENAI_API_KEY
+  PII_TOKEN_SECRET   (random string, minimum 32 characters)
+
+---
+
+===========================================================
+TESTS — WRITE AFTER ALL COMPONENTS ARE BUILT
+===========================================================
+
+Write a complete test suite covering every component.
+Use whatever test framework matches the confirmed stack.
+Put all tests in a /tests/privacy/ folder.
+Tests must be runnable with a single command.
+Tests must NOT require a live database or live OpenAI key.
+Mock all external dependencies — DB, OpenAI, everything.
+
+---
+
+TEST FILE 1 — PII Detector
+
+  POSITIVE — detector finds PII correctly:
+
+    Student:
+    - Text contains a student name from the DB cache
+      -> detector returns it with correct start and end position
+    - Text contains a student email address
+      -> detector returns it
+    - Text contains a student phone number
+      -> detector returns it
+    - Text contains "Roll No 21"
+      -> detector returns it
+    - Text contains multiple PII items in one string
+      -> detector returns all of them with correct positions
+
+    Teacher:
+    - Text contains a teacher name from the DB cache
+      -> detector returns it with correct position
+    - Text contains a teacher email
+      -> detector returns it
+
+    Admin:
+    - Text with mixed student and teacher PII
+      -> detector returns every item correctly
+
+  NEGATIVE — detector ignores safe text:
+
+    - Text with no names, no emails, no numbers
+      -> returns empty list
+    - Number that looks like a phone but is not
+      e.g. "Question 9876543210 is on page 3"
+      -> returns empty list or handles gracefully
+    - Common word that matches no name in the cache
+      -> returns empty list
+    - Empty string input
+      -> returns empty list with no error thrown
+
+---
+
+TEST FILE 2 — Tokenizer
+
+  POSITIVE:
+
+    Student:
+    - Mask a student name
+      -> token generated in format STUDENT_XXXX
+      -> original name stored in piiMap
+    - Mask the same student name twice in one request
+      -> same token returned both times
+    - Unmask a response containing a STUDENT token
+      -> original name restored correctly in output
+
+    Teacher:
+    - Mask a teacher name
+      -> token in format TEACHER_XXXX
+    - Unmask a response with a TEACHER token
+      -> teacher name restored correctly
+
+    Admin:
+    - Response with both student and teacher tokens
+      -> both unmasked correctly in one pass
+
+  NEGATIVE:
+
+    - Unmask with an empty piiMap
+      -> original text returned unchanged, no error
+    - Unmask a token not present in the piiMap
+      -> token left as-is, no crash
+    - piiMap contains null or undefined values
+      -> handled gracefully without crashing
+
+---
+
+TEST FILE 3 — OCR Sanitizer
+
+  POSITIVE — sanitizer removes identity from OCR text:
+
+    Student:
+    - OCR text starts with "My name is Rahul Sharma"
+      -> replaced with [STUDENT_IDENTIFIER]
+    - OCR text contains "Roll No 21" mid-paragraph
+      -> replaced with [STUDENT_IDENTIFIER]
+    - OCR text contains "Class 10A Priya Rao"
+      -> name portion replaced
+    - OCR text has a name that exists in the student cache
+      -> name tokenized even with no surrounding phrase
+
+    Teacher:
+    - OCR text contains a teacher name written by a student
+      e.g. "Checked by Mrs Anita Verma"
+      -> teacher name tokenized
+
+    Admin:
+    - OCR text with student name, roll number, and class
+      all on the first line
+      -> all three stripped before LLM sees the text
+
+  NEGATIVE — sanitizer does not damage answer content:
+
+    - OCR text with no identity info, only answer content
+      -> text passes through completely unchanged
+    - Empty OCR text
+      -> returns empty string, no error
+    - Text contains "I think the answer is..." with no name
+      -> phrase not incorrectly stripped
+
+---
+
+TEST FILE 4 — Privacy Guard
+
+  POSITIVE — full flow works correctly per role:
+
+    Student:
+    - Student submits a query mentioning their own name
+      -> name masked before LLM call
+      -> name restored in final response
+    - Student submits OCR for evaluation
+      -> OCR sanitized first
+      -> LLM called with clean text only
+      -> response returned with student's own identity restored
+
+    Teacher:
+    - Teacher queries class performance mentioning a student
+      name from their assigned class
+      -> name masked outbound to LLM
+      -> name unmasked in response because teacher has access
+    - Teacher submits OCR for evaluation
+      -> full flow works correctly end to end
+
+    Admin:
+    - Admin queries any student or teacher data
+      -> all tokens unmasked in response with no restriction
+
+  NEGATIVE — access control blocks correctly:
+
+    Student:
+    - Response contains another student's token
+      -> that token is NOT unmasked
+      -> access denied error thrown or token left as-is
+      -> document which behaviour you chose
+
+    Teacher:
+    - Response contains a student token from a class
+      the teacher is not assigned to
+      -> that token is NOT unmasked
+
+    All roles:
+    - Verify the piiMap is empty or discarded after each
+      request completes
+      -> map must not persist into the next request
+
+---
+
+TEST FILE 5 — AI Gateway
+
+  Mock the OpenAI API for every gateway test.
+  No real API calls allowed in the test suite.
+
+  POSITIVE:
+
+    Student:
+    - Call askQuestion with a safe prompt
+      -> OpenAI mock is called only with masked prompt
+      -> response returned correctly to caller
+
+    Teacher:
+    - Call evaluateAnswerSheet with OCR text containing a name
+      -> OCR sanitized before mock is called
+      -> mock receives no identity text at all
+
+    Admin:
+    - Call generateClassInsight with analytics data
+      -> correct call type config from registry is used
+      -> model and system prompt match registry exactly
+
+  NEGATIVE — gateway blocks unsafe requests:
+
+    - Call askQuestion with a prompt containing a raw email
+      -> UNSAFE_PAYLOAD error thrown
+      -> OpenAI mock is never called
+    - Call askQuestion with a prompt containing a raw phone number
+      -> UNSAFE_PAYLOAD error thrown
+      -> OpenAI mock is never called
+    - Call with a prompt exceeding the max token limit
+      -> request blocked, clear error returned
+    - OpenAI mock returns a server error
+      -> gateway returns a generic error message to caller
+      -> raw API error text is not exposed to the client
+
+  REGISTRY TESTS:
+
+    - Every call type in the registry has a model name,
+      temperature, maxOutputTokens, and systemPrompt
+    - No call type has an empty or missing system prompt
+    - Temperature for every call type is between 0.0 and 1.0
+    - No file outside the gateway imports the OpenAI library
+      (write a test that scans the source files and asserts
+      this — fail the build if a violation is found)
+
+---
+
+AFTER ALL TESTS ARE WRITTEN:
+
+Run the full test suite and show me the results.
+Every single test must pass before the work is complete.
+If any test fails, fix the component — do not skip the test.
+Show me the final passing test output before closing.
+
+---
+
+===========================================================
+RULES TO FOLLOW THROUGHOUT
+===========================================================
+
+- Never modify an existing file without showing me the diff
+  and getting my approval first
+- Never run a database migration or alter a table
+- Never add a column to any existing table
+- Never log a prompt, a response, OCR text, or a token map
+- Never import the OpenAI library outside the gateway file
+- Never hardcode a model name, temperature, or system prompt
+  outside the Central LLM Registry — this is a hard rule
+- Never store the token map anywhere except request memory
+- After each component is built, pause and ask if I want
+  to review it before moving to the next one
+- When writing tests, mock all external services —
+  no real DB connections and no real OpenAI calls in tests
