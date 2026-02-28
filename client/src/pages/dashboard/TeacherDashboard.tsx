@@ -186,6 +186,7 @@ export default function TeacherDashboard() {
   const [hwDueDate, setHwDueDate] = useState("");
   const [isCreatingHw, setIsCreatingHw] = useState(false);
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<"subject" | "class">("subject");
 
   const { data: examsList, isLoading: isLoadingExams } = useQuery<Exam[]>({
     queryKey: [api.exams.list.path],
@@ -242,15 +243,37 @@ export default function TeacherDashboard() {
     onSettled: () => setIsCreatingHw(false),
   });
 
-  const analyticsUrl = `/api/analytics${classFilter || subjectFilter ? `?class=${classFilter}&subject=${subjectFilter}` : ""}`;
+  const analyticsUrl = `/api/analytics?class=${classFilter}&subject=${subjectFilter}&viewMode=${viewMode}`;
   const { data: analytics } = useQuery<AnalyticsData>({
-    queryKey: ["/api/analytics", classFilter, subjectFilter],
+    queryKey: ["/api/analytics", classFilter, subjectFilter, viewMode],
     queryFn: async () => { const res = await fetchWithAuth(analyticsUrl); return res.json(); },
   });
 
   const { data: filterOptions } = useQuery<{ classes: string[]; subjects: string[] }>({
     queryKey: ["/api/analytics/filter-options"],
     queryFn: async () => { const res = await fetchWithAuth("/api/analytics/filter-options"); return res.json(); },
+  });
+
+  const { data: teacherScope } = useQuery<{
+    isClassTeacher: boolean;
+    classTeacherOf: string;
+    subjectsAssigned: string[];
+    classesAssigned: string[];
+  }>({
+    queryKey: ["/api/teacher/scope"],
+    queryFn: () => fetchWithAuth("/api/teacher/scope").then(r => r.json()),
+  });
+
+  const { data: questionQuality, isLoading: isLoadingQQ } = useQuery<any[]>({
+    queryKey: ["/api/teacher/question-quality"],
+    queryFn: () => fetchWithAuth("/api/teacher/question-quality").then(r => r.json()),
+    enabled: activeSection === "overview",
+  });
+
+  const { data: earlyWarnings, isLoading: isLoadingEW } = useQuery<any[]>({
+    queryKey: ["/api/teacher/early-warning"],
+    queryFn: () => fetchWithAuth("/api/teacher/early-warning").then(r => r.json()),
+    enabled: activeSection === "overview",
   });
 
   useEffect(() => {
@@ -276,7 +299,7 @@ export default function TeacherDashboard() {
 
   const sendMessage = useMutation({
     mutationFn: async (content: string) => {
-      const res = await fetchWithAuth(`/api/chat/conversations/${activeConversationId}/messages`, { method: "POST", body: JSON.stringify({ content }) });
+      const res = await fetchWithAuth(`/api/chat/conversations/${activeConversationId}/messages`, { method: "POST", body: JSON.stringify({ content, viewMode }) });
       return res.json();
     },
     onSuccess: () => { setChatMessage(""); refetchMessages(); },
@@ -609,17 +632,55 @@ export default function TeacherDashboard() {
             <div className="sf-analytics-head">
               <div>
                 <div className="sf-section-title">Analytics</div>
-                <div className="sf-section-sub">Live data from evaluated answer sheets</div>
+                <div className="sf-section-sub">
+                  {viewMode === "class" && teacherScope?.isClassTeacher
+                    ? `Class ${teacherScope.classTeacherOf} — all subjects view`
+                    : "Live data from evaluated answer sheets"}
+                </div>
               </div>
               <div className="sf-filter-row">
-                <select className="sf-fsel" value={classFilter} onChange={e => setClassFilter(e.target.value)}>
-                  <option value="">All Classes</option>
-                  {(filterOptions?.classes || []).map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select className="sf-fsel" value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)}>
-                  <option value="">All Subjects</option>
-                  {(filterOptions?.subjects || []).map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
+                {teacherScope?.isClassTeacher && (
+                  <div style={{ display: "flex", gap: 4, padding: "2px", background: "var(--cream2)", borderRadius: 10, border: "1.5px solid var(--rule)" }}>
+                    <button
+                      data-testid="button-view-subject"
+                      onClick={() => setViewMode("subject")}
+                      style={{
+                        padding: "4px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                        background: viewMode === "subject" ? "var(--card)" : "transparent",
+                        color: viewMode === "subject" ? "var(--ink)" : "var(--mid)",
+                        border: viewMode === "subject" ? "1.5px solid var(--rule)" : "1.5px solid transparent",
+                        cursor: "pointer", transition: "all 0.15s",
+                      }}
+                    >
+                      Subject View
+                    </button>
+                    <button
+                      data-testid="button-view-class"
+                      onClick={() => setViewMode("class")}
+                      style={{
+                        padding: "4px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                        background: viewMode === "class" ? "var(--card)" : "transparent",
+                        color: viewMode === "class" ? "var(--ink)" : "var(--mid)",
+                        border: viewMode === "class" ? "1.5px solid var(--rule)" : "1.5px solid transparent",
+                        cursor: "pointer", transition: "all 0.15s",
+                      }}
+                    >
+                      Class View
+                    </button>
+                  </div>
+                )}
+                {viewMode !== "class" && (
+                  <>
+                    <select className="sf-fsel" value={classFilter} onChange={e => setClassFilter(e.target.value)}>
+                      <option value="">All Classes</option>
+                      {(filterOptions?.classes || []).map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <select className="sf-fsel" value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)}>
+                      <option value="">All Subjects</option>
+                      {(filterOptions?.subjects || []).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </>
+                )}
               </div>
             </div>
 
@@ -818,6 +879,112 @@ export default function TeacherDashboard() {
                   </>
                 )}
               </div>
+            </div>
+
+            {/* ── EARLY WARNING SYSTEM ── */}
+            <div className="sf-card" style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <div>
+                  <div className="sf-card-title">Early Warning System</div>
+                  <div className="sf-card-sub">Students flagged by score decline or low homework engagement</div>
+                </div>
+                <span className="sf-chart-badge sf-cb-live" style={{ fontSize: 11 }}>Auto</span>
+              </div>
+              {isLoadingEW ? (
+                <div style={{ padding: "20px 0", textAlign: "center" }}><div className="sf-spinner" /></div>
+              ) : !earlyWarnings || earlyWarnings.length === 0 ? (
+                <div className="sf-empty">
+                  <div className="sf-empty-icon">🟢</div>
+                  No at-risk students detected. Evaluate more answer sheets to enable early warnings.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                  {earlyWarnings.slice(0, 6).map((w: any, i: number) => {
+                    const riskColor = w.riskLevel === "HIGH" ? "#d94f4f" : w.riskLevel === "MEDIUM" ? "#d08a2b" : "#3a8a5c";
+                    const riskBg = w.riskLevel === "HIGH" ? "#fff0f0" : w.riskLevel === "MEDIUM" ? "#fff8ed" : "#f0faf4";
+                    const riskIcon = w.riskLevel === "HIGH" ? "🔴" : w.riskLevel === "MEDIUM" ? "🟡" : "🟢";
+                    return (
+                      <div
+                        key={i}
+                        data-testid={`ew-student-${w.admissionNumber}`}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: riskBg, border: `1.5px solid ${riskColor}22` }}
+                      >
+                        <div style={{ width: 36, height: 36, borderRadius: "50%", background: `${riskColor}1a`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: riskColor, flexShrink: 0 }}>
+                          {w.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.studentName}</div>
+                          <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>
+                            Class {w.studentClass} &nbsp;·&nbsp; Score: {w.earlierAvgPct}% → {w.recentAvgPct}% &nbsp;·&nbsp; HW: {w.hwSubmitted}/{w.hwTotal} submitted
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: riskColor, display: "flex", alignItems: "center", gap: 3 }}>
+                            {riskIcon} {w.riskLevel}
+                          </div>
+                          <div style={{ fontSize: 10, color: "var(--mid)", marginTop: 1 }}>Risk {w.riskScore}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── QUESTION QUALITY ANALYSIS ── */}
+            <div className="sf-card" style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <div>
+                  <div className="sf-card-title">Question Quality Analysis</div>
+                  <div className="sf-card-sub">AI-classified questions where student performance was poor (&lt;50%)</div>
+                </div>
+                <span className="sf-chart-badge" style={{ background: "var(--lav-bg)", color: "var(--ink2)", fontSize: 11 }}>AI</span>
+              </div>
+              {isLoadingQQ ? (
+                <div style={{ padding: "20px 0", textAlign: "center" }}><div className="sf-spinner" /></div>
+              ) : !questionQuality || questionQuality.length === 0 ? (
+                <div className="sf-empty">
+                  <div className="sf-empty-icon">📊</div>
+                  No poor-performing questions found. Evaluate more answer sheets to enable quality analysis.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                  {questionQuality.map((q: any, i: number) => {
+                    const isTeachingGap = q.flag === "Teaching Gap";
+                    const flagColor = isTeachingGap ? "#d94f4f" : "#d08a2b";
+                    const flagBg = isTeachingGap ? "#fff0f0" : "#fff8ed";
+                    const flagIcon = isTeachingGap ? "📖" : "❓";
+                    return (
+                      <div
+                        key={i}
+                        data-testid={`qq-question-${q.examId}-${q.questionNumber}`}
+                        style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 10, background: flagBg, border: `1.5px solid ${flagColor}22` }}
+                      >
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: `${flagColor}1a`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0, marginTop: 1 }}>
+                          {flagIcon}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>
+                            {q.examName} — Q{q.questionNumber}
+                            <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase" }}>{q.subject}</span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>
+                            Avg score: <b style={{ color: flagColor }}>{q.avgPct}%</b> &nbsp;·&nbsp; {q.studentsAffected} student{q.studentsAffected !== 1 ? "s" : ""} affected
+                          </div>
+                          {q.flagReason && (
+                            <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 3, fontStyle: "italic" }}>{q.flagReason}</div>
+                          )}
+                        </div>
+                        <div style={{ flexShrink: 0, textAlign: "right" }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: flagColor, padding: "2px 8px", borderRadius: 6, background: `${flagColor}18`, border: `1px solid ${flagColor}30` }}>
+                            {q.flag}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </>
         )}

@@ -1,0 +1,262 @@
+You are EXTENDING an EXISTING School Exam Evaluation Platform.
+
+THIS TASK IMPLEMENTS ROLE-BASED DATA ABSTRACTION
+for Teacher Dashboard and Conversational AI.
+
+====================================================
+CRITICAL GLOBAL RULE — UI MUST REMAIN UNCHANGED
+====================================================
+
+Teacher dashboard layout is already approved.
+
+YOU MUST NOT:
+
+- redesign dashboard
+- modify styling
+- change layout structure
+- rebuild components
+- alter KPI card placement
+
+ONLY extend DATA LOGIC and PERMISSION BEHAVIOUR.
+
+
+====================================================
+OBJECTIVE
+====================================================
+
+Teacher dashboard must dynamically change
+DATA VISIBILITY and AI CONTEXT depending on:
+
+1. Subject Teacher
+2. Class Teacher
+
+
+====================================================
+TEACHER ROLE MODEL
+====================================================
+
+Teacher table already contains:
+
+teacher_id
+subjects_assigned[]
+classes_assigned[]
+is_class_teacher (BOOLEAN)
+class_teacher_of
+
+
+System must detect role automatically
+after login.
+
+
+====================================================
+DATA ABSTRACTION MODES
+====================================================
+
+----------------------------------------------------
+MODE 1 — CLASS TEACHER VIEW
+----------------------------------------------------
+
+If:
+
+is_class_teacher = TRUE
+
+
+Teacher dashboard must enable
+CLASS VIEW TOGGLE.
+
+
+Add logical toggle:
+
+[ Subject View ] | [ Class View ]
+
+
+(Default = Subject View)
+
+
+----------------------------------------------------
+CLASS VIEW BEHAVIOUR
+----------------------------------------------------
+
+Teacher sees:
+
+ALL students belonging to
+her assigned class & section.
+
+
+For EACH student show aggregated metrics:
+
+✓ overall performance
+✓ subject-wise averages
+✓ ranking
+✓ engagement score
+✓ homework consistency
+✓ improvement trend
+✓ risk indicator
+
+
+IMPORTANT:
+
+Metrics must aggregate across
+ALL subjects studied by student.
+
+
+Teacher becomes academic supervisor
+for entire class.
+
+
+====================================================
+CLASS TEACHER CONVERSATIONAL AI
+====================================================
+
+When CLASS VIEW is active:
+
+Conversational AI context must include:
+
+- full class analytics
+- cross-subject performance
+- weak students
+- engagement trends
+- ranking movement
+- homework behaviour
+
+
+Example allowed queries:
+
+"Which students in my class are declining?"
+"Which subject is weakest overall?"
+"Who needs intervention this month?"
+
+
+AI must operate ONLY within
+assigned class scope.
+
+
+====================================================
+MODE 2 — SUBJECT TEACHER VIEW
+====================================================
+
+If:
+
+is_class_teacher = FALSE
+OR
+Subject View selected
+
+
+Teacher visibility limited to:
+
+students studying teacher's subject
+within assigned classes.
+
+
+Metrics shown:
+
+✓ subject performance
+✓ homework completion (subject)
+✓ evaluation trends
+✓ improvement in subject
+
+
+====================================================
+SUBJECT TEACHER CONVERSATIONAL AI
+====================================================
+
+AI context must include ONLY:
+
+- teacher subject analytics
+- students enrolled in subject
+- subject evaluations
+- homework data for subject
+
+
+Example queries:
+
+"Which students are weak in Mathematics?"
+"Which class performs worst in Physics?"
+
+
+Cross-subject analytics must NOT be available.
+
+
+====================================================
+BACKEND DATA ABSTRACTION LAYER
+====================================================
+
+Create service:
+
+TeacherDataScopeService
+
+
+Responsibilities:
+
+1. Detect teacher role
+2. Determine visibility scope
+3. Filter analytics queries
+4. Inject AI context safely
+
+
+Pseudo logic:
+
+
+IF is_class_teacher AND view == CLASS
+   scope = CLASS_SCOPE
+ELSE
+   scope = SUBJECT_SCOPE
+
+
+All dashboard APIs must respect scope.
+
+
+====================================================
+AI CONTEXT INJECTION
+====================================================
+
+Extend existing AI pipeline.
+
+Create:
+
+TeacherAIContextProvider
+
+
+Provide structured context:
+
+CLASS_SCOPE:
+- class_performance_summary
+- cross_subject_metrics
+- risk_students
+- engagement_index
+
+
+SUBJECT_SCOPE:
+- subject_performance
+- enrolled_students
+- subject_trends
+
+
+LLM must NEVER receive data outside scope.
+
+
+====================================================
+ACCESS CONTROL GUARANTEE
+====================================================
+
+Class Teacher:
+→ entire assigned class only
+
+Subject Teacher:
+→ own subject students only
+
+No teacher may access
+unassigned class data.
+
+
+====================================================
+FINAL ACCEPTANCE CONDITIONS
+====================================================
+
+✓ Class teachers see class-wide metrics
+✓ Toggle switches Subject/Class view
+✓ Subject teachers limited correctly
+✓ Conversational AI respects scope
+✓ Cross-subject analytics only for class teacher
+✓ No UI redesign occurs
+✓ Dashboard layout unchanged

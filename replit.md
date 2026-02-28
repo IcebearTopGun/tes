@@ -105,9 +105,25 @@ A full-stack web application for teachers, students, and administrators to manag
 - Bulk upload: select multiple image files → parallel OCR → auto-grouped by student → merge → evaluate
 - Evaluation results include: chapter mapping, deviation reason, improvement suggestions
 - Homework management: assign, track submissions, grade
-- AI Analyst chat: ask questions about class performance
+- AI Analyst chat: ask questions about class performance (scope-aware per viewMode)
 - Analytics: class averages, marks distribution, improvement trends
 - **Profile tab** with photo upload, name/phone editing
+- **Role-Based Data Abstraction**: Class teachers (T001=10-A, T004=9-A) get Subject View / Class View toggle; Class View shows all-subject analytics for their assigned class; chat AI uses class-wide context
+- **Question Quality Analysis** (`GET /api/teacher/question-quality`): Aggregates per-question scores across all evaluations; questions with avg < 50% are AI-classified as "Teaching Gap" (concept gap) or "Question Clarity" (poorly worded); displayed as prioritised list in Overview tab
+- **Early Warning System** (`GET /api/teacher/early-warning`): Risk scores computed from score trend (recent vs earlier evaluations) + homework miss rate; risk levels LOW/MEDIUM/HIGH; shown in Overview tab
+
+### New API Routes (Teacher)
+| Route | Description |
+|-------|-------------|
+| `GET /api/teacher/scope` | Teacher profile info including isClassTeacher, classTeacherOf, subjects/classes assigned |
+| `GET /api/teacher/question-quality` | AI-classified poor-performing questions (< 50% avg) |
+| `GET /api/teacher/early-warning` | Risk-scored student list based on score decline + homework miss rate |
+| `GET /api/analytics?viewMode=class` | Class-wide analytics (all subjects) for class teachers |
+
+### New Service Files
+| File | Purpose |
+|------|---------|
+| `server/services/teacherDataScope.ts` | All business logic for scope, class analytics, question quality, early warning, AI context builders |
 
 ## Student Features
 

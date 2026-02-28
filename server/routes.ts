@@ -828,7 +828,7 @@ Return ONLY valid JSON with this exact structure:
     }
   });
 
-  // ANALYTICS — supports ?class=X&subject=Y filters
+  // ANALYTICS — supports ?class=X&subject=Y&viewMode=class|subject filters
   app.get("/api/analytics", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") {
       return res.status(401).json({ message: "Unauthorized" });
@@ -836,6 +836,19 @@ Return ONLY valid JSON with this exact structure:
     try {
       const classFilter = req.query.class as string | undefined;
       const subjectFilter = req.query.subject as string | undefined;
+      const viewMode = req.query.viewMode as string | undefined;
+
+      if (viewMode === "class") {
+        const { getTeacherScope, getClassViewAnalytics } = await import("./services/teacherDataScope");
+        const scope = await getTeacherScope(req.user.id);
+        if (!scope.isClassTeacher || !scope.classTeacherOf) {
+          return res.status(403).json({ message: "Not a class teacher" });
+        }
+        const data = await getClassViewAnalytics(scope.classTeacherOf);
+        if (!data) return res.json({ classAverages: [], studentPerformance: [], marksDistribution: [], improvementTrends: [], chapterWeakness: [] });
+        return res.json(data);
+      }
+
       const data = await storage.getAnalytics(req.user.id, classFilter, subjectFilter);
       res.json(data);
     } catch (err) {
@@ -880,49 +893,35 @@ Return ONLY valid JSON with this exact structure:
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
     
     const conversationId = parseInt(req.params.id);
-    const { content } = req.body;
+    const { content, viewMode } = req.body;
 
     try {
-      // 1. Get context (RAG) — exams + homework analytics
-      const evals = await storage.getEvaluationsByTeacher(req.user.id);
-      const evalContext = JSON.stringify(evals.map(e => ({
-        student: e.studentName,
-        admission: e.admissionNumber,
-        marks: e.totalMarks,
-        subject: e.subject,
-        exam: e.examName,
-        feedback: e.overallFeedback
-      })));
+      // Build scope-aware context
+      let dataContext: string;
+      if (viewMode === "class") {
+        const { getTeacherScope, buildClassAIContext } = await import("./services/teacherDataScope");
+        const scope = await getTeacherScope(req.user.id);
+        if (scope.isClassTeacher && scope.classTeacherOf) {
+          dataContext = await buildClassAIContext(scope.classTeacherOf, req.user.id);
+        } else {
+          const { buildSubjectAIContext } = await import("./services/teacherDataScope");
+          dataContext = await buildSubjectAIContext(req.user.id);
+        }
+      } else {
+        const { buildSubjectAIContext } = await import("./services/teacherDataScope");
+        dataContext = await buildSubjectAIContext(req.user.id);
+      }
 
-      const hwSubmissions = await storage.getHomeworkSubmissionsByTeacher(req.user.id);
-      const hwContext = hwSubmissions.length > 0
-        ? JSON.stringify(hwSubmissions.map(s => ({
-            student: s.admissionNumber,
-            subject: s.subject,
-            homework: s.description,
-            status: s.status,
-            correctness: s.correctnessScore,
-            onTime: s.isOnTime === 1,
-            submittedAt: s.submittedAt,
-            dueDate: s.dueDate,
-          })))
-        : "No homework submission data yet.";
-
-      // 2. Save user message
+      // Save user message
       await storage.createMessage({ conversationId, role: "user", content });
 
-      // 3. Get AI response
+      // Get AI response
       const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o",
         messages: [
           { 
             role: "system", 
-            content: `You are an educational data analyst. Use the following student evaluation data and homework analytics to answer the teacher's questions. 
-            ONLY use the provided data. Do NOT hallucinate. If data is missing, say so.
-            
-            EXAM EVALUATION DATA: ${evalContext}
-            
-            HOMEWORK ANALYTICS DATA: ${hwContext}` 
+            content: `You are an educational data analyst helping a teacher understand student performance. Use the provided data to answer questions. ONLY use the provided data. Do NOT hallucinate. If data is missing, say so.\n\n${dataContext}`,
           },
           { role: "user", content }
         ]
@@ -930,7 +929,7 @@ Return ONLY valid JSON with this exact structure:
 
       const aiContent = response.choices[0].message.content || "I couldn't analyze that.";
       
-      // 4. Save AI message
+      // Save AI message
       const msg = await storage.createMessage({ conversationId, role: "assistant", content: aiContent });
       
       res.json(msg);
@@ -1868,6 +1867,99 @@ Generate 5 practice questions that target the student's specific gaps. Vary ques
       res.sendFile(filePath);
     } else {
       res.status(404).json({ message: "Not found" });
+    }
+  });
+
+  // ─── TEACHER SCOPE (role detection for frontend) ────────────────────────────
+  app.get("/api/teacher/scope", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const { getTeacherScope } = await import("./services/teacherDataScope");
+      const scope = await getTeacherScope(req.user.id);
+      res.json(scope);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load teacher scope" });
+    }
+  });
+
+  // ─── QUESTION QUALITY ANALYSIS ─────────────────────────────────────────────
+  app.get("/api/teacher/question-quality", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const { computeQuestionQuality } = await import("./services/teacherDataScope");
+      const poorQuestions = await computeQuestionQuality(req.user.id);
+
+      if (poorQuestions.length === 0) {
+        return res.json([]);
+      }
+
+      // AI classification — classify each poor question as Teaching Gap or Question Clarity Issue
+      try {
+        const prompt = `You are an educational data analyst. For each exam question below, classify the root cause of poor performance as either:
+- "Teaching Gap": students lacked conceptual understanding (the topic was not mastered)
+- "Question Clarity": the question itself was ambiguous or poorly worded
+
+Questions data (JSON): ${JSON.stringify(poorQuestions.map(q => ({
+  questionNumber: q.questionNumber,
+  examName: q.examName,
+  subject: q.subject,
+  avgPct: q.avgPct,
+  studentsAffected: q.studentsAffected,
+  sampleDeviations: q.sampleDeviations,
+})))}
+
+Return ONLY a valid JSON array. Each element: {"questionNumber": <number>, "examName": "<string>", "flag": "Teaching Gap" | "Question Clarity", "reason": "<one sentence explanation>"}`;
+
+        const aiResponse = await getOpenAIClient().chat.completions.create({
+          model: "gpt-4o",
+          temperature: 0.2,
+          max_tokens: 800,
+          messages: [
+            { role: "system", content: "You classify exam questions by root cause of poor student performance. Return only valid JSON." },
+            { role: "user", content: prompt },
+          ],
+        });
+
+        const raw = aiResponse.choices[0]?.message?.content || "[]";
+        const jsonMatch = raw.match(/\[[\s\S]*\]/);
+        const classifications: any[] = jsonMatch ? JSON.parse(jsonMatch[0]) : [];
+
+        const classified = poorQuestions.map((q) => {
+          const match = classifications.find(
+            (c: any) => c.questionNumber == q.questionNumber && c.examName === q.examName
+          );
+          return {
+            ...q,
+            flag: match?.flag || "Teaching Gap",
+            flagReason: match?.reason || "Insufficient data for classification.",
+          };
+        });
+
+        return res.json(classified);
+      } catch (aiErr) {
+        console.warn("[question-quality] AI classification failed, returning raw data:", aiErr);
+        return res.json(poorQuestions.map(q => ({
+          ...q,
+          flag: q.avgPct < 30 ? "Teaching Gap" : "Question Clarity",
+          flagReason: "AI classification unavailable.",
+        })));
+      }
+    } catch (err) {
+      console.error("[question-quality] Error:", err);
+      res.status(500).json({ message: "Failed to compute question quality" });
+    }
+  });
+
+  // ─── EARLY WARNING SYSTEM ───────────────────────────────────────────────────
+  app.get("/api/teacher/early-warning", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const { computeEarlyWarnings } = await import("./services/teacherDataScope");
+      const warnings = await computeEarlyWarnings(req.user.id);
+      res.json(warnings);
+    } catch (err) {
+      console.error("[early-warning] Error:", err);
+      res.status(500).json({ message: "Failed to compute early warnings" });
     }
   });
 
