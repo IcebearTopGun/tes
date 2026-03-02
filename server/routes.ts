@@ -75,6 +75,98 @@ function drand(seed: number): number {
   return x - Math.floor(x);
 }
 
+
+async function initAdminUsers() {
+  try {
+    // Create table if not exists (raw SQL, safe to run multiple times)
+    await db.execute(drizzleSql`
+      CREATE TABLE IF NOT EXISTS admin_users (
+        id SERIAL PRIMARY KEY,
+        employee_id TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        phone_number TEXT,
+        role TEXT NOT NULL DEFAULT 'ADMIN',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+      )
+    `);
+
+    // Also create other new tables if they don't exist
+    await db.execute(drizzleSql`
+      CREATE TABLE IF NOT EXISTS class_sections (
+        id SERIAL PRIMARY KEY,
+        class_name INTEGER NOT NULL,
+        section TEXT NOT NULL,
+        subjects TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+      )
+    `);
+    await db.execute(drizzleSql`
+      CREATE TABLE IF NOT EXISTS managed_students (
+        id SERIAL PRIMARY KEY,
+        student_name TEXT NOT NULL,
+        phone_number TEXT,
+        email TEXT,
+        admission_number TEXT NOT NULL UNIQUE,
+        class TEXT NOT NULL,
+        section TEXT NOT NULL,
+        session_year TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+      )
+    `);
+    await db.execute(drizzleSql`
+      CREATE TABLE IF NOT EXISTS managed_teachers (
+        id SERIAL PRIMARY KEY,
+        teacher_name TEXT NOT NULL,
+        employee_id TEXT NOT NULL UNIQUE,
+        email TEXT,
+        phone_number TEXT,
+        assignments TEXT NOT NULL DEFAULT '[]',
+        is_class_teacher INTEGER NOT NULL DEFAULT 0,
+        class_teacher_of TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
+      )
+    `);
+
+    // Seed admin + principal if not present
+    const hp = await bcrypt.hash("123", 10);
+
+    const existingAdmin = await storage.getAdminUserByEmployeeId("ADMIN001");
+    if (!existingAdmin) {
+      await storage.createAdminUser({
+        employeeId: "ADMIN001",
+        name: "School Admin",
+        email: "schooladmin@school.edu",
+        passwordHash: hp,
+        phoneNumber: "9000000001",
+        role: "ADMIN",
+      });
+      console.log("[init] AdminUser ADMIN001 created (password: 123)");
+    }
+
+    const existingPrincipal = await storage.getAdminUserByEmployeeId("PRIN001");
+    if (!existingPrincipal) {
+      await storage.createAdminUser({
+        employeeId: "PRIN001",
+        name: "School Principal",
+        email: "principal@school.edu",
+        passwordHash: hp,
+        phoneNumber: "9000000002",
+        role: "PRINCIPAL",
+      });
+      console.log("[init] AdminUser PRIN001 created (password: 123)");
+    }
+  } catch (err) {
+    console.error("[initAdminUsers] Error:", err);
+  }
+}
+
+
 async function seedDatabase() {
   // Skip if already seeded (50 students + admin exist)
   const allStudents = await storage.getAllStudents();
@@ -176,6 +268,16 @@ async function seedDatabase() {
 
   // ── 1 ADMIN ─────────────────────────────────────────────────────────────────
   await storage.createAdmin({ employeeId: "A001", name: "Principal Admin", email: "admin@school.edu", password: hp });
+
+  // ── SEED ADMIN USERS (ADMIN + PRINCIPAL) ─────────────────────────────────
+  try {
+    const existingAU = await storage.getAdminUserByEmployeeId("ADMIN001");
+    if (!existingAU) {
+      await storage.createAdminUser({ employeeId: "ADMIN001", name: "School Admin", email: "schooladmin@school.edu", passwordHash: hp, phoneNumber: "9000000001", role: "ADMIN" });
+      await storage.createAdminUser({ employeeId: "PRIN001", name: "School Principal", email: "principal@school.edu", passwordHash: hp, phoneNumber: "9000000002", role: "PRINCIPAL" });
+      console.log("[seed] Admin users seeded: ADMIN001/123 and PRIN001/123");
+    }
+  } catch (err) { console.error("[seed] Admin users seeding error:", err); }
 
   // ── EXAM DEFINITIONS ─────────────────────────────────────────────────────────
   const today = new Date();
@@ -292,7 +394,7 @@ async function seedDatabase() {
 
 // Middleware to extract token from Header
 interface AuthRequest extends Request {
-  user?: { id: number; role: "teacher" | "student" };
+  user?: { id: number; role: "teacher" | "student" | "admin" };
 }
 
 function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
@@ -303,7 +405,7 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
 
   const token = authHeader.split(" ")[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role: "teacher" | "student" };
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role: "teacher" | "student" | "admin" };
     req.user = decoded;
     next();
   } catch (err) {
@@ -316,6 +418,7 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   await seedDatabase();
+  await initAdminUsers(); // ensures admin_users table exists + seeds ADMIN001 and PRIN001
 
   // TEACHER LOGIN
   app.post(api.auth.teacherLogin.path, async (req, res) => {
@@ -413,6 +516,15 @@ export async function registerRoutes(
       res.status(500).json({ message: "Internal server error" });
     }
   });
+
+
+  // ─── Helper: verify admin password for delete operations ───────────────────
+  async function verifyAdminPassword(adminId: number, password: string): Promise<boolean> {
+    const admin = await storage.getAdminByEmployeeId("A001"); // fallback to seed admin
+    if (!admin) return false;
+    return bcrypt.compare(password, admin.password);
+  }
+
 
   // ─── ADMIN: SCHOOL STATS ───────────────────────────────────────────────────
   app.get("/api/admin/stats", authMiddleware, async (req: AuthRequest, res) => {
@@ -605,6 +717,91 @@ export async function registerRoutes(
     }
   });
 
+  // ── EXAM RESULTS: per-exam student results with question-level breakdown ──
+  app.get("/api/exams/:id/results", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const examId = parseInt(req.params.id);
+      const exam = await storage.getExam(examId);
+      if (!exam || exam.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+      const sheets = await storage.getAnswerSheetsByExam(examId);
+      const results = await Promise.all(sheets.map(async (sheet) => {
+        const evaluation = await storage.getEvaluationByAnswerSheetId(sheet.id);
+        if (!evaluation) return null;
+        let questions: any[] = [];
+        try { questions = JSON.parse(evaluation.questions); } catch {}
+        const pct = exam.totalMarks > 0 ? Math.round((evaluation.totalMarks / exam.totalMarks) * 100) : 0;
+        
+        // Identify strengths and areas of improvement
+        const strengths = questions.filter(q => q.marks_awarded >= (q.max_marks * 0.7));
+        const improvements = questions.filter(q => q.marks_awarded < (q.max_marks * 0.7));
+        
+        return {
+          studentName: evaluation.studentName,
+          admissionNumber: evaluation.admissionNumber,
+          totalMarks: evaluation.totalMarks,
+          maxMarks: exam.totalMarks,
+          percentage: pct,
+          overallFeedback: evaluation.overallFeedback,
+          questions: questions.map(q => ({
+            questionNumber: q.question_number,
+            chapter: q.chapter || "General",
+            marksAwarded: q.marks_awarded,
+            maxMarks: q.max_marks,
+            deviationReason: q.deviation_reason,
+            improvementSuggestion: q.improvement_suggestion,
+          })),
+          strengths: strengths.map(q => q.chapter || `Q${q.question_number}`),
+          areasOfImprovement: improvements.map(q => ({
+            topic: q.chapter || `Q${q.question_number}`,
+            detail: q.improvement_suggestion || q.deviation_reason || "",
+          })),
+        };
+      }));
+
+      const validResults = results.filter(Boolean);
+
+      // Class-level stats
+      const totalStudents = validResults.length;
+      const avgScore = totalStudents > 0 ? Math.round(validResults.reduce((s, r) => s + r!.percentage, 0) / totalStudents) : 0;
+      
+      // Score distribution
+      const distribution = {
+        "90-100": validResults.filter(r => r!.percentage >= 90).length,
+        "75-89": validResults.filter(r => r!.percentage >= 75 && r!.percentage < 90).length,
+        "60-74": validResults.filter(r => r!.percentage >= 60 && r!.percentage < 75).length,
+        "40-59": validResults.filter(r => r!.percentage >= 40 && r!.percentage < 60).length,
+        "0-39": validResults.filter(r => r!.percentage < 40).length,
+      };
+
+      // Chapter-wise class performance
+      const chapterMap = new Map<string, { total: number; max: number; count: number }>();
+      for (const r of validResults) {
+        for (const q of r!.questions) {
+          const ch = q.chapter;
+          const existing = chapterMap.get(ch) || { total: 0, max: 0, count: 0 };
+          chapterMap.set(ch, { total: existing.total + q.marksAwarded, max: existing.max + q.maxMarks, count: existing.count + 1 });
+        }
+      }
+      const chapterAnalysis = Array.from(chapterMap.entries()).map(([chapter, data]) => ({
+        chapter,
+        avgPct: data.max > 0 ? Math.round((data.total / data.max) * 100) : 0,
+        questionCount: data.count,
+        status: data.max > 0 && (data.total / data.max) >= 0.7 ? "strong" : "weak",
+      })).sort((a, b) => a.avgPct - b.avgPct);
+
+      res.json({
+        exam: { id: exam.id, name: exam.examName, subject: exam.subject, className: exam.className, section: (exam as any).section, totalMarks: exam.totalMarks },
+        students: validResults,
+        classSummary: { totalStudents, avgScore, distribution, chapterAnalysis },
+      });
+    } catch (err: any) {
+      console.error("[RESULTS]", err);
+      res.status(500).json({ message: "Failed to load results" });
+    }
+  });
+
   app.post(api.exams.processAnswerSheet.path, authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") {
       return res.status(401).json({ message: "Unauthorized" });
@@ -709,6 +906,49 @@ export async function registerRoutes(
         console.log("[EVAL] Using stored modelAnswerText.");
       }
 
+      // Extract model answer from images if stored (and text is still empty)
+      const examAny = exam as any;
+      if (!modelAnswerText && examAny.modelAnswerImages) {
+        try {
+          const imgArr: string[] = JSON.parse(examAny.modelAnswerImages);
+          if (imgArr.length > 0) {
+            console.log(`[EVAL] Extracting model answer from ${imgArr.length} image(s) via GPT-4o vision...`);
+            const imgContent: any[] = [
+              { type: "text", text: "Extract and transcribe the full model answer key from these images. Format as: Q1: <answer text>\nQ2: <answer text>\n..." },
+              ...imgArr.map(img => ({ type: "image_url", image_url: { url: img.startsWith("data:") ? img : `data:image/jpeg;base64,${img}` } })),
+            ];
+            const extractRes = await getOpenAIClient().chat.completions.create({
+              model: "gpt-4o",
+              messages: [{ role: "user", content: imgContent }],
+              max_tokens: 2000,
+            });
+            modelAnswerText = extractRes.choices[0]?.message?.content || "";
+            console.log("[EVAL] Extracted model answer from images.");
+          }
+        } catch (imgErr) { console.warn("[EVAL] Could not extract model answer from images:", imgErr); }
+      }
+
+      // Extract question text from images if available
+      let questionText = (exam as any).questionText?.trim() || "";
+      if (!questionText && examAny.questionImages) {
+        try {
+          const qImgArr: string[] = JSON.parse(examAny.questionImages);
+          if (qImgArr.length > 0) {
+            console.log(`[EVAL] Extracting questions from ${qImgArr.length} image(s)...`);
+            const qImgContent: any[] = [
+              { type: "text", text: "Extract and transcribe all exam questions from these images. Format as: Q1 (<marks> marks): <question text>\nQ2 (<marks> marks): <question text>\n..." },
+              ...qImgArr.map(img => ({ type: "image_url", image_url: { url: img.startsWith("data:") ? img : `data:image/jpeg;base64,${img}` } })),
+            ];
+            const qExtractRes = await getOpenAIClient().chat.completions.create({
+              model: "gpt-4o",
+              messages: [{ role: "user", content: qImgContent }],
+              max_tokens: 2000,
+            });
+            questionText = qExtractRes.choices[0]?.message?.content || "";
+          }
+        } catch (qImgErr) { console.warn("[EVAL] Could not extract questions from images:", qImgErr); }
+      }
+
       let markingSchemeText = exam.markingSchemeText?.trim() || "";
       if (!markingSchemeText && exam.markingSchemeUrl) {
         console.log("[EVAL] No markingSchemeText stored, extracting from uploaded file...");
@@ -722,11 +962,15 @@ export async function registerRoutes(
         .map((a: any) => `Q${a.question_number}: ${a.answer_text}`)
         .join("\n");
 
-      // Fetch NCERT context for this exam's class + subject
-      const ncertChaptersData = await storage.getNcertChaptersByClassAndSubject(exam.className, exam.subject);
-      const ncertContext = ncertChaptersData.length > 0
-        ? ncertChaptersData.map(ch => `Chapter: ${ch.chapterName}\n${ch.chapterContent}`).join("\n\n---\n\n")
-        : "";
+      // Fetch NCERT context only if exam has useNcert=1
+      const shouldUseNcert = (exam as any).useNcert === 1;
+      let ncertContext = "";
+      if (shouldUseNcert) {
+        const ncertChaptersData = await storage.getNcertChaptersByClassAndSubject(exam.className, exam.subject);
+        ncertContext = ncertChaptersData.length > 0
+          ? ncertChaptersData.map(ch => `Chapter: ${ch.chapterName}\n${ch.chapterContent}`).join("\n\n---\n\n")
+          : "";
+      }
 
       const evalPrompt = `You are an experienced teacher evaluating a student's exam answer sheet.
 
@@ -741,7 +985,7 @@ ${modelAnswerText || "(No model answer provided — evaluate based on subject kn
 
 ${markingSchemeText ? `=== MARKING SCHEME ===\n${markingSchemeText}` : ""}
 
-${ncertContext ? `=== NCERT REFERENCE CHAPTERS ===\n${ncertContext}\n\nMap each question to the most relevant NCERT chapter above.` : ""}
+${ncertContext ? `=== NCERT REFERENCE CHAPTERS ===\n${ncertContext}\n\nMap each question to the most relevant NCERT chapter above and reference the chapter content in your evaluation.` : ""}${!shouldUseNcert ? "\n(NCERT reference is disabled for this exam — evaluate using model answer only.)" : ""}
 
 === STUDENT DETAILS ===
 Name: ${sheet.studentName}
@@ -862,9 +1106,14 @@ Return ONLY valid JSON with this exact structure:
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
     try {
       const teacherExams = await storage.getExamsByTeacher(req.user.id);
-      const classes = [...new Set(teacherExams.map(e => e.className))].sort();
-      const subjects = [...new Set(teacherExams.map(e => e.subject))].sort();
-      res.json({ classes, subjects });
+      const examClasses = [...new Set(teacherExams.map(e => e.className))].sort();
+      const examSubjects = [...new Set(teacherExams.map(e => e.subject))].sort();
+      // Also include subjects assigned to this teacher from the subjects table
+      const allSubjects = await storage.getAllSubjects();
+      const assignedSubjects = allSubjects.filter(s => s.teacherId === req.user!.id);
+      const additionalSubjects = assignedSubjects.map(s => s.name).filter(n => !examSubjects.includes(n));
+      const additionalClasses = [...new Set(assignedSubjects.map(s => s.className).filter(Boolean) as string[])].filter(c => !examClasses.includes(c));
+      res.json({ classes: [...examClasses, ...additionalClasses].sort(), subjects: [...examSubjects, ...additionalSubjects].sort() });
     } catch (err) {
       res.status(500).json({ message: "Failed to load filter options" });
     }
@@ -974,7 +1223,26 @@ Return ONLY valid JSON with this exact structure:
               content: [
                 {
                   type: "text",
-                  text: "Extract student information from this handwritten answer sheet page. Return ONLY valid JSON with fields: admission_number (string), student_name (string), sheet_number (integer, the page/sheet number written on the paper — default 1 if not visible), and answers (array of {question_number: number, answer_text: string}). If you cannot read the admission number or name, use 'UNKNOWN'."
+                  text: `You are reading a handwritten student exam answer sheet page. Extract the following and return ONLY valid JSON.
+
+Look carefully for:
+- Student NAME: usually written at the top, labeled "Name:" or "NAME:"
+- ADMISSION NUMBER: usually labeled "Admission Number:", "Admission No:", "Roll No:" or similar — it is a number like 1234
+- PAGE NUMBER: often a circled number (①②③) in the top-right corner, or written as "Page 1", "Sheet 2" etc. Default to 1 if not found.
+- ANSWERS: labeled as "Ans 1", "Ans1", "Q1", "Answer 1" etc. Each answer may span multiple lines.
+
+Return this exact JSON structure:
+{
+  "student_name": "<full name as written>",
+  "admission_number": "<the numeric admission/roll number as a string>",
+  "sheet_number": <page number as integer>,
+  "answers": [
+    {"question_number": 1, "answer_text": "<full answer text for Q1>"},
+    {"question_number": 2, "answer_text": "<full answer text for Q2>"}
+  ]
+}
+
+If you genuinely cannot read the name, use "UNKNOWN". If you cannot read the admission number, use "UNKNOWN". Be thorough — read every line of text on the page.`
                 },
                 { type: "image_url", image_url: { url: imageBase64 } },
               ],
@@ -983,33 +1251,81 @@ Return ONLY valid JSON with this exact structure:
           });
 
           const ocrData = JSON.parse(response.choices[0].message.content || "{}");
-          const page = await storage.createAnswerSheetPage({
+          console.log(`[BULK] Page ${idx + 1} OCR done — student: "${ocrData.student_name}", admission: "${ocrData.admission_number}", sheet: ${ocrData.sheet_number}, answers: ${ocrData.answers?.length ?? 0}`);
+
+          // Build an in-memory page object — DB storage is best-effort
+          const pageObj: any = {
+            id: -(idx + 1), // negative = no DB id yet
             examId,
-            admissionNumber: ocrData.admission_number || "UNKNOWN",
-            studentName: ocrData.student_name || "UNKNOWN",
+            admissionNumber: (ocrData.admission_number || "UNKNOWN").toString().trim(),
+            studentName: (ocrData.student_name || "UNKNOWN").toString().trim(),
             sheetNumber: ocrData.sheet_number || (idx + 1),
             imageBase64,
             ocrOutput: JSON.stringify(ocrData),
             status: "processed",
-          });
-          console.log(`[BULK] Page ${idx + 1} OCR done — student: ${ocrData.student_name}, admission: ${ocrData.admission_number}`);
-          return { page, ocrData };
+          };
+
+          // Try saving to DB (non-fatal if table doesn't exist yet)
+          try {
+            const saved = await storage.createAnswerSheetPage({
+              examId,
+              admissionNumber: pageObj.admissionNumber,
+              studentName: pageObj.studentName,
+              sheetNumber: pageObj.sheetNumber,
+              imageBase64,
+              ocrOutput: pageObj.ocrOutput,
+              status: "processed",
+            });
+            pageObj.id = saved.id; // use real DB id
+          } catch (dbErr: any) {
+            console.warn(`[BULK] DB save skipped for page ${idx + 1} (table may not exist yet): ${dbErr?.message}`);
+          }
+
+          return { page: pageObj, ocrData };
         } catch (err: any) {
           console.error(`[BULK] OCR failed for page ${idx + 1}:`, err?.message);
-          return { error: `Page ${idx + 1} OCR failed`, index: idx };
+          return { error: `Page ${idx + 1} OCR failed: ${err?.message}`, index: idx };
         }
       }));
 
       // 2. Group successful pages by admission_number
-      const groups = new Map<string, { studentName: string; pages: { page: any; ocrData: any }[] }>();
-      for (const result of pageResults) {
-        if ((result as any).error) continue;
-        const { page, ocrData } = result as any;
-        const admNo = page.admissionNumber;
-        if (!groups.has(admNo)) {
-          groups.set(admNo, { studentName: page.studentName, pages: [] });
+      // Resolve UNKNOWN admission numbers by trying to match student name to a known group
+      const successResults = pageResults.filter((r: any) => !r.error) as { page: any; ocrData: any }[];
+
+      // First pass: collect all known admission numbers
+      const knownAdmMap = new Map<string, string>(); // studentName (lowercase) -> admissionNumber
+      for (const { page } of successResults) {
+        if (page.admissionNumber !== "UNKNOWN" && page.studentName !== "UNKNOWN") {
+          knownAdmMap.set(page.studentName.toLowerCase().trim(), page.admissionNumber);
         }
-        groups.get(admNo)!.pages.push({ page, ocrData });
+      }
+
+      // Second pass: resolve UNKNOWN admission numbers by name match
+      for (const result of successResults) {
+        const { page } = result;
+        if (page.admissionNumber === "UNKNOWN" && page.studentName !== "UNKNOWN") {
+          const matched = knownAdmMap.get(page.studentName.toLowerCase().trim());
+          if (matched) {
+            page.admissionNumber = matched;
+            console.log(`[BULK] Resolved UNKNOWN admission number for ${page.studentName} -> ${matched}`);
+          }
+        }
+        // Also normalise: trim whitespace and lowercase for grouping key
+        page._groupKey = page.admissionNumber.trim().toUpperCase();
+      }
+
+      const groups = new Map<string, { studentName: string; admissionNumber: string; pages: { page: any; ocrData: any }[] }>();
+      for (const result of successResults) {
+        const { page, ocrData } = result;
+        const key = page._groupKey || page.admissionNumber;
+        if (!groups.has(key)) {
+          groups.set(key, { studentName: page.studentName, admissionNumber: page.admissionNumber, pages: [] });
+        }
+        // Use best (non-UNKNOWN) name for the group
+        if (page.studentName !== "UNKNOWN" && groups.get(key)!.studentName === "UNKNOWN") {
+          groups.get(key)!.studentName = page.studentName;
+        }
+        groups.get(key)!.pages.push({ page, ocrData });
       }
 
       // 3. Sort each group by sheet_number and merge answers
@@ -1031,23 +1347,53 @@ Return ONLY valid JSON with this exact structure:
           }
         }
 
-        const script = await storage.createMergedAnswerScript({
+        // Build in-memory script object first
+        const scriptObj: any = {
+          id: Date.now() + Math.floor(Math.random() * 10000), // temp id
           examId,
-          admissionNumber: admNo,
+          admissionNumber: group.admissionNumber || admNo,
           studentName: group.studentName,
           mergedAnswers: JSON.stringify(mergedAnswers),
           pageIds: JSON.stringify(pageIds),
           status: "pending",
-        });
-        mergedScripts.push(script);
-        console.log(`[BULK] Merged script created for ${admNo} (${pageIds.length} pages, ${mergedAnswers.length} answers)`);
+          createdAt: new Date().toISOString(),
+        };
+
+        // Try saving to DB (non-fatal)
+        try {
+          const saved = await storage.createMergedAnswerScript({
+            examId,
+            admissionNumber: scriptObj.admissionNumber,
+            studentName: scriptObj.studentName,
+            mergedAnswers: scriptObj.mergedAnswers,
+            pageIds: scriptObj.pageIds,
+            status: "pending",
+          });
+          scriptObj.id = saved.id; // use real DB id for evaluation
+        } catch (dbErr: any) {
+          console.warn(`[BULK] DB save for merged script failed (${admNo}): ${dbErr?.message}`);
+        }
+
+        mergedScripts.push(scriptObj);
+        console.log(`[BULK] Script ready for ${admNo} (${pageIds.length} pages, ${mergedAnswers.length} answers, dbId=${scriptObj.id})`);
       }
 
       const errors = pageResults.filter((r: any) => r.error).map((r: any) => r.error);
+      console.log(`[BULK] Done: ${mergedScripts.length} merged scripts, ${errors.length} errors`);
+      // Log what OCR extracted for debugging
+      for (const r of successResults) {
+        console.log(`[BULK-OCR] Page ${r.page.id}: name="${r.page.studentName}" adm="${r.page.admissionNumber}" sheet=${r.page.sheetNumber} answers=${r.ocrData.answers?.length ?? 0}`);
+      }
       res.json({
-        pagesProcessed: pageResults.length - errors.length,
+        pagesProcessed: successResults.length,
         errors,
         mergedScripts,
+        ocrDetails: successResults.map(r => ({
+          studentName: r.page.studentName,
+          admissionNumber: r.page.admissionNumber,
+          sheetNumber: r.page.sheetNumber,
+          answersFound: r.ocrData.answers?.length ?? 0,
+        })),
       });
     } catch (err: any) {
       console.error("[BULK] Error:", err?.message);
@@ -1119,7 +1465,7 @@ ${modelAnswerText || "(No model answer provided — evaluate based on subject kn
 
 ${markingSchemeText ? `=== MARKING SCHEME ===\n${markingSchemeText}` : ""}
 
-${ncertContext ? `=== NCERT REFERENCE CHAPTERS ===\n${ncertContext}\n\nMap each question to the most relevant NCERT chapter above.` : ""}
+${ncertContext ? `=== NCERT REFERENCE CHAPTERS ===\n${ncertContext}\n\nMap each question to the most relevant NCERT chapter above and reference the chapter content in your evaluation.` : ""}${!shouldUseNcert ? "\n(NCERT reference is disabled for this exam — evaluate using model answer only.)" : ""}
 
 === STUDENT DETAILS ===
 Name: ${script.studentName}
@@ -1737,27 +2083,59 @@ Generate 5 practice questions that target the student's specific gaps. Vary ques
   app.get("/api/teacher/options", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
     try {
+      const teacherRecord = await storage.getTeacherById(req.user.id);
+
+      // Load assigned subjects from subjects table (admin-assigned)
+      const assignedSubjectRows = await storage.getAllSubjects().then(
+        rows => rows.filter(s => s.teacherId === req.user!.id)
+      );
+
+      // Build structured subject options: { name, code, className, section }
+      const structuredSubjects = assignedSubjectRows.map(s => ({
+        name: s.name,
+        code: s.code || "",
+        className: s.className || "",
+        section: s.section || "",
+      }));
+
+      // Also pull from exams/homework for fallback
       const teacherExams = await storage.getExamsByTeacher(req.user.id);
       const teacherHw = await storage.getHomeworkByTeacher(req.user.id);
 
       const subjectsFromExams = teacherExams.map(e => e.subject);
       const subjectsFromHw = teacherHw.map(h => h.subject);
-      const classesFromExams = teacherExams.map(e => e.className);
-      const classesFromHw = teacherHw.map(h => h.className);
+      const allSubjectNames = [...new Set([
+        ...assignedSubjectRows.map(s => s.name),
+        ...subjectsFromExams,
+        ...subjectsFromHw
+      ])].sort();
 
-      const allSubjects = [...new Set([...subjectsFromExams, ...subjectsFromHw])].sort();
-      const allClasses = [...new Set([...classesFromExams, ...classesFromHw])].sort();
+      // Assigned class-section pairs
+      const assignedClassSections = assignedSubjectRows
+        .filter(s => s.className && s.section)
+        .map(s => ({ className: s.className!, section: s.section! }));
+      
+      // Also from classes table (if teacher is class teacher)
+      const allClasses = await storage.getAllClasses();
+      const classTeacherClasses = allClasses.filter(c => c.classTeacherId === req.user!.id)
+        .map(c => ({ className: c.name, section: c.section }));
 
-      const DEFAULT_SUBJECTS = ["Mathematics", "Science", "English", "Social Studies", "Hindi", "Physics", "Chemistry", "Biology", "History", "Geography"];
+      const allClassSections = [...assignedClassSections, ...classTeacherClasses]
+        .filter((v, i, a) => a.findIndex(x => x.className === v.className && x.section === v.section) === i);
+
+      const uniqueClasses = [...new Set(allClassSections.map(c => c.className))].sort();
       const DEFAULT_CLASSES = ["8", "9", "10", "11", "12"];
-      const SECTIONS = ["A", "B", "C", "D"];
+      const DEFAULT_SUBJECTS = ["Mathematics", "Science", "English", "Social Studies", "Hindi", "Physics", "Chemistry", "Biology", "History", "Geography"];
 
       res.json({
-        subjects: allSubjects.length > 0 ? allSubjects : DEFAULT_SUBJECTS,
-        classes: allClasses.length > 0 ? allClasses : DEFAULT_CLASSES,
-        sections: SECTIONS,
+        subjects: allSubjectNames.length > 0 ? allSubjectNames : DEFAULT_SUBJECTS,
+        structuredSubjects: structuredSubjects.length > 0 ? structuredSubjects : [],
+        classes: uniqueClasses.length > 0 ? uniqueClasses : DEFAULT_CLASSES,
+        classSections: allClassSections.length > 0 ? allClassSections : [],
+        sections: ["A", "B", "C", "D"],
       });
     } catch (err) {
+      console.error("teacher options error:", err);
       res.status(500).json({ message: "Failed to load options" });
     }
   });
@@ -1950,6 +2328,195 @@ Return ONLY a valid JSON array. Each element: {"questionNumber": <number>, "exam
     }
   });
 
+
+  // ─── QUALITY OF EDUCATION ─────────────────────────────────────────────────
+  // Compares exam questions against NCERT depth for the class/subject
+  app.get("/api/teacher/education-quality", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const exams = await storage.getExamsByTeacher(req.user.id);
+      if (exams.length === 0) return res.json([]);
+
+      const results: any[] = [];
+
+      for (const exam of exams) {
+        if (!exam.questionText) continue;
+
+        const ncertChaps = await storage.getNcertChaptersByClassAndSubject(exam.className, exam.subject);
+        const ncertContext = ncertChaps.length > 0
+          ? ncertChaps.map((c: any) => `Chapter: ${c.chapterName}\nContent: ${c.chapterContent}`).join("\n\n")
+          : `Standard NCERT Class ${exam.className} ${exam.subject} curriculum`;
+
+        // Map category to readable label
+        const categoryLabel: Record<string, string> = {
+          unit_test: "Unit Test",
+          class_test: "Class Test",
+          homework: "Homework",
+          half_yearly: "Half Yearly Exam",
+          annual: "Annual Exam",
+          quiz: "Quiz",
+          assignment: "Assignment",
+        };
+
+        try {
+          const prompt = `You are an expert educational quality assessor for Indian CBSE/NCERT curriculum.
+
+Exam details:
+- Name: ${exam.examName}
+- Type: ${categoryLabel[exam.category] || exam.category}
+- Subject: ${exam.subject}
+- Class: ${exam.className}
+- Total Marks: ${exam.totalMarks}
+
+Questions asked in this exam:
+${exam.questionText}
+
+NCERT curriculum reference for Class ${exam.className} ${exam.subject}:
+${ncertContext}
+
+Analyse the question paper against the NCERT curriculum depth and return ONLY valid JSON (no markdown, no explanation):
+{
+  "examId": ${exam.id},
+  "examName": "${exam.examName.replace(/"/g, "'")}",
+  "category": "${categoryLabel[exam.category] || exam.category}",
+  "subject": "${exam.subject}",
+  "className": "${exam.className}",
+  "totalMarks": ${exam.totalMarks},
+  "overallDepthRating": "Below NCERT Level" | "At NCERT Level" | "Above NCERT Level" | "Mixed",
+  "depthScore": <0-100 integer, 50 = exactly at NCERT level, <50 = below, >50 = above>,
+  "summary": "<2-3 sentence overall assessment>",
+  "questionAnalysis": [
+    {
+      "questionSnippet": "<first 60 chars of question>",
+      "ncertChapter": "<matching NCERT chapter or topic>",
+      "depthLevel": "Below" | "At Level" | "Above" | "Beyond Syllabus",
+      "bloomsLevel": "Remember" | "Understand" | "Apply" | "Analyse" | "Evaluate" | "Create",
+      "concern": "<specific concern if any, empty string if good>"
+    }
+  ],
+  "strengths": ["strength 1", "strength 2"],
+  "concerns": ["concern 1", "concern 2"],
+  "recommendations": ["recommendation 1", "recommendation 2"]
+}`;
+
+          const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+              "anthropic-version": "2023-06-01",
+            },
+            body: JSON.stringify({
+              model: "claude-haiku-4-5-20251001",
+              max_tokens: 2000,
+              messages: [{ role: "user", content: prompt }],
+            }),
+          });
+
+          const aiData: any = await aiRes.json();
+          const raw = aiData.content?.[0]?.text || "{}";
+          const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+          const parsed = JSON.parse(cleaned);
+          results.push(parsed);
+        } catch (aiErr) {
+          // Fallback without AI
+          results.push({
+            examId: exam.id,
+            examName: exam.examName,
+            category: categoryLabel[exam.category] || exam.category,
+            subject: exam.subject,
+            className: exam.className,
+            totalMarks: exam.totalMarks,
+            overallDepthRating: "At NCERT Level",
+            depthScore: 50,
+            summary: "AI analysis unavailable. Questions appear to be at standard level.",
+            questionAnalysis: [],
+            strengths: [],
+            concerns: ["AI classification temporarily unavailable"],
+            recommendations: ["Add NCERT chapters in the settings to enable deep analysis"],
+          });
+        }
+      }
+
+      res.json(results);
+    } catch (err) {
+      console.error("[education-quality]", err);
+      res.status(500).json({ message: "Failed to compute education quality" });
+    }
+  });
+
+  // ─── EXAM STATS (mean/median/mode) ────────────────────────────────────────
+  app.get("/api/exams/:id/stats", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const examId = parseInt(req.params.id);
+      const exam = await storage.getExam(examId);
+      if (!exam || exam.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+      const sheets = await storage.getAnswerSheetsByExam(examId);
+      const scores: number[] = [];
+
+      for (const sheet of sheets) {
+        const evaluation = await storage.getEvaluationByAnswerSheetId(sheet.id);
+        if (evaluation && exam.totalMarks > 0) {
+          scores.push(Math.round((evaluation.totalMarks / exam.totalMarks) * 100));
+        }
+      }
+
+      if (scores.length === 0) return res.json({ count: 0 });
+
+      scores.sort((a, b) => a - b);
+      const mean = Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
+      const mid = Math.floor(scores.length / 2);
+      const median = scores.length % 2 === 0
+        ? Math.round((scores[mid - 1] + scores[mid]) / 2)
+        : scores[mid];
+
+      // Mode
+      const freq: Record<number, number> = {};
+      scores.forEach(s => { freq[s] = (freq[s] || 0) + 1; });
+      const maxFreq = Math.max(...Object.values(freq));
+      const modes = Object.entries(freq).filter(([, f]) => f === maxFreq).map(([v]) => parseInt(v));
+
+      // Standard deviation
+      const variance = scores.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / scores.length;
+      const stdDev = Math.round(Math.sqrt(variance));
+
+      const categoryLabel: Record<string, string> = {
+        unit_test: "Unit Test", class_test: "Class Test", homework: "Homework",
+        half_yearly: "Half Yearly Exam", annual: "Annual Exam", quiz: "Quiz", assignment: "Assignment",
+      };
+
+      res.json({
+        examId,
+        examName: exam.examName,
+        category: categoryLabel[exam.category] || exam.category,
+        subject: exam.subject,
+        className: exam.className,
+        totalMarks: exam.totalMarks,
+        questionText: exam.questionText || null,
+        count: scores.length,
+        mean,
+        median,
+        mode: modes,
+        stdDev,
+        min: scores[0],
+        max: scores[scores.length - 1],
+        scores,
+        distribution: {
+          "90-100": scores.filter(s => s >= 90).length,
+          "75-89": scores.filter(s => s >= 75 && s < 90).length,
+          "60-74": scores.filter(s => s >= 60 && s < 75).length,
+          "40-59": scores.filter(s => s >= 40 && s < 60).length,
+          "0-39": scores.filter(s => s < 40).length,
+        },
+      });
+    } catch (err) {
+      console.error("[exam-stats]", err);
+      res.status(500).json({ message: "Failed to compute exam stats" });
+    }
+  });
+
   // ─── EARLY WARNING SYSTEM ───────────────────────────────────────────────────
   app.get("/api/teacher/early-warning", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
@@ -2020,6 +2587,982 @@ Return ONLY a valid JSON array. Each element: {"questionNumber": <number>, "exam
       console.error("[admin-question-quality] Error:", err);
       res.status(500).json({ message: "Failed to compute admin question quality" });
     }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ADMIN CRUD: Teachers
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  app.post("/api/admin/teachers", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { employeeId, name, phone } = req.body;
+      if (!employeeId || !name || !phone) return res.status(400).json({ message: "Employee ID, name and phone are required" });
+      const existing = await storage.getTeacherByEmployeeId(employeeId);
+      if (existing) return res.status(400).json({ message: "Employee ID already exists" });
+      // Create teacher with a default password (they will use OTP to login)
+      const defaultPwd = await bcrypt.hash("changeme123", 10);
+      const teacher = await storage.createTeacher({
+        employeeId, name, phone,
+        email: `${employeeId.toLowerCase()}@school.edu`,
+        password: defaultPwd,
+        subjectsAssigned: "[]",
+        classesAssigned: "[]",
+        isClassTeacher: 0,
+        classTeacherOf: "",
+      });
+      const { password: _, ...t } = teacher;
+      res.status(201).json(t);
+    } catch (err) {
+      console.error("[admin-create-teacher]", err);
+      res.status(500).json({ message: "Failed to create teacher" });
+    }
+  });
+
+  app.put("/api/admin/teachers/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { name, phone, employeeId, email, subjectsAssigned, classesAssigned, isClassTeacher, classTeacherOf } = req.body;
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (phone !== undefined) updateData.phone = phone;
+      if (employeeId !== undefined) updateData.employeeId = employeeId;
+      if (email !== undefined) updateData.email = email;
+      if (subjectsAssigned !== undefined) updateData.subjectsAssigned = subjectsAssigned;
+      if (classesAssigned !== undefined) updateData.classesAssigned = classesAssigned;
+      if (isClassTeacher !== undefined) updateData.isClassTeacher = isClassTeacher;
+      if (classTeacherOf !== undefined) updateData.classTeacherOf = classTeacherOf;
+      const teacher = await storage.updateTeacher(id, updateData);
+      const { password: _, ...t } = teacher;
+      res.json(t);
+    } catch (err) {
+      console.error("[admin-update-teacher]", err);
+      res.status(500).json({ message: "Failed to update teacher" });
+    }
+  });
+
+  app.delete("/api/admin/teachers/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { password } = req.body;
+      if (password) {
+        const valid = await verifyAdminPassword(req.user.id, password);
+        if (!valid) return res.status(403).json({ message: "Incorrect admin password" });
+      }
+      const id = parseInt(req.params.id, 10);
+      await storage.deleteTeacher(id);
+      res.json({ message: "Teacher deleted" });
+    } catch (err) {
+      console.error("[admin-delete-teacher]", err);
+      res.status(500).json({ message: "Failed to delete teacher" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ADMIN CRUD: Students
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  app.post("/api/admin/students", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { admissionNumber, name, phone, studentClass, section } = req.body;
+      if (!admissionNumber || !name || !phone) return res.status(400).json({ message: "Admission number, name and phone are required" });
+      const existing = await storage.getStudentByAdmissionNumber(admissionNumber);
+      if (existing) return res.status(400).json({ message: "Admission number already exists" });
+      const defaultPwd = await bcrypt.hash("changeme123", 10);
+      const student = await storage.createStudent({
+        admissionNumber, name, phone,
+        studentClass: studentClass || "9",
+        section: section || "A",
+        password: defaultPwd,
+      });
+      const { password: _, ...s } = student;
+      res.status(201).json(s);
+    } catch (err) {
+      console.error("[admin-create-student]", err);
+      res.status(500).json({ message: "Failed to create student" });
+    }
+  });
+
+  app.put("/api/admin/students/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { name, phone, admissionNumber, studentClass, section } = req.body;
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (phone !== undefined) updateData.phone = phone;
+      if (admissionNumber !== undefined) updateData.admissionNumber = admissionNumber;
+      if (studentClass !== undefined) updateData.studentClass = studentClass;
+      if (section !== undefined) updateData.section = section;
+      const student = await storage.updateStudent(id, updateData);
+      const { password: _, ...s } = student;
+      res.json(s);
+    } catch (err) {
+      console.error("[admin-update-student]", err);
+      res.status(500).json({ message: "Failed to update student" });
+    }
+  });
+
+  app.delete("/api/admin/students/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { password } = req.body;
+      if (password) {
+        const valid = await verifyAdminPassword(req.user.id, password);
+        if (!valid) return res.status(403).json({ message: "Incorrect admin password" });
+      }
+      const id = parseInt(req.params.id, 10);
+      await storage.deleteStudent(id);
+      res.json({ message: "Student deleted" });
+    } catch (err) {
+      console.error("[admin-delete-student]", err);
+      res.status(500).json({ message: "Failed to delete student" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ADMIN CRUD: Classes
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/classes", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const allClasses = await storage.getAllClasses();
+      const allTeachers = await storage.getAllTeachers();
+      const enriched = allClasses.map(c => {
+        const teacher = c.classTeacherId ? allTeachers.find(t => t.id === c.classTeacherId) : null;
+        return { ...c, classTeacherName: teacher?.name || null };
+      });
+      res.json(enriched);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load classes" });
+    }
+  });
+
+  app.post("/api/admin/classes", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { name, section, description, classTeacherId } = req.body;
+      if (!name || !section) return res.status(400).json({ message: "Class name and section are required" });
+      const existingClasses = await storage.getAllClasses();
+      const dupClass = existingClasses.find(c => c.name === name && c.section === section);
+      if (dupClass) return res.status(400).json({ message: `Class ${name}-${section} already exists` });
+      const cls = await storage.createClass({ name, section, description: description || null, classTeacherId: classTeacherId || null });
+      // Update teacher's isClassTeacher and classTeacherOf
+      if (classTeacherId) {
+        await storage.updateTeacher(classTeacherId, {
+          isClassTeacher: 1,
+          classTeacherOf: `${name}-${section}`,
+        });
+      }
+      const teacherInfo = classTeacherId ? await storage.getTeacherById(classTeacherId) : null;
+      res.status(201).json({ ...cls, classTeacherName: teacherInfo?.name || null });
+    } catch (err) {
+      console.error("[admin-create-class]", err);
+      res.status(500).json({ message: "Failed to create class" });
+    }
+  });
+
+  app.put("/api/admin/classes/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { name, section, description, classTeacherId } = req.body;
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (section !== undefined) updateData.section = section;
+      if (description !== undefined) updateData.description = description;
+      if (classTeacherId !== undefined) updateData.classTeacherId = classTeacherId || null;
+      const cls = await storage.updateClass(id, updateData);
+      // Update teacher record
+      if (classTeacherId) {
+        const n = name || cls.name;
+        const s = section || cls.section;
+        await storage.updateTeacher(classTeacherId, { isClassTeacher: 1, classTeacherOf: `${n}-${s}` });
+      }
+      const teacherInfo = (updateData.classTeacherId || cls.classTeacherId) ? await storage.getTeacherById(updateData.classTeacherId || cls.classTeacherId) : null;
+      res.json({ ...cls, classTeacherName: teacherInfo?.name || null });
+    } catch (err) {
+      console.error("[admin-update-class]", err);
+      res.status(500).json({ message: "Failed to update class" });
+    }
+  });
+
+  app.delete("/api/admin/classes/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = parseInt(req.params.id, 10);
+      await storage.deleteClass(id);
+      res.json({ message: "Class deleted" });
+    } catch (err) {
+      console.error("[admin-delete-class]", err);
+      res.status(500).json({ message: "Failed to delete class" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // ADMIN CRUD: Subjects
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/subjects", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const allSubjects = await storage.getAllSubjects();
+      const allTeachers = await storage.getAllTeachers();
+      const enriched = allSubjects.map(s => {
+        const teacher = s.teacherId ? allTeachers.find(t => t.id === s.teacherId) : null;
+        return { ...s, teacherName: teacher?.name || null };
+      });
+      res.json(enriched);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to load subjects" });
+    }
+  });
+
+  app.post("/api/admin/subjects", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { name, code, description, className, section, teacherId } = req.body;
+      if (!name) return res.status(400).json({ message: "Subject name is required" });
+      if (!className || !section) return res.status(400).json({ message: "Class name and section are required for a subject" });
+      const existingSubjects = await storage.getAllSubjects();
+      if (code) {
+        const dupCode = existingSubjects.find(s => s.code && s.code.toLowerCase() === code.toLowerCase() && s.className === className && s.section === section);
+        if (dupCode) return res.status(400).json({ message: `Subject with code "${code}" for class ${className}-${section} already exists` });
+      } else {
+        const dupName = existingSubjects.find(s => s.name.toLowerCase() === name.toLowerCase() && s.className === className && s.section === section);
+        if (dupName) return res.status(400).json({ message: `Subject "${name}" for class ${className}-${section} already exists` });
+      }
+      const subj = await storage.createSubject({ name, code: code || null, description: description || null, className: className || null, section: section || null, teacherId: teacherId || null });
+      // Update teacher's subjects/classes assigned
+      if (teacherId && className) {
+        const teacher = await storage.getTeacherById(teacherId);
+        if (teacher) {
+          let subjects: string[] = [];
+          let classes: string[] = [];
+          try { subjects = JSON.parse(teacher.subjectsAssigned || "[]"); } catch {}
+          try { classes = JSON.parse(teacher.classesAssigned || "[]"); } catch {}
+          if (!subjects.includes(name)) subjects.push(name);
+          if (!classes.includes(className)) classes.push(className);
+          await storage.updateTeacher(teacherId, { subjectsAssigned: JSON.stringify(subjects), classesAssigned: JSON.stringify(classes) });
+        }
+      }
+      const teacherInfo = teacherId ? await storage.getTeacherById(teacherId) : null;
+      res.status(201).json({ ...subj, teacherName: teacherInfo?.name || null });
+    } catch (err) {
+      console.error("[admin-create-subject]", err);
+      res.status(500).json({ message: "Failed to create subject" });
+    }
+  });
+
+  app.put("/api/admin/subjects/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { name, code, description, className, section, teacherId } = req.body;
+      const updateData: any = {};
+      if (name !== undefined) updateData.name = name;
+      if (code !== undefined) updateData.code = code;
+      if (description !== undefined) updateData.description = description;
+      if (className !== undefined) updateData.className = className;
+      if (section !== undefined) updateData.section = section;
+      if (teacherId !== undefined) updateData.teacherId = teacherId || null;
+      const subj = await storage.updateSubject(id, updateData);
+      // Update teacher assignments
+      if (teacherId && name) {
+        const teacher = await storage.getTeacherById(teacherId);
+        if (teacher) {
+          let subjects: string[] = [];
+          let classes: string[] = [];
+          try { subjects = JSON.parse(teacher.subjectsAssigned || "[]"); } catch {}
+          try { classes = JSON.parse(teacher.classesAssigned || "[]"); } catch {}
+          if (!subjects.includes(name)) subjects.push(name);
+          const cn = className || "";
+          if (cn && !classes.includes(cn)) classes.push(cn);
+          await storage.updateTeacher(teacherId, { subjectsAssigned: JSON.stringify(subjects), classesAssigned: JSON.stringify(classes) });
+        }
+      }
+      const teacherInfo = (updateData.teacherId || subj.teacherId) ? await storage.getTeacherById(updateData.teacherId || subj.teacherId) : null;
+      res.json({ ...subj, teacherName: teacherInfo?.name || null });
+    } catch (err) {
+      console.error("[admin-update-subject]", err);
+      res.status(500).json({ message: "Failed to update subject" });
+    }
+  });
+
+  app.delete("/api/admin/subjects/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = parseInt(req.params.id, 10);
+      await storage.deleteSubject(id);
+      res.json({ message: "Subject deleted" });
+    } catch (err) {
+      console.error("[admin-delete-subject]", err);
+      res.status(500).json({ message: "Failed to delete subject" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  // OTP Auth: Send OTP and Verify OTP
+  // ═══════════════════════════════════════════════════════════════════════════════
+
+  app.post("/api/auth/otp/send", async (req, res) => {
+    try {
+      const { phone, role, identifier } = req.body;
+      if (!phone || !role || !identifier) return res.status(400).json({ message: "Phone, role and identifier are required" });
+
+      // Verify the user exists and phone matches
+      if (role === "teacher") {
+        const teacher = await storage.getTeacherByEmployeeId(identifier);
+        if (!teacher) return res.status(404).json({ message: "Teacher not found with this Employee ID" });
+        if (!teacher.phone || teacher.phone !== phone) return res.status(400).json({ message: "Phone number does not match records" });
+      } else if (role === "student") {
+        const student = await storage.getStudentByAdmissionNumber(identifier);
+        if (!student) return res.status(404).json({ message: "Student not found with this Admission Number" });
+        if (!student.phone || student.phone !== phone) return res.status(400).json({ message: "Phone number does not match records" });
+      } else {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+
+      // Generate 6-digit OTP
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes
+
+      await storage.createOtp(phone, code, role, identifier, expiresAt);
+
+      // In production, send SMS here. For now, log the OTP.
+      console.log(`[OTP] Code ${code} sent to ${phone} for ${role} ${identifier}`);
+
+      res.json({ message: "OTP sent successfully", expiresIn: 300 });
+    } catch (err) {
+      console.error("[otp-send]", err);
+      res.status(500).json({ message: "Failed to send OTP" });
+    }
+  });
+
+  app.post("/api/auth/otp/verify", async (req, res) => {
+    try {
+      const { phone, code, role, identifier } = req.body;
+      if (!phone || !code || !role || !identifier) return res.status(400).json({ message: "Phone, code, role and identifier are required" });
+
+      const otp = await storage.getLatestOtp(phone, identifier);
+      if (!otp) return res.status(400).json({ message: "No OTP found. Please request a new one." });
+
+      // Check expiry
+      if (new Date(otp.expiresAt) < new Date()) {
+        return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+      }
+
+      // Check code
+      if (otp.code !== code) {
+        return res.status(400).json({ message: "Invalid OTP code" });
+      }
+
+      // Mark as verified
+      await storage.markOtpVerified(otp.id);
+
+      // Login the user
+      if (role === "teacher") {
+        const teacher = await storage.getTeacherByEmployeeId(identifier);
+        if (!teacher) return res.status(404).json({ message: "Teacher not found" });
+        const token = jwt.sign({ id: teacher.id, role: "teacher" }, JWT_SECRET, { expiresIn: "1d" });
+        const { password, ...teacherWithoutPassword } = teacher;
+        res.json({ token, role: "teacher", user: teacherWithoutPassword });
+      } else if (role === "student") {
+        const student = await storage.getStudentByAdmissionNumber(identifier);
+        if (!student) return res.status(404).json({ message: "Student not found" });
+        const token = jwt.sign({ id: student.id, role: "student" }, JWT_SECRET, { expiresIn: "1d" });
+        const { password, ...studentWithoutPassword } = student;
+        res.json({ token, role: "student", user: studentWithoutPassword });
+      } else {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+    } catch (err) {
+      console.error("[otp-verify]", err);
+      res.status(500).json({ message: "Failed to verify OTP" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ADMIN USER AUTH (ADMIN + PRINCIPAL)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.post("/api/auth/adminuser/login", async (req, res) => {
+    try {
+      const { employeeId, password } = req.body;
+      if (!employeeId || !password) return res.status(400).json({ message: "Employee ID and password required" });
+
+      // 1. Try new admin_users table first
+      const adminUser = await storage.getAdminUserByEmployeeId(employeeId);
+      if (adminUser && (await bcrypt.compare(password, adminUser.passwordHash))) {
+        const jwtRole = adminUser.role === "PRINCIPAL" ? "principal" : "admin";
+        const token = jwt.sign({ id: adminUser.id, role: jwtRole }, JWT_SECRET, { expiresIn: "1d" });
+        const { passwordHash: _, ...userWithoutPwd } = adminUser;
+        return res.json({ token, role: jwtRole, user: userWithoutPwd });
+      }
+
+      // 2. Fall back to legacy admins table (for A001 and any existing admin)
+      const legacyAdmin = await storage.getAdminByEmployeeId(employeeId);
+      if (legacyAdmin && (await bcrypt.compare(password, legacyAdmin.password))) {
+        const token = jwt.sign({ id: legacyAdmin.id, role: "admin" }, JWT_SECRET, { expiresIn: "1d" });
+        const { password: _, ...adminWithoutPassword } = legacyAdmin;
+        return res.json({ token, role: "admin", user: adminWithoutPassword });
+      }
+
+      return res.status(401).json({ message: "Invalid credentials" });
+    } catch (err) {
+      console.error("[adminuser-login]", err);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Seed a default principal for testing
+  app.post("/api/auth/adminuser/seed-principal", async (req, res) => {
+    try {
+      const existing = await storage.getAdminUserByEmployeeId("P001");
+      if (existing) return res.json({ message: "Already seeded", user: existing });
+      const hash = await bcrypt.hash("principal123", 10);
+      const u = await storage.createAdminUser({
+        employeeId: "P001",
+        name: "School Principal",
+        email: "principal@school.edu",
+        passwordHash: hash,
+        phoneNumber: "9999999999",
+        role: "PRINCIPAL",
+      });
+      const { passwordHash: _, ...safe } = u;
+      res.status(201).json(safe);
+    } catch (err) {
+      res.status(500).json({ message: "Seed failed" });
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CLASS-SECTION MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/class-sections", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin" && req.user?.role !== "principal") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const list = await storage.getAllClassSections();
+      res.json(list);
+    } catch (err) { res.status(500).json({ message: "Failed to fetch class sections" }); }
+  });
+
+  app.post("/api/admin/class-sections", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { className, section, subjects } = req.body;
+      if (!className || !section || !subjects) return res.status(400).json({ message: "Class, section and subjects required" });
+      // Validate: class must be integer
+      const classNum = parseInt(className, 10);
+      if (isNaN(classNum) || String(classNum) !== String(className)) return res.status(400).json({ message: "Class must be an integer" });
+      // Validate: section must be capital alphabet
+      if (!/^[A-Z]$/.test(section)) return res.status(400).json({ message: "Section must be a single capital letter (A-Z)" });
+      // Check duplicate
+      const existing = await storage.getClassSectionByClassAndSection(classNum, section);
+      if (existing) return res.status(409).json({ message: `Class ${classNum}-${section} already exists`, duplicate: true });
+      const subjectsJson = JSON.stringify(Array.isArray(subjects) ? subjects : subjects.split(",").map((s: string) => s.trim()));
+      const created = await storage.createClassSection({ className: classNum, section, subjects: subjectsJson });
+      res.status(201).json(created);
+    } catch (err) {
+      console.error("[create-class-section]", err);
+      res.status(500).json({ message: "Failed to create class section" });
+    }
+  });
+
+  app.put("/api/admin/class-sections/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { className, section, subjects } = req.body;
+      const updateData: any = {};
+      if (className !== undefined) {
+        const classNum = parseInt(className, 10);
+        if (isNaN(classNum)) return res.status(400).json({ message: "Class must be an integer" });
+        updateData.className = classNum;
+      }
+      if (section !== undefined) {
+        if (!/^[A-Z]$/.test(section)) return res.status(400).json({ message: "Section must be a single capital letter" });
+        updateData.section = section;
+      }
+      if (subjects !== undefined) {
+        updateData.subjects = JSON.stringify(Array.isArray(subjects) ? subjects : subjects.split(",").map((s: string) => s.trim()));
+      }
+      const updated = await storage.updateClassSection(id, updateData);
+      res.json(updated);
+    } catch (err) { res.status(500).json({ message: "Failed to update" }); }
+  });
+
+  app.delete("/api/admin/class-sections/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { password, deleteSubject } = req.body;
+      if (!password) return res.status(400).json({ message: "Admin password required" });
+      const validPwd = await verifyAdminPassword(req.user.id, password);
+      if (!validPwd) return res.status(403).json({ message: "Incorrect admin password" });
+      const id = parseInt(req.params.id, 10);
+      if (deleteSubject) {
+        // Delete only specific subject from the class section
+        const existing = await storage.getAllClassSections().then(list => list.find(c => c.id === id));
+        if (!existing) return res.status(404).json({ message: "Not found" });
+        const subs: string[] = JSON.parse(existing.subjects);
+        const filtered = subs.filter(s => s !== deleteSubject);
+        await storage.updateClassSection(id, { subjects: JSON.stringify(filtered) });
+        return res.json({ message: "Subject removed" });
+      }
+      await storage.deleteClassSection(id);
+      res.json({ message: "Deleted" });
+    } catch (err) { res.status(500).json({ message: "Failed to delete" }); }
+  });
+
+  app.post("/api/admin/class-sections/bulk-upload", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { records } = req.body;
+      if (!Array.isArray(records)) return res.status(400).json({ message: "Records array required" });
+      const parsed = records.map((r: any) => ({
+        className: parseInt(r.class || r.className, 10),
+        section: String(r.section).toUpperCase().trim(),
+        subjects: JSON.stringify(String(r.subjects || "").split(",").map((s: string) => s.trim()).filter(Boolean)),
+      }));
+      const result = await storage.bulkCreateClassSections(parsed);
+      res.json(result);
+    } catch (err) { res.status(500).json({ message: "Bulk upload failed" }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MANAGED STUDENTS MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/managed-students", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin" && req.user?.role !== "principal") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const list = await storage.getAllManagedStudents();
+      res.json(list);
+    } catch (err) { res.status(500).json({ message: "Failed to fetch" }); }
+  });
+
+  app.post("/api/admin/managed-students", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { studentName, phoneNumber, email, admissionNumber, class: cls, section, sessionYear } = req.body;
+      if (!studentName || !admissionNumber || !cls || !section || !sessionYear) {
+        return res.status(400).json({ message: "studentName, admissionNumber, class, section, sessionYear required" });
+      }
+      const existing = await storage.getManagedStudentByAdmission(admissionNumber);
+      if (existing) return res.status(409).json({ message: "Admission number already exists", duplicate: true });
+      const created = await storage.createManagedStudent({ studentName, phoneNumber, email, admissionNumber, class: cls, section, sessionYear });
+      res.status(201).json(created);
+    } catch (err) { res.status(500).json({ message: "Failed to create" }); }
+  });
+
+  app.put("/api/admin/managed-students/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { studentName, phoneNumber, email, admissionNumber, class: cls, section, sessionYear } = req.body;
+      const updateData: any = {};
+      if (studentName !== undefined) updateData.studentName = studentName;
+      if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
+      if (email !== undefined) updateData.email = email;
+      if (admissionNumber !== undefined) updateData.admissionNumber = admissionNumber;
+      if (cls !== undefined) updateData.class = cls;
+      if (section !== undefined) updateData.section = section;
+      if (sessionYear !== undefined) updateData.sessionYear = sessionYear;
+      const updated = await storage.updateManagedStudent(id, updateData);
+      res.json(updated);
+    } catch (err) { res.status(500).json({ message: "Failed to update" }); }
+  });
+
+  app.delete("/api/admin/managed-students/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { password } = req.body;
+      if (!password) return res.status(400).json({ message: "Admin password required" });
+      const validPwd = await verifyAdminPassword(req.user.id, password);
+      if (!validPwd) return res.status(403).json({ message: "Incorrect admin password" });
+      const id = parseInt(req.params.id, 10);
+      await storage.deleteManagedStudent(id);
+      res.json({ message: "Deleted" });
+    } catch (err) { res.status(500).json({ message: "Failed to delete" }); }
+  });
+
+  app.post("/api/admin/managed-students/bulk-upload", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { records } = req.body;
+      if (!Array.isArray(records)) return res.status(400).json({ message: "Records array required" });
+      const parsed = records.map((r: any) => ({
+        studentName: r.studentName || r.name || "",
+        phoneNumber: r.phoneNumber || r.phone || "",
+        email: r.email || "",
+        admissionNumber: String(r.admissionNumber || ""),
+        class: String(r.class || r.studentClass || ""),
+        section: String(r.section || ""),
+        sessionYear: String(r.sessionYear || r.currentSessionYear || new Date().getFullYear() + "-" + (new Date().getFullYear() + 1)),
+      }));
+      const result = await storage.bulkCreateManagedStudents(parsed);
+      res.json(result);
+    } catch (err) { res.status(500).json({ message: "Bulk upload failed" }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MANAGED TEACHERS MANAGEMENT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/admin/managed-teachers", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin" && req.user?.role !== "principal") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const list = await storage.getAllManagedTeachers();
+      res.json(list);
+    } catch (err) { res.status(500).json({ message: "Failed to fetch" }); }
+  });
+
+  app.post("/api/admin/managed-teachers", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { teacherName, employeeId, email, phoneNumber, assignments, isClassTeacher, classTeacherOf } = req.body;
+      if (!teacherName || !employeeId) return res.status(400).json({ message: "teacherName and employeeId required" });
+      const existing = await storage.getManagedTeacherByEmployeeId(employeeId);
+      if (existing) return res.status(409).json({ message: "Employee ID already exists", duplicate: true });
+      const created = await storage.createManagedTeacher({
+        teacherName, employeeId, email, phoneNumber,
+        assignments: assignments ? JSON.stringify(assignments) : "[]",
+        isClassTeacher: isClassTeacher ? 1 : 0,
+        classTeacherOf: classTeacherOf || null,
+      });
+      res.status(201).json(created);
+    } catch (err) { res.status(500).json({ message: "Failed to create" }); }
+  });
+
+  app.put("/api/admin/managed-teachers/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const id = parseInt(req.params.id, 10);
+      const { teacherName, employeeId, email, phoneNumber, assignments, isClassTeacher, classTeacherOf } = req.body;
+      const updateData: any = {};
+      if (teacherName !== undefined) updateData.teacherName = teacherName;
+      if (employeeId !== undefined) updateData.employeeId = employeeId;
+      if (email !== undefined) updateData.email = email;
+      if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
+      if (assignments !== undefined) updateData.assignments = JSON.stringify(assignments);
+      if (isClassTeacher !== undefined) updateData.isClassTeacher = isClassTeacher ? 1 : 0;
+      if (classTeacherOf !== undefined) updateData.classTeacherOf = classTeacherOf;
+      const updated = await storage.updateManagedTeacher(id, updateData);
+      res.json(updated);
+    } catch (err) { res.status(500).json({ message: "Failed to update" }); }
+  });
+
+  app.delete("/api/admin/managed-teachers/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { password, deleteSubjectOnly, className, section, subject } = req.body;
+      if (!password) return res.status(400).json({ message: "Admin password required" });
+      const validPwd = await verifyAdminPassword(req.user.id, password);
+      if (!validPwd) return res.status(403).json({ message: "Incorrect admin password" });
+      const id = parseInt(req.params.id, 10);
+      if (deleteSubjectOnly && className && section && subject) {
+        const t = await storage.getManagedTeacherById(id);
+        if (!t) return res.status(404).json({ message: "Not found" });
+        const assignments: any[] = JSON.parse(t.assignments || "[]");
+        const updated = assignments.map((a: any) => {
+          if (a.class === className && a.section === section) {
+            return { ...a, subjects: (a.subjects || []).filter((s: string) => s !== subject) };
+          }
+          return a;
+        }).filter((a: any) => a.subjects && a.subjects.length > 0);
+        await storage.updateManagedTeacher(id, { assignments: JSON.stringify(updated) });
+        return res.json({ message: "Subject assignment removed" });
+      }
+      await storage.deleteManagedTeacher(id);
+      res.json({ message: "Deleted" });
+    } catch (err) { res.status(500).json({ message: "Failed to delete" }); }
+  });
+
+  app.post("/api/admin/managed-teachers/bulk-upload", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { records } = req.body;
+      if (!Array.isArray(records)) return res.status(400).json({ message: "Records array required" });
+      const parsed = records.map((r: any) => {
+        const assignments = [];
+        if (r.class && r.section && r.subjects) {
+          assignments.push({ class: r.class, section: r.section, subjects: String(r.subjects).split(",").map((s: string) => s.trim()) });
+        }
+        return {
+          teacherName: r.teacherName || r.name || "",
+          employeeId: String(r.employeeId || ""),
+          email: r.email || "",
+          phoneNumber: r.phoneNumber || r.phone || "",
+          assignments: JSON.stringify(assignments),
+          isClassTeacher: r.isClassTeacher === "true" || r.isClassTeacher === true ? 1 : 0,
+          classTeacherOf: r.classTeacherOf || null,
+        };
+      });
+      const result = await storage.bulkCreateManagedTeachers(parsed);
+      res.json(result);
+    } catch (err) { res.status(500).json({ message: "Bulk upload failed" }); }
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PRINCIPAL ANALYTICS ENDPOINTS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Dynamic stats for principal dashboard header
+  app.get("/api/principal/stats", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "principal" && req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const allEvals = await storage.getAllEvaluations?.() || [];
+      const allStudents = await storage.getAllStudents();
+      const allExams = await storage.getAllExams?.() || [];
+
+      // Academic Health Index: avg score percentage across all evaluations
+      let totalPct = 0, evalCount = 0;
+      for (const ev of allEvals) {
+        const qs = JSON.parse(ev.questions || "[]");
+        const awarded = qs.reduce((s: number, q: any) => s + (q.marks_awarded || 0), 0);
+        const max = qs.reduce((s: number, q: any) => s + (q.max_marks || 0), 0);
+        if (max > 0) { totalPct += (awarded / max) * 100; evalCount++; }
+      }
+      const academicHealthIndex = evalCount > 0 ? Math.round(totalPct / evalCount) : 0;
+
+      // Participation rate: students evaluated / total students
+      const uniqueStudentsEvaluated = new Set(allEvals.map((e: any) => e.admissionNumber)).size;
+      const participationRate = allStudents.length > 0 ? Math.round((uniqueStudentsEvaluated / allStudents.length) * 100) : 0;
+
+      // Average performance score (0-100)
+      const avgPerformance = academicHealthIndex;
+
+      // Academic improvement rate (compare first half vs second half of evals)
+      let improvementRate = 0;
+      if (allEvals.length >= 4) {
+        const half = Math.floor(allEvals.length / 2);
+        const firstHalf = allEvals.slice(0, half);
+        const secondHalf = allEvals.slice(half);
+        const avg = (evsArr: any[]) => {
+          let s = 0, c = 0;
+          for (const ev of evsArr) {
+            const qs = JSON.parse(ev.questions || "[]");
+            const awarded = qs.reduce((a: number, q: any) => a + (q.marks_awarded || 0), 0);
+            const max = qs.reduce((a: number, q: any) => a + (q.max_marks || 0), 0);
+            if (max > 0) { s += (awarded / max) * 100; c++; }
+          }
+          return c > 0 ? s / c : 0;
+        };
+        const first = avg(firstHalf);
+        const second = avg(secondHalf);
+        improvementRate = first > 0 ? Math.round(((second - first) / first) * 100) : 0;
+      }
+
+      res.json({ academicHealthIndex, improvementRate, participationRate, avgPerformance });
+    } catch (err) {
+      console.error("[principal/stats]", err);
+      res.status(500).json({ message: "Failed" });
+    }
+  });
+
+  // Class performance insights
+  app.get("/api/principal/class-performance", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "principal" && req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const allEvals = await storage.getAllEvaluations?.() || [];
+      const allSheets = await storage.getAllAnswerSheets?.() || [];
+      const allExams = await storage.getAllExams?.() || [];
+      const allStudents = await storage.getAllStudents();
+
+      // Build exam map
+      const examMap = new Map(allExams.map((e: any) => [e.id, e]));
+      const sheetMap = new Map(allSheets.map((s: any) => [s.id, s]));
+
+      // Per class-section performance
+      const classData: Record<string, { scores: number[]; students: Set<string>; totalStudents: number }> = {};
+
+      for (const ev of allEvals) {
+        const sheet = sheetMap.get(ev.answerSheetId);
+        if (!sheet) continue;
+        const exam = examMap.get(sheet.examId);
+        if (!exam) continue;
+        const key = `${exam.className}-${exam.section || "?"}`;
+        if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0 };
+        const qs = JSON.parse(ev.questions || "[]");
+        const awarded = qs.reduce((a: number, q: any) => a + (q.marks_awarded || 0), 0);
+        const max = qs.reduce((a: number, q: any) => a + (q.max_marks || 0), 0);
+        if (max > 0) classData[key].scores.push((awarded / max) * 100);
+        classData[key].students.add(ev.admissionNumber);
+      }
+
+      // Total students per class
+      for (const s of allStudents) {
+        const key = `${s.studentClass}-${s.section}`;
+        if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0 };
+        classData[key].totalStudents++;
+      }
+
+      const result = Object.entries(classData).map(([key, data]) => {
+        const [cls, sec] = key.split("-");
+        const avg = data.scores.length > 0 ? Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length) : 0;
+        const high = data.scores.filter(s => s >= 75).length;
+        const middle = data.scores.filter(s => s >= 50 && s < 75).length;
+        const atRisk = data.scores.filter(s => s < 50).length;
+        const participation = data.totalStudents > 0 ? Math.round((data.students.size / data.totalStudents) * 100) : 0;
+        return { class: cls, section: sec, avgScore: avg, highPerformers: high, average: middle, atRisk, participation, evaluatedCount: data.students.size, totalStudents: data.totalStudents };
+      }).sort((a, b) => parseInt(a.class) - parseInt(b.class));
+
+      res.json(result);
+    } catch (err) {
+      console.error("[principal/class-performance]", err);
+      res.status(500).json({ message: "Failed" });
+    }
+  });
+
+  // Teacher effectiveness
+  app.get("/api/principal/teacher-effectiveness", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "principal" && req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const allEvals = await storage.getAllEvaluations?.() || [];
+      const allSheets = await storage.getAllAnswerSheets?.() || [];
+      const allExams = await storage.getAllExams?.() || [];
+      const allTeachers = await storage.getAllTeachers();
+
+      const examMap = new Map(allExams.map((e: any) => [e.id, e]));
+      const sheetMap = new Map(allSheets.map((s: any) => [s.id, s]));
+      const teacherMap = new Map(allTeachers.map((t: any) => [t.id, t]));
+
+      const teacherData: Record<number, { name: string; scores: number[]; examCount: number; studentSet: Set<string>; examsOverTime: string[] }> = {};
+
+      for (const ev of allEvals) {
+        const sheet = sheetMap.get(ev.answerSheetId);
+        if (!sheet) continue;
+        const exam = examMap.get(sheet.examId);
+        if (!exam) continue;
+        const tid = exam.teacherId;
+        if (!teacherData[tid]) {
+          const t = teacherMap.get(tid);
+          teacherData[tid] = { name: t?.name || "Unknown", scores: [], examCount: 0, studentSet: new Set(), examsOverTime: [] };
+        }
+        const qs = JSON.parse(ev.questions || "[]");
+        const awarded = qs.reduce((a: number, q: any) => a + (q.marks_awarded || 0), 0);
+        const max = qs.reduce((a: number, q: any) => a + (q.max_marks || 0), 0);
+        if (max > 0) teacherData[tid].scores.push((awarded / max) * 100);
+        teacherData[tid].studentSet.add(ev.admissionNumber);
+        if (exam.createdAt) teacherData[tid].examsOverTime.push(exam.createdAt);
+      }
+
+      for (const exam of allExams) {
+        const tid = exam.teacherId;
+        if (teacherData[tid]) teacherData[tid].examCount++;
+      }
+
+      const result = Object.entries(teacherData).map(([id, data]) => {
+        const avg = data.scores.length > 0 ? Math.round(data.scores.reduce((a, b) => a + b, 0) / data.scores.length) : 0;
+        // Variance (consistency)
+        const variance = data.scores.length > 1
+          ? Math.round(data.scores.reduce((a, s) => a + Math.pow(s - avg, 2), 0) / data.scores.length)
+          : 0;
+        const consistencyIndex = Math.max(0, 100 - variance);
+        return {
+          teacherId: parseInt(id), name: data.name, avgScore: avg,
+          consistencyIndex, examCount: data.examCount,
+          studentsEvaluated: data.studentSet.size,
+          examsOverTime: data.examsOverTime.sort(),
+        };
+      }).sort((a, b) => b.avgScore - a.avgScore);
+
+      res.json(result);
+    } catch (err) {
+      console.error("[principal/teacher-effectiveness]", err);
+      res.status(500).json({ message: "Failed" });
+    }
+  });
+
+  // School level insights
+  app.get("/api/principal/school-insights", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "principal" && req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const allEvals = await storage.getAllEvaluations?.() || [];
+      const allSheets = await storage.getAllAnswerSheets?.() || [];
+      const allExams = await storage.getAllExams?.() || [];
+
+      const examMap = new Map(allExams.map((e: any) => [e.id, e]));
+      const sheetMap = new Map(allSheets.map((s: any) => [s.id, s]));
+
+      // Subject strength/weakness
+      const subjectData: Record<string, number[]> = {};
+      // Evaluations per subject
+      const evalsBySubject: Record<string, number> = {};
+      const evalsByClass: Record<string, number> = {};
+      // All student scores for top/bottom percentile
+      const allStudentScores: Record<string, number[]> = {};
+
+      for (const ev of allEvals) {
+        const sheet = sheetMap.get(ev.answerSheetId);
+        if (!sheet) continue;
+        const exam = examMap.get(sheet.examId);
+        if (!exam) continue;
+        const qs = JSON.parse(ev.questions || "[]");
+        const awarded = qs.reduce((a: number, q: any) => a + (q.marks_awarded || 0), 0);
+        const max = qs.reduce((a: number, q: any) => a + (q.max_marks || 0), 0);
+        const pct = max > 0 ? (awarded / max) * 100 : 0;
+        if (!subjectData[exam.subject]) subjectData[exam.subject] = [];
+        subjectData[exam.subject].push(pct);
+        evalsBySubject[exam.subject] = (evalsBySubject[exam.subject] || 0) + 1;
+        evalsByClass[exam.className] = (evalsByClass[exam.className] || 0) + 1;
+        if (!allStudentScores[ev.admissionNumber]) allStudentScores[ev.admissionNumber] = [];
+        allStudentScores[ev.admissionNumber].push(pct);
+      }
+
+      const subjectStrengths = Object.entries(subjectData).map(([subject, scores]) => ({
+        subject,
+        avgScore: Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+        count: scores.length,
+      })).sort((a, b) => b.avgScore - a.avgScore);
+
+      // Top/bottom 10%
+      const studentAvgs = Object.entries(allStudentScores).map(([admission, scores]) => ({
+        admission,
+        avg: scores.reduce((a, b) => a + b, 0) / scores.length,
+      })).sort((a, b) => b.avg - a.avg);
+      const topN = Math.max(1, Math.ceil(studentAvgs.length * 0.1));
+      const topStudents = studentAvgs.slice(0, topN);
+      const bottomStudents = studentAvgs.slice(-topN);
+
+      const overallAvg = allEvals.length > 0 ? (() => {
+        let s = 0, c = 0;
+        for (const ev of allEvals) {
+          const qs = JSON.parse(ev.questions || "[]");
+          const a = qs.reduce((x: number, q: any) => x + (q.marks_awarded || 0), 0);
+          const m = qs.reduce((x: number, q: any) => x + (q.max_marks || 0), 0);
+          if (m > 0) { s += (a / m) * 100; c++; }
+        }
+        return c > 0 ? Math.round(s / c) : 0;
+      })() : 0;
+
+      res.json({
+        overallAvg,
+        subjectStrengths,
+        evalsBySubject,
+        evalsByClass,
+        topStudents: topStudents.map(s => ({ ...s, avg: Math.round(s.avg) })),
+        bottomStudents: bottomStudents.map(s => ({ ...s, avg: Math.round(s.avg) })),
+        totalEvaluations: allEvals.length,
+      });
+    } catch (err) {
+      console.error("[principal/school-insights]", err);
+      res.status(500).json({ message: "Failed" });
+    }
+  });
+
+  // Delete with admin password confirm (generic endpoint)
+  app.post("/api/admin/verify-password", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { password } = req.body;
+      const valid = await verifyAdminPassword(req.user.id, password);
+      res.json({ valid });
+    } catch (err) { res.status(500).json({ message: "Failed" }); }
   });
 
   return httpServer;

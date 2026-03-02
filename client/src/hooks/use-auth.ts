@@ -33,6 +33,7 @@ export function useAuth() {
     toast({ title: "Welcome back!", description: "Successfully authenticated." });
     if (data.role === "teacher") setLocation("/teacher-dashboard");
     else if (data.role === "admin") setLocation("/admin-dashboard");
+    else if (data.role === "principal") setLocation("/principal-dashboard");
     else setLocation("/student-dashboard");
   };
 
@@ -106,6 +107,50 @@ export function useAuth() {
     onError: handleAuthError,
   });
 
+  const adminUserLogin = useMutation({
+    mutationFn: async (credentials: { employeeId: string; password: string }) => {
+      const res = await fetchWithAuth("/api/auth/adminuser/login", {
+        method: "POST",
+        body: JSON.stringify(credentials),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "Login failed");
+      return json as AuthResponse;
+    },
+    onSuccess: handleAuthSuccess,
+    onError: handleAuthError,
+  });
+
+  const requestOtp = useMutation({
+    mutationFn: async (data: { phone: string; role: "teacher" | "student"; identifier: string }) => {
+      const res = await fetchWithAuth(api.auth.otpSend.path, {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "Failed to send OTP");
+      return json as { message: string; expiresIn: number };
+    },
+    onSuccess: () => {
+      toast({ title: "OTP Sent", description: "Check your phone for the verification code." });
+    },
+    onError: handleAuthError,
+  });
+
+  const verifyOtp = useMutation({
+    mutationFn: async (data: { phone: string; code: string; role: "teacher" | "student"; identifier: string }) => {
+      const res = await fetchWithAuth(api.auth.otpVerify.path, {
+        method: "POST",
+        body: JSON.stringify(data),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "OTP verification failed");
+      return json as AuthResponse;
+    },
+    onSuccess: handleAuthSuccess,
+    onError: handleAuthError,
+  });
+
   const logout = () => {
     localStorage.removeItem("token");
     queryClient.setQueryData([api.auth.me.path], null);
@@ -120,8 +165,11 @@ export function useAuth() {
     teacherLogin,
     studentLogin,
     adminLogin,
+    adminUserLogin,
     teacherSignup,
     studentSignup,
+    requestOtp,
+    verifyOtp,
     logout,
   };
 }

@@ -2,16 +2,23 @@ import { db } from "./db";
 import {
   teachers, students, exams, answerSheets, evaluations, conversations, messages,
   answerSheetPages, mergedAnswerScripts, ncertChapters, deviationLogs, performanceProfiles,
-  homework, homeworkSubmissions, admins,
-  type Teacher, type Student, type Exam, type Admin,
+  homework, homeworkSubmissions, admins, classes, subjects, otpCodes,
+  adminUsers, classSections, managedStudents, managedTeachers,
+  type Teacher, type Student, type Exam, type Admin, type Class, type Subject, type OtpCode,
   type InsertTeacher, type InsertStudent, type InsertExam, type InsertAdmin,
+  type InsertClass, type InsertSubject,
   type NcertChapter, type InsertNcertChapter,
   type Homework, type InsertHomework, type HomeworkSubmission, type InsertHomeworkSubmission,
+  type AdminUser, type InsertAdminUser,
+  type ClassSection, type InsertClassSection,
+  type ManagedStudent, type InsertManagedStudent,
+  type ManagedTeacher, type InsertManagedTeacher,
 } from "@shared/schema";
-import { eq, and, desc, sql as drizzleSql, count } from "drizzle-orm";
+import { eq, and, desc, sql as drizzleSql, count, gt, inArray } from "drizzle-orm";
 
 export interface IStorage {
   getTeacher(id: number): Promise<Teacher | undefined>;
+  getTeacherById(id: number): Promise<Teacher | undefined>;
   getTeacherByEmployeeId(employeeId: string): Promise<Teacher | undefined>;
   createTeacher(teacher: InsertTeacher): Promise<Teacher>;
   
@@ -116,6 +123,29 @@ export interface IStorage {
   }>;
   updateProfile(role: "student" | "teacher" | "admin", id: number, data: { name?: string; phone?: string; profilePhotoUrl?: string }): Promise<void>;
 
+  // Admin CRUD for teachers/students
+  updateTeacher(id: number, data: Partial<InsertTeacher>): Promise<Teacher>;
+  deleteTeacher(id: number): Promise<void>;
+  updateStudent(id: number, data: Partial<InsertStudent>): Promise<Student>;
+  deleteStudent(id: number): Promise<void>;
+
+  // Classes
+  getAllClasses(): Promise<Class[]>;
+  createClass(cls: InsertClass): Promise<Class>;
+  updateClass(id: number, data: Partial<InsertClass>): Promise<Class>;
+  deleteClass(id: number): Promise<void>;
+
+  // Subjects
+  getAllSubjects(): Promise<Subject[]>;
+  createSubject(subj: InsertSubject): Promise<Subject>;
+  updateSubject(id: number, data: Partial<InsertSubject>): Promise<Subject>;
+  deleteSubject(id: number): Promise<void>;
+
+  // OTP
+  createOtp(phone: string, code: string, role: string, identifier: string, expiresAt: string): Promise<OtpCode>;
+  getLatestOtp(phone: string, identifier: string): Promise<OtpCode | undefined>;
+  markOtpVerified(id: number): Promise<void>;
+
   // Analytics
   getTeacherStats(teacherId: number): Promise<{
     totalStudents: number;
@@ -136,6 +166,10 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   async getTeacher(id: number): Promise<Teacher | undefined> {
+    const [teacher] = await db.select().from(teachers).where(eq(teachers.id, id));
+    return teacher;
+  }
+  async getTeacherById(id: number): Promise<Teacher | undefined> {
     const [teacher] = await db.select().from(teachers).where(eq(teachers.id, id));
     return teacher;
   }
@@ -520,8 +554,24 @@ export class DatabaseStorage implements IStorage {
       ? Math.round((totalMarksSum / totalMaxSum) * 100)
       : 0;
 
+    // Count students in teacher's assigned classes (from subjects table assignments)
+    let totalStudentsCount = studentSet.size;
+    try {
+      const teacherRecord = await db.select().from(teachers).where(eq(teachers.id, teacherId)).then(r => r[0]);
+      if (teacherRecord) {
+        let classesAssigned: string[] = [];
+        try { classesAssigned = JSON.parse(teacherRecord.classesAssigned || "[]"); } catch {}
+        if (classesAssigned.length > 0) {
+          // Count students in assigned classes
+          const studentsInClass = await db.select().from(students)
+            .where(inArray(students.studentClass, classesAssigned));
+          if (studentsInClass.length > 0) totalStudentsCount = studentsInClass.length;
+        }
+      }
+    } catch {}
+
     return {
-      totalStudents: studentSet.size || 0,
+      totalStudents: totalStudentsCount,
       activeClasses: classSet.size || 0,
       totalExams: teacherExams.length,
       sheetsEvaluated,
@@ -684,6 +734,15 @@ export class DatabaseStorage implements IStorage {
   async getAllExams(): Promise<Exam[]> {
     return db.select().from(exams).orderBy(desc(exams.id));
   }
+
+  async getAllEvaluations(): Promise<any[]> {
+    return db.select().from(evaluations).orderBy(evaluations.id);
+  }
+
+  async getAllAnswerSheets(): Promise<any[]> {
+    return db.select().from(answerSheets).orderBy(answerSheets.id);
+  }
+
 
   async getSchoolStats(): Promise<{
     totalStudents: number;
@@ -1026,6 +1085,217 @@ export class DatabaseStorage implements IStorage {
       await db.update(admins).set(data).where(eq(admins.id, id));
     }
   }
+
+  // ─── ADMIN CRUD: Teachers ────────────────────────────────────────────────────
+  async updateTeacher(id: number, data: Partial<InsertTeacher>): Promise<Teacher> {
+    const [updated] = await db.update(teachers).set(data).where(eq(teachers.id, id)).returning();
+    return updated;
+  }
+
+  async deleteTeacher(id: number): Promise<void> {
+    await db.delete(teachers).where(eq(teachers.id, id));
+  }
+
+  // ─── ADMIN CRUD: Students ───────────────────────────────────────────────────
+  async updateStudent(id: number, data: Partial<InsertStudent>): Promise<Student> {
+    const [updated] = await db.update(students).set(data).where(eq(students.id, id)).returning();
+    return updated;
+  }
+
+  async deleteStudent(id: number): Promise<void> {
+    await db.delete(students).where(eq(students.id, id));
+  }
+
+  // ─── Classes ─────────────────────────────────────────────────────────────────
+  async getAllClasses(): Promise<Class[]> {
+    return db.select().from(classes).orderBy(classes.name, classes.section);
+  }
+
+  async createClass(cls: InsertClass): Promise<Class> {
+    const [created] = await db.insert(classes).values(cls).returning();
+    return created;
+  }
+
+  async updateClass(id: number, data: Partial<InsertClass>): Promise<Class> {
+    const [updated] = await db.update(classes).set(data).where(eq(classes.id, id)).returning();
+    return updated;
+  }
+
+  async deleteClass(id: number): Promise<void> {
+    await db.delete(classes).where(eq(classes.id, id));
+  }
+
+  // ─── Subjects ────────────────────────────────────────────────────────────────
+  async getAllSubjects(): Promise<Subject[]> {
+    return db.select().from(subjects).orderBy(subjects.name);
+  }
+
+  async createSubject(subj: InsertSubject): Promise<Subject> {
+    const [created] = await db.insert(subjects).values(subj).returning();
+    return created;
+  }
+
+  async updateSubject(id: number, data: Partial<InsertSubject>): Promise<Subject> {
+    const [updated] = await db.update(subjects).set(data).where(eq(subjects.id, id)).returning();
+    return updated;
+  }
+
+  async deleteSubject(id: number): Promise<void> {
+    await db.delete(subjects).where(eq(subjects.id, id));
+  }
+
+  // ─── OTP ─────────────────────────────────────────────────────────────────────
+  async createOtp(phone: string, code: string, role: string, identifier: string, expiresAt: string): Promise<OtpCode> {
+    const [created] = await db.insert(otpCodes).values({ phone, code, role, identifier, expiresAt }).returning();
+    return created;
+  }
+
+  async getLatestOtp(phone: string, identifier: string): Promise<OtpCode | undefined> {
+    const [otp] = await db.select().from(otpCodes)
+      .where(and(eq(otpCodes.phone, phone), eq(otpCodes.identifier, identifier), eq(otpCodes.verified, 0)))
+      .orderBy(desc(otpCodes.id))
+      .limit(1);
+    return otp;
+  }
+
+  async markOtpVerified(id: number): Promise<void> {
+    await db.update(otpCodes).set({ verified: 1 }).where(eq(otpCodes.id, id));
+  }
+  // ─── AdminUsers ────────────────────────────────────────────────────────────
+  async getAdminUserByEmployeeId(employeeId: string): Promise<AdminUser | undefined> {
+    const [u] = await db.select().from(adminUsers).where(eq(adminUsers.employeeId, employeeId)).limit(1);
+    return u;
+  }
+
+  async getAdminUserById(id: number): Promise<AdminUser | undefined> {
+    const [u] = await db.select().from(adminUsers).where(eq(adminUsers.id, id)).limit(1);
+    return u;
+  }
+
+  async createAdminUser(data: InsertAdminUser): Promise<AdminUser> {
+    const [created] = await db.insert(adminUsers).values(data).returning();
+    return created;
+  }
+
+  async getAllAdminUsers(): Promise<AdminUser[]> {
+    return db.select().from(adminUsers).orderBy(adminUsers.name);
+  }
+
+  // ─── ClassSections ──────────────────────────────────────────────────────────
+  async getAllClassSections(): Promise<ClassSection[]> {
+    return db.select().from(classSections).orderBy(classSections.className, classSections.section);
+  }
+
+  async getClassSectionByClassAndSection(className: number, section: string): Promise<ClassSection | undefined> {
+    const [c] = await db.select().from(classSections)
+      .where(and(eq(classSections.className, className), eq(classSections.section, section)))
+      .limit(1);
+    return c;
+  }
+
+  async createClassSection(data: InsertClassSection): Promise<ClassSection> {
+    const [created] = await db.insert(classSections).values(data).returning();
+    return created;
+  }
+
+  async updateClassSection(id: number, data: Partial<InsertClassSection>): Promise<ClassSection> {
+    const [updated] = await db.update(classSections).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(classSections.id, id)).returning();
+    return updated;
+  }
+
+  async deleteClassSection(id: number): Promise<void> {
+    await db.delete(classSections).where(eq(classSections.id, id));
+  }
+
+  async bulkCreateClassSections(records: InsertClassSection[]): Promise<{ created: number; duplicates: string[] }> {
+    let created = 0;
+    const duplicates: string[] = [];
+    for (const r of records) {
+      const existing = await this.getClassSectionByClassAndSection(r.className, r.section);
+      if (existing) { duplicates.push(String(r.className) + "-" + r.section); continue; }
+      await this.createClassSection(r);
+      created++;
+    }
+    return { created, duplicates };
+  }
+
+  // ─── ManagedStudents ────────────────────────────────────────────────────────
+  async getAllManagedStudents(): Promise<ManagedStudent[]> {
+    return db.select().from(managedStudents).orderBy(managedStudents.studentName);
+  }
+
+  async getManagedStudentByAdmission(admissionNumber: string): Promise<ManagedStudent | undefined> {
+    const [s] = await db.select().from(managedStudents).where(eq(managedStudents.admissionNumber, admissionNumber)).limit(1);
+    return s;
+  }
+
+  async createManagedStudent(data: InsertManagedStudent): Promise<ManagedStudent> {
+    const [created] = await db.insert(managedStudents).values(data).returning();
+    return created;
+  }
+
+  async updateManagedStudent(id: number, data: Partial<InsertManagedStudent>): Promise<ManagedStudent> {
+    const [updated] = await db.update(managedStudents).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(managedStudents.id, id)).returning();
+    return updated;
+  }
+
+  async deleteManagedStudent(id: number): Promise<void> {
+    await db.delete(managedStudents).where(eq(managedStudents.id, id));
+  }
+
+  async bulkCreateManagedStudents(records: InsertManagedStudent[]): Promise<{ created: number; duplicates: string[] }> {
+    let created = 0;
+    const duplicates: string[] = [];
+    for (const r of records) {
+      const existing = await this.getManagedStudentByAdmission(r.admissionNumber);
+      if (existing) { duplicates.push(r.admissionNumber); continue; }
+      await this.createManagedStudent(r);
+      created++;
+    }
+    return { created, duplicates };
+  }
+
+  // ─── ManagedTeachers ────────────────────────────────────────────────────────
+  async getAllManagedTeachers(): Promise<ManagedTeacher[]> {
+    return db.select().from(managedTeachers).orderBy(managedTeachers.teacherName);
+  }
+
+  async getManagedTeacherByEmployeeId(employeeId: string): Promise<ManagedTeacher | undefined> {
+    const [t] = await db.select().from(managedTeachers).where(eq(managedTeachers.employeeId, employeeId)).limit(1);
+    return t;
+  }
+
+  async getManagedTeacherById(id: number): Promise<ManagedTeacher | undefined> {
+    const [t] = await db.select().from(managedTeachers).where(eq(managedTeachers.id, id)).limit(1);
+    return t;
+  }
+
+  async createManagedTeacher(data: InsertManagedTeacher): Promise<ManagedTeacher> {
+    const [created] = await db.insert(managedTeachers).values(data).returning();
+    return created;
+  }
+
+  async updateManagedTeacher(id: number, data: Partial<InsertManagedTeacher>): Promise<ManagedTeacher> {
+    const [updated] = await db.update(managedTeachers).set({ ...data, updatedAt: new Date().toISOString() }).where(eq(managedTeachers.id, id)).returning();
+    return updated;
+  }
+
+  async deleteManagedTeacher(id: number): Promise<void> {
+    await db.delete(managedTeachers).where(eq(managedTeachers.id, id));
+  }
+
+  async bulkCreateManagedTeachers(records: InsertManagedTeacher[]): Promise<{ created: number; duplicates: string[] }> {
+    let created = 0;
+    const duplicates: string[] = [];
+    for (const r of records) {
+      const existing = await this.getManagedTeacherByEmployeeId(r.employeeId);
+      if (existing) { duplicates.push(r.employeeId); continue; }
+      await this.createManagedTeacher(r);
+      created++;
+    }
+    return { created, duplicates };
+  }
+
 }
 
 export const storage = new DatabaseStorage();

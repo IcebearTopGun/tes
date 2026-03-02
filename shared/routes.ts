@@ -23,8 +23,26 @@ export const studentResponseSchema = z.custom<Omit<typeof students.$inferSelect,
 
 export const authResponseSchema = z.object({
   token: z.string(),
-  role: z.enum(["teacher", "student"]),
+  role: z.enum(["teacher", "student", "admin"]),
   user: z.union([teacherResponseSchema, studentResponseSchema])
+});
+
+export const otpSendResponseSchema = z.object({
+  message: z.string(),
+  expiresIn: z.number(),
+});
+
+export const otpSendInputSchema = z.object({
+  phone: z.string().min(1, "Phone number required"),
+  role: z.enum(["teacher", "student"]),
+  identifier: z.string().min(1, "Identifier required"),
+});
+
+export const otpVerifyInputSchema = z.object({
+  phone: z.string().min(1, "Phone number required"),
+  code: z.string().min(1, "OTP code required"),
+  role: z.enum(["teacher", "student"]),
+  identifier: z.string().min(1, "Identifier required"),
 });
 
 export const api = {
@@ -77,6 +95,26 @@ export const api = {
       responses: {
         200: authResponseSchema.omit({ token: true }),
         401: errorSchemas.unauthorized
+      }
+    },
+    otpSend: {
+      method: 'POST' as const,
+      path: '/api/auth/otp/send' as const,
+      input: otpSendInputSchema,
+      responses: {
+        200: otpSendResponseSchema,
+        400: errorSchemas.validation,
+        404: errorSchemas.notFound
+      }
+    },
+    otpVerify: {
+      method: 'POST' as const,
+      path: '/api/auth/otp/verify' as const,
+      input: otpVerifyInputSchema,
+      responses: {
+        200: authResponseSchema,
+        400: errorSchemas.validation,
+        404: errorSchemas.notFound
       }
     }
   },

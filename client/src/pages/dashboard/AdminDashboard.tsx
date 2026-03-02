@@ -3,12 +3,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, MessageSquare, TrendingUp, Send, Plus, ChevronDown, ChevronUp } from "lucide-react";
+import { Loader2, X, MessageSquare, TrendingUp, Send, Plus, ChevronDown, ChevronUp, Pencil, Trash2, BookOpen, School } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
 import { fetchWithAuth } from "@/lib/fetcher";
 import ProfileDrawer from "@/components/ProfileDrawer";
+import CustomInsights from "@/components/CustomInsights";
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -43,11 +44,52 @@ const BAR_COLORS = [
   { bg: "#fce4ef", border: "1.5px solid rgba(212,65,126,.2)" },
 ];
 
+type TeacherRecord = {
+  id: number;
+  employeeId: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  subjectsAssigned?: string | null;
+  classesAssigned?: string | null;
+  isClassTeacher?: number | null;
+  classTeacherOf?: string | null;
+};
+
+type StudentRecord = {
+  id: number;
+  admissionNumber: string;
+  name: string;
+  phone: string;
+  studentClass: string;
+  section: string;
+};
+
+type ClassRecord = {
+  id: number;
+  name: string;
+  section: string;
+  description?: string | null;
+  classTeacherId?: number | null;
+  classTeacherName?: string | null;
+};
+
+type SubjectRecord = {
+  id: number;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  className?: string | null;
+  section?: string | null;
+  teacherId?: number | null;
+  teacherName?: string | null;
+};
+
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
 
-  const [activeSection, setActiveSection] = useState("overview");
+  const [activeSection, setActiveSection] = useState("mgd-classes");
   const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
@@ -58,6 +100,59 @@ export default function AdminDashboard() {
   const [moreInsightsOpen, setMoreInsightsOpen] = useState(false);
   const [classFilter, setClassFilter] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
+
+  // ─── New managed tables state ─────────────────────────────────────────────
+  const [showAddClassSection, setShowAddClassSection] = useState(false);
+  const [editingClassSection, setEditingClassSection] = useState<any>(null);
+  const [classSectionForm, setClassSectionForm] = useState({ className: "", section: "", subjects: [] as string[] });
+  const [classSectionErrors, setClassSectionErrors] = useState<any>({});
+
+  const [showAddMgdStudent, setShowAddMgdStudent] = useState(false);
+  const [editingMgdStudent, setEditingMgdStudent] = useState<any>(null);
+  const [mgdStudentForm, setMgdStudentForm] = useState({ studentName: "", phoneNumber: "", email: "", admissionNumber: "", class: "", section: "", sessionYear: "" });
+  const [mgdStudentErrors, setMgdStudentErrors] = useState<any>({});
+
+  const [showAddMgdTeacher, setShowAddMgdTeacher] = useState(false);
+  const [editingMgdTeacher, setEditingMgdTeacher] = useState<any>(null);
+  const [mgdTeacherForm, setMgdTeacherForm] = useState({ teacherName: "", employeeId: "", email: "", phoneNumber: "", assignments: [] as any[], isClassTeacher: false, classTeacherOf: "" });
+  const [mgdTeacherErrors, setMgdTeacherErrors] = useState<any>({});
+  const [teacherAssignClass, setTeacherAssignClass] = useState("");
+  const [teacherAssignSection, setTeacherAssignSection] = useState("");
+  const [teacherAssignSubjects, setTeacherAssignSubjects] = useState<string[]>([]);
+
+  // ─── Delete confirmation state ────────────────────────────────────────────
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: string; id: number; extra?: any } | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+
+  // ─── Bulk upload state ────────────────────────────────────────────────────
+  const [bulkUploadType, setBulkUploadType] = useState<string | null>(null);
+  const [bulkUploadResult, setBulkUploadResult] = useState<{ created: number; duplicates: string[] } | null>(null);
+  const [bulkDotMenu, setBulkDotMenu] = useState<number | null>(null);
+
+  // Add/Edit modal state
+  const [showAddTeacher, setShowAddTeacher] = useState(false);
+  const [editingTeacher, setEditingTeacher] = useState<TeacherRecord | null>(null);
+  const [teacherForm, setTeacherForm] = useState({ employeeId: "", name: "", phone: "" });
+
+  const [showAddStudent, setShowAddStudent] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<StudentRecord | null>(null);
+  const [studentForm, setStudentForm] = useState({ admissionNumber: "", name: "", phone: "", studentClass: "9", section: "A" });
+
+  const [showAddClass, setShowAddClass] = useState(false);
+  const [editingClass, setEditingClass] = useState<ClassRecord | null>(null);
+  const [classForm, setClassForm] = useState({ name: "", section: "", description: "", classTeacherId: "" });
+
+  const [showAddSubject, setShowAddSubject] = useState(false);
+  const [editingSubject, setEditingSubject] = useState<SubjectRecord | null>(null);
+  const [subjectForm, setSubjectForm] = useState({ name: "", code: "", description: "", className: "", section: "", teacherId: "" });
+
+  // Validation error states
+  const [teacherErrors, setTeacherErrors] = useState<Record<string, string>>({});
+  const [studentErrors, setStudentErrors] = useState<Record<string, string>>({});
+  const [classErrors, setClassErrors] = useState<Record<string, string>>({});
+  const [subjectErrors, setSubjectErrors] = useState<Record<string, string>>({});
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const avaRef = useRef<HTMLDivElement>(null);
 
@@ -70,7 +165,7 @@ export default function AdminDashboard() {
   const { data: analytics, isLoading: analyticsLoading } = useQuery<any>({
     queryKey: ["/api/admin/analytics"],
     queryFn: () => fetchWithAuth("/api/admin/analytics").then(r => r.json()),
-    enabled: activeSection === "overview",
+    enabled: true,
     staleTime: 60000,
   });
 
@@ -80,17 +175,16 @@ export default function AdminDashboard() {
     staleTime: 60000,
   });
 
-  const { data: studentList, isLoading: studentsLoading } = useQuery<any[]>({
+  const { data: studentList, isLoading: studentsLoading } = useQuery<StudentRecord[]>({
     queryKey: ["/api/admin/students"],
     queryFn: () => fetchWithAuth("/api/admin/students").then(r => r.json()),
     enabled: activeSection === "students",
     staleTime: 60000,
   });
 
-  const { data: teacherList, isLoading: teachersLoading } = useQuery<any[]>({
+  const { data: teacherList, isLoading: teachersLoading } = useQuery<TeacherRecord[]>({
     queryKey: ["/api/admin/teachers"],
     queryFn: () => fetchWithAuth("/api/admin/teachers").then(r => r.json()),
-    enabled: activeSection === "teachers",
     staleTime: 60000,
   });
 
@@ -107,6 +201,222 @@ export default function AdminDashboard() {
     enabled: activeSection === "question-quality",
     staleTime: 60000,
   });
+
+  const { data: classList, isLoading: classesLoading } = useQuery<ClassRecord[]>({
+    queryKey: ["/api/admin/classes"],
+    queryFn: () => fetchWithAuth("/api/admin/classes").then(r => r.json()),
+    staleTime: 60000,
+  });
+
+  const { data: subjectList, isLoading: subjectsLoading } = useQuery<SubjectRecord[]>({
+    queryKey: ["/api/admin/subjects"],
+    queryFn: () => fetchWithAuth("/api/admin/subjects").then(r => r.json()),
+    staleTime: 60000,
+  });
+
+  // ── CRUD Mutations ──
+  const addTeacherMut = useMutation({
+    mutationFn: async (data: any) => {
+      const r = await fetchWithAuth("/api/admin/teachers", { method: "POST", body: JSON.stringify(data) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || "Failed to create teacher");
+      return json;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/teachers"] }); setShowAddTeacher(false); setTeacherForm({ employeeId: "", name: "", phone: "" }); setTeacherErrors({}); },
+    onError: (err: any) => { setTeacherErrors({ employeeId: err.message }); },
+  });
+  const updateTeacherMut = useMutation({
+    mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/teachers/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/teachers"] }); setEditingTeacher(null); },
+  });
+  const deleteTeacherMut = useMutation({
+    mutationFn: (id: number) => fetchWithAuth(`/api/admin/teachers/${id}`, { method: "DELETE" }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/teachers"] }); },
+  });
+
+  const addStudentMut = useMutation({
+    mutationFn: async (data: any) => {
+      const r = await fetchWithAuth("/api/admin/students", { method: "POST", body: JSON.stringify(data) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || "Failed to create student");
+      return json;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/students"] }); setShowAddStudent(false); setStudentForm({ admissionNumber: "", name: "", phone: "", studentClass: "9", section: "A" }); setStudentErrors({}); },
+    onError: (err: any) => { setStudentErrors({ admissionNumber: err.message }); },
+  });
+  const updateStudentMut = useMutation({
+    mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/students/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/students"] }); setEditingStudent(null); },
+  });
+  const deleteStudentMut = useMutation({
+    mutationFn: (id: number) => fetchWithAuth(`/api/admin/students/${id}`, { method: "DELETE" }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/students"] }); },
+  });
+
+  const addClassMut = useMutation({
+    mutationFn: async (data: any) => {
+      const r = await fetchWithAuth("/api/admin/classes", { method: "POST", body: JSON.stringify(data) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || "Failed to create class");
+      return json;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/classes"] }); setShowAddClass(false); setClassForm({ name: "", section: "", description: "", classTeacherId: "" }); setClassErrors({}); },
+    onError: (err: any) => { setClassErrors({ section: err.message }); },
+  });
+  const updateClassMut = useMutation({
+    mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/classes/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/classes"] }); setEditingClass(null); },
+  });
+  const deleteClassMut = useMutation({
+    mutationFn: (id: number) => fetchWithAuth(`/api/admin/classes/${id}`, { method: "DELETE" }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/classes"] }); },
+  });
+
+  const addSubjectMut = useMutation({
+    mutationFn: async (data: any) => {
+      const r = await fetchWithAuth("/api/admin/subjects", { method: "POST", body: JSON.stringify(data) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.message || "Failed to create subject");
+      return json;
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/subjects"] }); setShowAddSubject(false); setSubjectForm({ name: "", code: "", description: "", className: "", section: "", teacherId: "" }); setSubjectErrors({}); },
+    onError: (err: any) => { setSubjectErrors({ name: err.message }); },
+  });
+  const updateSubjectMut = useMutation({
+    mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/subjects/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/subjects"] }); setEditingSubject(null); },
+  });
+  const deleteSubjectMut = useMutation({
+    mutationFn: (id: number) => fetchWithAuth(`/api/admin/subjects/${id}`, { method: "DELETE" }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/subjects"] }); },
+  });
+
+  // ─── New managed table queries/mutations ──────────────────────────────────
+  const { data: classSectionList, isLoading: classSectionsLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/class-sections"],
+    queryFn: () => fetchWithAuth("/api/admin/class-sections").then(r => r.json()),
+  });
+
+  const addClassSectionMut = useMutation({
+    mutationFn: (data: any) => fetchWithAuth("/api/admin/class-sections", { method: "POST", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setShowAddClassSection(false); setEditingClassSection(null); },
+  });
+
+  const updateClassSectionMut = useMutation({
+    mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/class-sections/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setEditingClassSection(null); },
+  });
+
+  const deleteClassSectionMut = useMutation({
+    mutationFn: ({ id, password, deleteSubject }: any) => fetchWithAuth(`/api/admin/class-sections/${id}`, { method: "DELETE", body: JSON.stringify({ password, deleteSubject }) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setDeleteConfirm(null); setDeletePassword(""); },
+    onError: () => { setDeleteError("Incorrect password or operation failed"); },
+  });
+
+  const bulkUploadClassSectionsMut = useMutation({
+    mutationFn: (records: any[]) => fetchWithAuth("/api/admin/class-sections/bulk-upload", { method: "POST", body: JSON.stringify({ records }) }).then(r => r.json()),
+    onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setBulkUploadResult(data); },
+  });
+
+  const { data: mgdStudentList, isLoading: mgdStudentsLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/managed-students"],
+    queryFn: () => fetchWithAuth("/api/admin/managed-students").then(r => r.json()),
+  });
+
+  const addMgdStudentMut = useMutation({
+    mutationFn: (data: any) => fetchWithAuth("/api/admin/managed-students", { method: "POST", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setShowAddMgdStudent(false); setEditingMgdStudent(null); },
+  });
+
+  const updateMgdStudentMut = useMutation({
+    mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/managed-students/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setEditingMgdStudent(null); },
+  });
+
+  const deleteMgdStudentMut = useMutation({
+    mutationFn: ({ id, password }: any) => fetchWithAuth(`/api/admin/managed-students/${id}`, { method: "DELETE", body: JSON.stringify({ password }) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setDeleteConfirm(null); setDeletePassword(""); },
+    onError: () => { setDeleteError("Incorrect password or operation failed"); },
+  });
+
+  const bulkUploadMgdStudentsMut = useMutation({
+    mutationFn: (records: any[]) => fetchWithAuth("/api/admin/managed-students/bulk-upload", { method: "POST", body: JSON.stringify({ records }) }).then(r => r.json()),
+    onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setBulkUploadResult(data); },
+  });
+
+  const { data: mgdTeacherList, isLoading: mgdTeachersLoading } = useQuery<any[]>({
+    queryKey: ["/api/admin/managed-teachers"],
+    queryFn: () => fetchWithAuth("/api/admin/managed-teachers").then(r => r.json()),
+  });
+
+  const addMgdTeacherMut = useMutation({
+    mutationFn: (data: any) => fetchWithAuth("/api/admin/managed-teachers", { method: "POST", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setShowAddMgdTeacher(false); setEditingMgdTeacher(null); },
+  });
+
+  const updateMgdTeacherMut = useMutation({
+    mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/managed-teachers/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setEditingMgdTeacher(null); },
+  });
+
+  const deleteMgdTeacherMut = useMutation({
+    mutationFn: ({ id, password, deleteSubjectOnly, className, section, subject }: any) => fetchWithAuth(`/api/admin/managed-teachers/${id}`, { method: "DELETE", body: JSON.stringify({ password, deleteSubjectOnly, className, section, subject }) }).then(r => r.json()),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setDeleteConfirm(null); setDeletePassword(""); },
+    onError: () => { setDeleteError("Incorrect password or operation failed"); },
+  });
+
+  const bulkUploadMgdTeachersMut = useMutation({
+    mutationFn: (records: any[]) => fetchWithAuth("/api/admin/managed-teachers/bulk-upload", { method: "POST", body: JSON.stringify({ records }) }).then(r => r.json()),
+    onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setBulkUploadResult(data); },
+  });
+
+  // ─── Delete confirm helpers ───────────────────────────────────────────────
+  const handleDeleteConfirm = () => {
+    if (!deleteConfirm || !deletePassword) { setDeleteError("Password required"); return; }
+    setDeleteError("");
+    const { type, id, extra } = deleteConfirm;
+    if (type === "classSection") deleteClassSectionMut.mutate({ id, password: deletePassword, deleteSubject: extra?.deleteSubject });
+    else if (type === "mgdStudent") deleteMgdStudentMut.mutate({ id, password: deletePassword });
+    else if (type === "mgdTeacher") deleteMgdTeacherMut.mutate({ id, password: deletePassword, ...(extra || {}) });
+  };
+
+  // ─── XLSX bulk upload helper ──────────────────────────────────────────────
+  const handleExcelUpload = (file: File, type: string) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        // Parse CSV-like structure (tab separated or comma separated)
+        const text = e.target?.result as string;
+        const lines = text.split("\n").filter(l => l.trim());
+        if (lines.length < 2) return;
+        const headers = lines[0].split("\t").map(h => h.trim().replace(/"/g,""));
+        const records = lines.slice(1).map(line => {
+          const cols = line.split("\t").map(c => c.trim().replace(/"/g,""));
+          const obj: any = {};
+          headers.forEach((h, i) => { obj[h] = cols[i] || ""; });
+          return obj;
+        });
+        if (type === "classSection") bulkUploadClassSectionsMut.mutate(records);
+        else if (type === "mgdStudent") bulkUploadMgdStudentsMut.mutate(records);
+        else if (type === "mgdTeacher") bulkUploadMgdTeachersMut.mutate(records);
+      } catch (err) { console.error(err); }
+    };
+    reader.readAsText(file);
+  };
+
+  const downloadTemplate = (type: string) => {
+    const templates: Record<string, string> = {
+      classSection: "class\tsection\tsubjects\n5\tA\tEnglish,Maths,Science\n6\tB\tHindi,Maths",
+      mgdStudent: "studentName\tphoneNumber\temail\tadmissionNumber\tclass\tsection\tsessionYear\nRahul Sharma\t9876543210\trahul@school.edu\t2024001\t5\tA\t2024-2025",
+      mgdTeacher: "teacherName\temployeeId\temail\tphoneNumber\tclass\tsection\tsubjects\tisClassTeacher\nRamesh Singh\tT100\tramesh@school.edu\t9876543210\t5\tA\tEnglish,Maths\tfalse",
+    };
+    const content = templates[type] || "";
+    const blob = new Blob([content], { type: "text/tab-separated-values" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `template_${type}.tsv`; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const { data: messages, refetch: refetchMessages } = useQuery<any[]>({
     queryKey: ["/api/chat/messages", activeConversationId],
@@ -205,57 +515,42 @@ export default function AdminDashboard() {
         </div>
 
         <div className="sf-nav-tabs">
-          <button className={`sf-nav-tab${activeSection === "overview" ? " on" : ""}`} onClick={() => setActiveSection("overview")}>
+
+
+
+
+
+
+
+          <button className={`sf-nav-tab${activeSection === "mgd-classes" ? " on" : ""}`} onClick={() => setActiveSection("mgd-classes")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
-              <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+              <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
             </svg>
-            Overview
+            Class & Subjects
           </button>
-          <button className={`sf-nav-tab${activeSection === "students" ? " on" : ""}`} onClick={() => setActiveSection("students")}>
+          <button className={`sf-nav-tab${activeSection === "mgd-students" ? " on" : ""}`} onClick={() => setActiveSection("mgd-students")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
             </svg>
-            Students
+            Mgd Students
           </button>
-          <button className={`sf-nav-tab${activeSection === "teachers" ? " on" : ""}`} onClick={() => setActiveSection("teachers")}>
+          <button className={`sf-nav-tab${activeSection === "mgd-teachers" ? " on" : ""}`} onClick={() => setActiveSection("mgd-teachers")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>
             </svg>
-            Teachers
+            Mgd Teachers
           </button>
-          <button className={`sf-nav-tab${activeSection === "early-warning" ? " on" : ""}`} onClick={() => setActiveSection("early-warning")}>
+          <button className={`sf-nav-tab${activeSection === "custom-insights" ? " on" : ""}`} onClick={() => setActiveSection("custom-insights")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
             </svg>
-            Early Warning
+            Custom Insights
           </button>
-          <button className={`sf-nav-tab${activeSection === "question-quality" ? " on" : ""}`} onClick={() => setActiveSection("question-quality")}>
-            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-            Question Quality
-          </button>
-          <button className="sf-nav-tab" onClick={() => setIsProfilePanelOpen(true)}>
-            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-            </svg>
-            Profile
-          </button>
+
         </div>
 
         <div className="sf-nav-right">
-          <div className="sf-search">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: "var(--dim)", flexShrink: 0 }}>
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-            </svg>
-            <input placeholder="Search…" />
-          </div>
           <div className="sf-ic-btn">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -363,435 +658,210 @@ export default function AdminDashboard() {
         </div>
 
         {/* SECTION TABS */}
-        <div className="sf-section-tabs">
-          <button className={`sf-stab${activeSection === "overview" ? " on" : ""}`} onClick={() => setActiveSection("overview")}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
-              <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
-            </svg>
-            Overview
-          </button>
-          <button className={`sf-stab${activeSection === "students" ? " on" : ""}`} onClick={() => setActiveSection("students")}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-            </svg>
-            All Students
-          </button>
-          <button className={`sf-stab${activeSection === "teachers" ? " on" : ""}`} onClick={() => setActiveSection("teachers")}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>
-            </svg>
-            All Teachers
-          </button>
-          <button className="sf-stab" onClick={() => setIsProfilePanelOpen(true)}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-            </svg>
-            Profile
-          </button>
-        </div>
 
-        {/* ── OVERVIEW TAB ── */}
-        {activeSection === "overview" && (
-          <>
-            <div className="sf-analytics-head">
-              <div>
-                <div className="sf-section-title">School Analytics</div>
-                <div className="sf-section-sub">Live data across all classes, subjects and teachers</div>
-              </div>
-              <div className="sf-filter-row">
-                <select className="sf-fsel" value={classFilter} onChange={e => setClassFilter(e.target.value)}>
-                  <option value="">All Classes</option>
-                  {classOptions.map((c: any) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select className="sf-fsel" value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)}>
-                  <option value="">All Subjects</option>
-                  {subjectOptions.map((s: any) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-            </div>
 
-            <div className="sf-charts-grid">
-              {/* Chart 1: Class Performance */}
-              <div className="sf-chart-card">
-                <div className="sf-chart-head">
-                  <div className="sf-chart-ico-row">
-                    <div className="sf-chart-ico sf-ci-lav">📊</div>
-                    <div>
-                      <div className="sf-chart-name">Class Performance</div>
-                      <div className="sf-chart-desc">Avg score % per class-section</div>
-                    </div>
-                  </div>
-                  <span className="sf-chart-badge sf-cb-live">Live</span>
-                </div>
-                <div className="sf-bar-chart">
-                  {analyticsLoading ? (
-                    <div style={{ width: "100%", textAlign: "center", fontSize: 12, color: "var(--mid)", padding: "32px 0" }}><div className="sf-spinner" /></div>
-                  ) : classBars.length > 0 ? classBars.map((b, i) => (
-                    <div key={i} className="sf-bar-col">
-                      <div className="sf-bar" style={{ height: `${b.height}px`, background: b.color.bg, border: b.color.border || undefined }} data-v={`${b.pct}%`} />
-                      <div className="sf-blbl">{b.label}</div>
-                    </div>
-                  )) : <div style={{ width: "100%", textAlign: "center", fontSize: 12, color: "var(--mid)", padding: "32px 0" }}>No evaluation data yet</div>}
-                </div>
-              </div>
-
-              {/* Chart 2: Subject Performance */}
-              <div className="sf-chart-card">
-                <div className="sf-chart-head">
-                  <div className="sf-chart-ico-row">
-                    <div className="sf-chart-ico sf-ci-green">📚</div>
-                    <div>
-                      <div className="sf-chart-name">Subject Difficulty</div>
-                      <div className="sf-chart-desc">Avg score % per subject</div>
-                    </div>
-                  </div>
-                  <span className="sf-chart-badge sf-cb-live">Live</span>
-                </div>
-                <div className="sf-bar-chart">
-                  {analyticsLoading ? (
-                    <div style={{ width: "100%", textAlign: "center", padding: "32px 0" }}><div className="sf-spinner" /></div>
-                  ) : subjBars.length > 0 ? subjBars.map((b, i) => (
-                    <div key={i} className="sf-bar-col">
-                      <div className="sf-bar" style={{ height: `${b.height}px`, background: b.color.bg, border: b.color.border || undefined }} data-v={`${b.pct}%`} />
-                      <div className="sf-blbl">{b.label}</div>
-                    </div>
-                  )) : <div style={{ width: "100%", textAlign: "center", fontSize: 12, color: "var(--mid)", padding: "32px 0" }}>No data yet</div>}
-                </div>
-              </div>
-
-              {/* Chart 3: Teacher stats */}
-              <div className="sf-chart-card">
-                <div className="sf-chart-head">
-                  <div className="sf-chart-ico-row">
-                    <div className="sf-chart-ico sf-ci-amber">👨‍🏫</div>
-                    <div>
-                      <div className="sf-chart-name">Teacher Performance</div>
-                      <div className="sf-chart-desc">Exams, evaluations, class avg</div>
-                    </div>
-                  </div>
-                  <span className="sf-chart-badge sf-cb-live">Live</span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-                  {analyticsLoading ? (
-                    <div style={{ textAlign: "center", padding: "32px 0" }}><div className="sf-spinner" /></div>
-                  ) : teacherStats.length === 0 ? (
-                    <div style={{ textAlign: "center", fontSize: 12, color: "var(--mid)", padding: "24px 0" }}>No data yet</div>
-                  ) : teacherStats.slice(0, 5).map((t: any) => (
-                    <div key={t.teacherId} className="sf-exam-item" style={{ cursor: "default" }}>
-                      <div className="sf-exam-subj" style={{ background: "var(--lav-bg)" }}>{getInitials(t.teacherName)}</div>
-                      <div className="sf-exam-info">
-                        <div className="sf-exam-name">{t.teacherName}</div>
-                        <div className="sf-exam-meta">{t.examsCreated} exams · {t.sheetsEvaluated} evaluated</div>
-                      </div>
-                      <span className="sf-exam-status sf-es-done" style={{ background: "none", color: kpiColor(t.avgClassPct) }}>{t.avgClassPct}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Chart 4: Marks Distribution Donut */}
-              <div className="sf-chart-card">
-                <div className="sf-chart-head">
-                  <div className="sf-chart-ico-row">
-                    <div className="sf-chart-ico sf-ci-blue">🎯</div>
-                    <div>
-                      <div className="sf-chart-name">Marks Distribution</div>
-                      <div className="sf-chart-desc">Score bands across all evaluations</div>
-                    </div>
-                  </div>
-                  <span className="sf-chart-badge sf-cb-live">Live</span>
-                </div>
-                {analyticsLoading ? (
-                  <div style={{ textAlign: "center", padding: "32px 0" }}><div className="sf-spinner" /></div>
-                ) : (
-                  <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 8 }}>
-                    <svg width="100" height="100" viewBox="0 0 100 100" style={{ flexShrink: 0 }}>
-                      <circle cx="50" cy="50" r="38" fill="none" stroke="var(--rule)" strokeWidth="14" />
-                      {totalDistCount > 0 && donutSegments.map((seg, i) => (
-                        <circle key={i} cx="50" cy="50" r="38" fill="none"
-                          stroke={seg.color} strokeWidth="14"
-                          strokeDasharray={`${seg.dash} ${circumference - seg.dash}`}
-                          strokeDashoffset={seg.dashOffset}
-                          transform="rotate(-90 50 50)"
-                        />
-                      ))}
-                      <text x="50" y="53" textAnchor="middle" fontSize="12" fontWeight="700" fill="var(--ink)" fontFamily="DM Sans">{totalDistCount}</text>
-                      <text x="50" y="63" textAnchor="middle" fontSize="8" fill="var(--mid)" fontFamily="DM Sans">evals</text>
-                    </svg>
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-                      {distParts.map((d, i) => (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: d.color, flexShrink: 0 }} />
-                          <span style={{ color: "var(--mid)", flex: 1 }}>{d.label}</span>
-                          <span style={{ fontWeight: 700 }}>{d.pct}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* MORE INSIGHTS — collapsible */}
-            <div style={{ marginTop: 24 }}>
-              <button
-                className="sf-stab"
-                style={{ display: "flex", alignItems: "center", gap: 6, width: "auto", fontSize: 14, fontWeight: 700 }}
-                onClick={() => setMoreInsightsOpen(v => !v)}
-                data-testid="button-more-insights"
-              >
-                {moreInsightsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                More Insights
-              </button>
-
-              {moreInsightsOpen && (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16, marginTop: 16 }}>
-                  {/* Class Stability */}
-                  <div className="sf-card">
-                    <div className="sf-card-title">Class Performance Stability</div>
-                    <div className="sf-card-sub">Low standard deviation = consistent outcomes</div>
-                    {(kpis?.moreInsights?.classStability || []).slice(0, 6).map((c: any, i: number) => (
-                      <div key={i} className="sf-exam-item" style={{ cursor: "default" }}>
-                        <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", fontSize: 11 }}>C{c.className}</div>
-                        <div className="sf-exam-info">
-                          <div className="sf-exam-name">Class {c.className}</div>
-                          <div className="sf-exam-meta">StdDev: {c.stdDev}</div>
-                        </div>
-                        <span className={`sf-exam-status ${c.label === "Stable" ? "sf-es-done" : c.label === "Volatile" ? "sf-es-draft" : ""}`}>{c.label}</span>
-                      </div>
-                    ))}
-                    {!kpis?.moreInsights?.classStability?.length && <div className="sf-empty"><div className="sf-empty-icon">📈</div>No data yet</div>}
-                  </div>
-
-                  {/* Subject Difficulty */}
-                  <div className="sf-card">
-                    <div className="sf-card-title">Subject Difficulty</div>
-                    <div className="sf-card-sub">Based on average exam performance</div>
-                    {(kpis?.moreInsights?.subjectDifficulty || []).map((s: any, i: number) => (
-                      <div key={i} className="sf-exam-item" style={{ cursor: "default" }}>
-                        <div className="sf-exam-subj" style={{ background: "var(--amber-bg)", fontSize: 11 }}>{s.subject.slice(0, 3)}</div>
-                        <div className="sf-exam-info">
-                          <div className="sf-exam-name">{s.subject}</div>
-                          <div className="sf-exam-meta">Avg: {s.avgPct}%</div>
-                        </div>
-                        <span className={`sf-exam-status ${s.trend === "Easy" ? "sf-es-done" : s.trend === "Hard" ? "sf-es-draft" : ""}`}>{s.trend}</span>
-                      </div>
-                    ))}
-                    {!kpis?.moreInsights?.subjectDifficulty?.length && <div className="sf-empty"><div className="sf-empty-icon">📚</div>No data yet</div>}
-                  </div>
-
-                  {/* Rank Distribution */}
-                  <div className="sf-card">
-                    <div className="sf-card-title">Rank Distribution</div>
-                    <div className="sf-card-sub">Student score bands across school</div>
-                    {(kpis?.moreInsights?.rankDistribution || []).map((r: any, i: number) => (
-                      <div key={i} style={{ marginBottom: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
-                          <span style={{ color: "var(--mid)" }}>{r.band}</span>
-                          <span style={{ fontWeight: 700 }}>{r.count} ({r.pct}%)</span>
-                        </div>
-                        <div style={{ height: 6, borderRadius: 3, background: "var(--rule)", overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${r.pct}%`, background: BAR_COLORS[i].bg, borderRadius: 3, transition: "width 0.5s ease" }} />
-                        </div>
-                      </div>
-                    ))}
-                    {!kpis?.moreInsights?.rankDistribution?.some((r: any) => r.count > 0) && <div className="sf-empty"><div className="sf-empty-icon">🏆</div>No evaluation data</div>}
-                  </div>
-
-                  {/* Engagement Drop Alerts */}
-                  <div className="sf-card">
-                    <div className="sf-card-title">Engagement Drop Alerts</div>
-                    <div className="sf-card-sub">Classes with homework submission below 50%</div>
-                    {(kpis?.moreInsights?.engagementAlerts || []).length > 0 ? (
-                      kpis.moreInsights.engagementAlerts.map((a: any, i: number) => (
-                        <div key={i} className="sf-fitem">
-                          <div className="sf-fitem-ico sf-fi-red">⚠️</div>
-                          <div>
-                            <div className="sf-fitem-subj">{a.className}</div>
-                            <div className="sf-fitem-text">{a.completionPct}% completion — {a.alert}</div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="sf-empty"><div className="sf-empty-icon">✅</div>No engagement alerts — all classes are engaged.</div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* ── STUDENTS TAB ── */}
-        {activeSection === "students" && (
+        {/* ── CLASS & SUBJECTS MANAGEMENT TAB ── */}
+        {activeSection === "mgd-classes" && (
           <div className="sf-panel">
-            <div className="sf-panel-title">All Students</div>
-            <div className="sf-panel-sub">Complete student directory across all classes and sections</div>
-            {studentsLoading ? (
-              <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
-            ) : (studentList || []).length === 0 ? (
-              <div className="sf-empty"><div className="sf-empty-icon">🎓</div>No students registered yet.</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+              <div>
+                <div className="sf-panel-title">Class &amp; Subject Management</div>
+                <div className="sf-panel-sub">Manage class sections and their subject assignments</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button variant="outline" onClick={() => downloadTemplate("classSection")} style={{ fontSize: 12 }}>
+                  ⬇ Download Template
+                </Button>
+                <label style={{ cursor: "pointer" }}>
+                  <span style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", display: "inline-block" }}>⬆ Upload Excel</span>
+                  <input type="file" accept=".tsv,.csv,.xlsx" style={{ display: "none" }} onChange={e => { if (e.target.files?.[0]) handleExcelUpload(e.target.files[0], "classSection"); }} />
+                </label>
+                <Button onClick={() => { setShowAddClassSection(true); setEditingClassSection(null); setClassSectionForm({ className: "", section: "", subjects: [] }); setClassSectionErrors({}); }}>
+                  <Plus size={14} style={{ marginRight: 8 }} /> Add Class
+                </Button>
+              </div>
+            </div>
+
+            {bulkUploadResult && (
+              <div style={{ marginTop: 12, padding: "10px 14px", background: "#f0fdf4", borderRadius: 8, border: "1px solid #86efac", fontSize: 13 }}>
+                ✅ Created {bulkUploadResult.created} records.
+                {bulkUploadResult.duplicates.length > 0 && ` Duplicates skipped: ${bulkUploadResult.duplicates.join(", ")}`}
+                <button onClick={() => setBulkUploadResult(null)} style={{ marginLeft: 12, fontSize: 11, color: "var(--mid)", background: "none", border: "none", cursor: "pointer" }}>Dismiss</button>
+              </div>
+            )}
+
+            {(showAddClassSection || !!editingClassSection) && (
+              <div className="sf-card" style={{ marginTop: 16 }}>
+                <div className="sf-card-title">{editingClassSection ? "Edit Class Section" : "Add Class Section"}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 12 }}>
+                  <div>
+                    <Input placeholder="Class (integer, e.g. 5)" type="number" value={classSectionForm.className} onChange={e => setClassSectionForm(v => ({ ...v, className: e.target.value }))} style={{ borderColor: classSectionErrors.className ? "#d94f4f" : undefined }} />
+                    {classSectionErrors.className && <div style={{ fontSize: 11, color: "#d94f4f" }}>{classSectionErrors.className}</div>}
+                  </div>
+                  <div>
+                    <Input placeholder="Section (A-Z)" value={classSectionForm.section} maxLength={1} onChange={e => setClassSectionForm(v => ({ ...v, section: e.target.value.toUpperCase() }))} style={{ borderColor: classSectionErrors.section ? "#d94f4f" : undefined }} />
+                    {classSectionErrors.section && <div style={{ fontSize: 11, color: "#d94f4f" }}>{classSectionErrors.section}</div>}
+                  </div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 6 }}>Subjects (select multiple)</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {["English", "Hindi", "Maths", "Science"].map(sub => (
+                      <label key={sub} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${classSectionForm.subjects.includes(sub) ? "var(--ink)" : "var(--rule)"}`, background: classSectionForm.subjects.includes(sub) ? "var(--lav-card)" : "var(--pane)" }}>
+                        <input type="checkbox" checked={classSectionForm.subjects.includes(sub)} onChange={e => setClassSectionForm(v => ({ ...v, subjects: e.target.checked ? [...v.subjects, sub] : v.subjects.filter(s => s !== sub) }))} style={{ display: "none" }} />
+                        {sub}
+                      </label>
+                    ))}
+                  </div>
+                  {classSectionErrors.subjects && <div style={{ fontSize: 11, color: "#d94f4f" }}>{classSectionErrors.subjects}</div>}
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <Button onClick={() => {
+                    const errs: any = {};
+                    if (!classSectionForm.className || isNaN(parseInt(classSectionForm.className))) errs.className = "Integer required";
+                    if (!classSectionForm.section || !/^[A-Z]$/.test(classSectionForm.section)) errs.section = "Single capital letter required";
+                    if (!classSectionForm.subjects.length) errs.subjects = "Select at least one subject";
+                    if (Object.keys(errs).length) { setClassSectionErrors(errs); return; }
+                    // Duplicate check
+                    const dup = (classSectionList || []).find((c: any) => String(c.className) === classSectionForm.className && c.section === classSectionForm.section && (!editingClassSection || c.id !== editingClassSection.id));
+                    if (dup) { setClassSectionErrors({ className: `Class ${classSectionForm.className}-${classSectionForm.section} already exists` }); return; }
+                    setClassSectionErrors({});
+                    const payload = { className: parseInt(classSectionForm.className), section: classSectionForm.section, subjects: classSectionForm.subjects };
+                    if (editingClassSection) updateClassSectionMut.mutate({ id: editingClassSection.id, ...payload });
+                    else addClassSectionMut.mutate(payload);
+                  }}>
+                    {editingClassSection ? "Save" : "Create"}
+                  </Button>
+                  <Button variant="outline" onClick={() => { setShowAddClassSection(false); setEditingClassSection(null); setClassSectionErrors({}); }}>Cancel</Button>
+                </div>
+              </div>
+            )}
+
+            {classSectionsLoading ? (
+              <div style={{ textAlign: "center", padding: 32 }}><div className="sf-spinner" /></div>
+            ) : !(classSectionList || []).length ? (
+              <div className="sf-empty"><div className="sf-empty-icon">🏫</div>No class sections added yet.</div>
             ) : (
-              <>
-                {[["9", "A"], ["9", "B"], ["10", "A"], ["10", "B"]].map(([cls, sec]) => {
-                  const group = (studentList || []).filter((s: any) => s.studentClass === cls && s.section === sec);
-                  if (!group.length) return null;
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+                {(classSectionList || []).map((cs: any) => {
+                  const subjects: string[] = (() => { try { return JSON.parse(cs.subjects); } catch { return []; } })();
                   return (
-                    <div key={`${cls}${sec}`} style={{ marginBottom: 24 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, paddingBottom: 6, borderBottom: "1px solid var(--rule)" }}>
-                        Class {cls} — Section {sec} · {group.length} students
+                    <div key={cs.id} className="sf-exam-item" style={{ cursor: "default", padding: "12px 14px", justifyContent: "space-between" }}>
+                      <div>
+                        <div className="sf-exam-name">Class {cs.className} — Section {cs.section}</div>
+                        <div className="sf-exam-meta">{subjects.join(", ") || "No subjects"}</div>
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
-                        {group.map((s: any) => (
-                          <div key={s.id} className="sf-exam-item" style={{ cursor: "default", padding: "10px 14px" }} data-testid={`student-card-${s.id}`}>
-                            <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", fontSize: 11 }}>{getInitials(s.name)}</div>
-                            <div className="sf-exam-info">
-                              <div className="sf-exam-name" style={{ fontSize: 13 }}>{s.name}</div>
-                              <div className="sf-exam-meta">{s.admissionNumber}</div>
-                            </div>
+                      <div style={{ position: "relative" }}>
+                        <button onClick={() => setBulkDotMenu(bulkDotMenu === cs.id ? null : cs.id)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", cursor: "pointer", fontSize: 16 }}>⋮</button>
+                        {bulkDotMenu === cs.id && (
+                          <div style={{ position: "absolute", right: 0, top: 32, background: "white", border: "1px solid var(--rule)", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.12)", zIndex: 100, minWidth: 180 }}>
+                            <button onClick={() => { setBulkDotMenu(null); setEditingClassSection(cs); setShowAddClassSection(false); setClassSectionForm({ className: String(cs.className), section: cs.section, subjects }); setClassSectionErrors({}); }} style={{ display: "block", width: "100%", padding: "10px 14px", textAlign: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}>✏️ Edit</button>
+                            {subjects.map(sub => (
+                              <button key={sub} onClick={() => { setBulkDotMenu(null); setDeleteConfirm({ type: "classSection", id: cs.id, extra: { deleteSubject: sub } }); setDeletePassword(""); setDeleteError(""); }} style={{ display: "block", width: "100%", padding: "10px 14px", textAlign: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#c05050" }}>🗑 Delete subject: {sub}</button>
+                            ))}
+                            <button onClick={() => { setBulkDotMenu(null); setDeleteConfirm({ type: "classSection", id: cs.id }); setDeletePassword(""); setDeleteError(""); }} style={{ display: "block", width: "100%", padding: "10px 14px", textAlign: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#c05050" }}>🗑 Delete entire class</button>
                           </div>
-                        ))}
+                        )}
                       </div>
                     </div>
                   );
                 })}
-              </>
+              </div>
             )}
           </div>
         )}
 
-        {/* ── TEACHERS TAB ── */}
-        {activeSection === "teachers" && (
+        {/* ── MANAGED STUDENTS TAB ── */}
+        {activeSection === "mgd-students" && (
           <div className="sf-panel">
-            <div className="sf-panel-title">All Teachers</div>
-            <div className="sf-panel-sub">Staff directory with subject and class assignments</div>
-            {teachersLoading ? (
-              <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
-            ) : (teacherList || []).length === 0 ? (
-              <div className="sf-empty"><div className="sf-empty-icon">👩‍🏫</div>No teachers registered yet.</div>
-            ) : (teacherList || []).map((t: any) => {
-              let subjects: string[] = [];
-              let classes: string[] = [];
-              try { subjects = JSON.parse(t.subjectsAssigned || "[]"); } catch {}
-              try { classes = JSON.parse(t.classesAssigned || "[]"); } catch {}
-              return (
-                <div key={t.id} className="sf-exam-item" style={{ cursor: "default", flexDirection: "column", alignItems: "flex-start", gap: 6, padding: "14px 18px" }} data-testid={`teacher-card-${t.id}`}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
-                    <div className="sf-exam-subj" style={{ background: "var(--ink)", color: "var(--cream)", flexShrink: 0 }}>{getInitials(t.name)}</div>
-                    <div className="sf-exam-info" style={{ flex: 1 }}>
-                      <div className="sf-exam-name">{t.name}</div>
-                      <div className="sf-exam-meta">{t.employeeId} · {t.email}</div>
-                    </div>
-                    {t.isClassTeacher === 1 && <span className="sf-exam-status sf-es-done" style={{ flexShrink: 0 }}>Class Teacher</span>}
-                  </div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginLeft: 52 }}>
-                    {subjects.map((s: string) => <span key={s} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "var(--lav-bg)", fontWeight: 600 }}>{s}</span>)}
-                    {classes.map((c: string) => <span key={c} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "var(--cream)", border: "1px solid var(--rule)", color: "var(--mid)" }}>Class {c}</span>)}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+              <div>
+                <div className="sf-panel-title">Student Management</div>
+                <div className="sf-panel-sub">Add, edit and manage student records</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button variant="outline" onClick={() => downloadTemplate("mgdStudent")} style={{ fontSize: 12 }}>⬇ Template</Button>
+                <label style={{ cursor: "pointer" }}>
+                  <span style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", display: "inline-block" }}>⬆ Upload Excel</span>
+                  <input type="file" accept=".tsv,.csv" style={{ display: "none" }} onChange={e => { if (e.target.files?.[0]) handleExcelUpload(e.target.files[0], "mgdStudent"); }} />
+                </label>
+                <Button onClick={() => { setShowAddMgdStudent(true); setEditingMgdStudent(null); setMgdStudentForm({ studentName: "", phoneNumber: "", email: "", admissionNumber: "", class: "", section: "", sessionYear: "" }); setMgdStudentErrors({}); }}>
+                  <Plus size={14} style={{ marginRight: 8 }} /> Add Student
+                </Button>
+              </div>
+            </div>
 
-        {/* ── EARLY WARNING TAB ── */}
-        {activeSection === "early-warning" && (
-          <div className="sf-panel">
-            <div className="sf-panel-title">Early Warning System — School-Wide</div>
-            <div className="sf-panel-sub">Bottom 2 at-risk students per class — click any student to view a full risk explanation</div>
-            {adminEWLoading ? (
-              <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
-            ) : !adminEW || adminEW.length === 0 ? (
-              <div className="sf-empty"><div className="sf-empty-icon">🟢</div>No at-risk students identified across the school. Evaluate more answer sheets to activate this system.</div>
+            {bulkUploadResult && (
+              <div style={{ marginTop: 12, padding: "10px 14px", background: "#f0fdf4", borderRadius: 8, border: "1px solid #86efac", fontSize: 13 }}>
+                ✅ Created {bulkUploadResult.created} records.
+                {bulkUploadResult.duplicates.length > 0 && ` Duplicates (admissionNumber) skipped: ${bulkUploadResult.duplicates.join(", ")}`}
+                <button onClick={() => setBulkUploadResult(null)} style={{ marginLeft: 12, fontSize: 11, color: "var(--mid)", background: "none", border: "none", cursor: "pointer" }}>Dismiss</button>
+              </div>
+            )}
+
+            {(showAddMgdStudent || !!editingMgdStudent) && (
+              <div className="sf-card" style={{ marginTop: 16 }}>
+                <div className="sf-card-title">{editingMgdStudent ? "Edit Student" : "Add Student"}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 12 }}>
+                  <div>
+                    <Input placeholder="Student Name" value={mgdStudentForm.studentName} onChange={e => setMgdStudentForm(v => ({ ...v, studentName: e.target.value }))} style={{ borderColor: mgdStudentErrors.studentName ? "#d94f4f" : undefined }} />
+                    {mgdStudentErrors.studentName && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.studentName}</div>}
+                  </div>
+                  <Input placeholder="Phone Number" value={mgdStudentForm.phoneNumber} onChange={e => setMgdStudentForm(v => ({ ...v, phoneNumber: e.target.value }))} />
+                  <Input placeholder="Email" value={mgdStudentForm.email} onChange={e => setMgdStudentForm(v => ({ ...v, email: e.target.value }))} />
+                  <div>
+                    <Input placeholder="Admission Number (unique)" value={mgdStudentForm.admissionNumber} onChange={e => setMgdStudentForm(v => ({ ...v, admissionNumber: e.target.value }))} style={{ borderColor: mgdStudentErrors.admissionNumber ? "#d94f4f" : undefined }} />
+                    {mgdStudentErrors.admissionNumber && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.admissionNumber}</div>}
+                  </div>
+                  <Input placeholder="Class" value={mgdStudentForm.class} onChange={e => setMgdStudentForm(v => ({ ...v, class: e.target.value }))} />
+                  <Input placeholder="Section" value={mgdStudentForm.section} maxLength={1} onChange={e => setMgdStudentForm(v => ({ ...v, section: e.target.value.toUpperCase() }))} />
+                  <Input placeholder="Session Year (e.g. 2024-2025)" value={mgdStudentForm.sessionYear} onChange={e => setMgdStudentForm(v => ({ ...v, sessionYear: e.target.value }))} />
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <Button onClick={() => {
+                    const errs: any = {};
+                    if (!mgdStudentForm.studentName.trim()) errs.studentName = "Name required";
+                    if (!mgdStudentForm.admissionNumber.trim()) errs.admissionNumber = "Admission number required";
+                    if (!mgdStudentForm.class.trim()) errs.class = "Class required";
+                    if (!mgdStudentForm.section.trim()) errs.section = "Section required";
+                    if (!mgdStudentForm.sessionYear.trim()) errs.sessionYear = "Session year required";
+                    if (!errs.admissionNumber) {
+                      const dup = (mgdStudentList || []).find((s: any) => s.admissionNumber === mgdStudentForm.admissionNumber && (!editingMgdStudent || s.id !== editingMgdStudent.id));
+                      if (dup) errs.admissionNumber = "Admission number already exists";
+                    }
+                    if (Object.keys(errs).length) { setMgdStudentErrors(errs); return; }
+                    setMgdStudentErrors({});
+                    if (editingMgdStudent) updateMgdStudentMut.mutate({ id: editingMgdStudent.id, ...mgdStudentForm });
+                    else addMgdStudentMut.mutate(mgdStudentForm);
+                  }}>
+                    {editingMgdStudent ? "Save" : "Create"}
+                  </Button>
+                  <Button variant="outline" onClick={() => { setShowAddMgdStudent(false); setEditingMgdStudent(null); setMgdStudentErrors({}); }}>Cancel</Button>
+                </div>
+              </div>
+            )}
+
+            {mgdStudentsLoading ? (
+              <div style={{ textAlign: "center", padding: 32 }}><div className="sf-spinner" /></div>
+            ) : !(mgdStudentList || []).length ? (
+              <div className="sf-empty"><div className="sf-empty-icon">👨‍🎓</div>No students added yet.</div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                {adminEW.map((group: any) => (
-                  <div key={group.class}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Class {group.class}</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {group.students.map((w: any) => {
-                        const ewKey = `${group.class}_${w.admissionNumber}`;
-                        const isExpanded = expandedEWStudent === ewKey;
-                        const riskColor = w.riskLevel === "HIGH" ? "#d94f4f" : w.riskLevel === "MEDIUM" ? "#d08a2b" : "#3a8a5c";
-                        const riskBg = w.riskLevel === "HIGH" ? "#fff0f0" : w.riskLevel === "MEDIUM" ? "#fff8ed" : "#f0faf4";
-                        const riskIcon = w.riskLevel === "HIGH" ? "🔴" : w.riskLevel === "MEDIUM" ? "🟡" : "🟢";
-                        return (
-                          <div key={w.admissionNumber} data-testid={`admin-ew-student-${w.admissionNumber}`} style={{ borderRadius: 13, border: `1.5px solid ${riskColor}22`, overflow: "hidden", background: riskBg }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", cursor: "pointer" }}
-                              onClick={() => setExpandedEWStudent(isExpanded ? null : ewKey)}>
-                              <div style={{ width: 38, height: 38, borderRadius: "50%", background: `${riskColor}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: riskColor, flexShrink: 0 }}>
-                                {w.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
-                              </div>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{w.studentName}</div>
-                                <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>Score: {w.earlierAvgPct}% → {w.recentAvgPct}% &nbsp;·&nbsp; HW: {w.hwSubmitted}/{w.hwTotal}</div>
-                                {(w.weakSubjects || []).length > 0 && (
-                                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
-                                    {(w.weakSubjects || []).map((s: string) => (
-                                      <span key={s} style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 5, background: "#f0e0e0", color: "#b03030" }}>{s}</span>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                              <div style={{ textAlign: "right", flexShrink: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: riskColor }}>{riskIcon} {w.riskLevel}</div>
-                                <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>Risk: {w.riskScore}</div>
-                                <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>{isExpanded ? "▲ collapse" : "▼ explain"}</div>
-                              </div>
-                            </div>
-                            {isExpanded && (
-                              <div style={{ padding: "0 16px 16px", borderTop: `1px solid ${riskColor}22` }}>
-                                <div style={{ marginTop: 12, padding: "10px 14px", background: "rgba(0,0,0,0.04)", borderRadius: 10, fontSize: 13, color: "var(--ink)", lineHeight: 1.6 }}>
-                                  <b>Why at risk:</b> {w.riskReason || "Low homework engagement and consistently below-average performance."}
-                                </div>
-                                {(w.subjectBreakdown || []).length > 0 && (
-                                  <div style={{ marginTop: 14 }}>
-                                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Subject-Wise Marks</div>
-                                    {(w.subjectBreakdown || []).map((sb: any) => (
-                                      <div key={sb.subject} style={{ marginBottom: 8 }}>
-                                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
-                                          <span style={{ color: "var(--ink)", fontWeight: 500 }}>{sb.subject}</span>
-                                          <span style={{ color: sb.avgPct < 50 ? "#d94f4f" : sb.avgPct < 65 ? "#d08a2b" : "#3a8a5c", fontWeight: 600 }}>{sb.avgPct}%</span>
-                                        </div>
-                                        <div style={{ height: 5, borderRadius: 3, background: "rgba(0,0,0,0.08)" }}>
-                                          <div style={{ height: "100%", borderRadius: 3, width: `${sb.avgPct}%`, background: sb.avgPct < 50 ? "#d94f4f" : sb.avgPct < 65 ? "#d08a2b" : "#3a8a5c" }} />
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                {(w.evalTimeline || []).length > 0 && (
-                                  <div style={{ marginTop: 14 }}>
-                                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Evaluation History</div>
-                                    {(w.evalTimeline || []).map((et: any, idx: number) => (
-                                      <div key={et.evalId} style={{ display: "flex", justifyContent: "space-between", padding: "5px 10px", background: "rgba(255,255,255,0.5)", borderRadius: 6, fontSize: 12, marginBottom: 4 }}>
-                                        <span style={{ color: "var(--mid)" }}>#{idx + 1} {et.examName || et.subject}</span>
-                                        <span style={{ fontWeight: 600, color: et.pct < 50 ? "#d94f4f" : et.pct < 65 ? "#d08a2b" : "#3a8a5c" }}>{et.pct}%</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
-                                  <div style={{ flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.5)", borderRadius: 9, textAlign: "center" }}>
-                                    <div style={{ fontSize: 16, fontWeight: 700, color: w.hwMissRate > 50 ? "#d94f4f" : "#3a8a5c" }}>{w.hwSubmitted}/{w.hwTotal}</div>
-                                    <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>HW Submitted</div>
-                                  </div>
-                                  <div style={{ flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.5)", borderRadius: 9, textAlign: "center" }}>
-                                    <div style={{ fontSize: 16, fontWeight: 700, color: w.hwMissRate > 50 ? "#d94f4f" : "#3a8a5c" }}>{w.hwMissRate}%</div>
-                                    <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>HW Miss Rate</div>
-                                  </div>
-                                  <div style={{ flex: 1, padding: "9px 12px", background: "rgba(255,255,255,0.5)", borderRadius: 9, textAlign: "center" }}>
-                                    <div style={{ fontSize: 16, fontWeight: 700, color: w.scoreTrend > 5 ? "#d94f4f" : "#3a8a5c" }}>{w.recentAvgPct}%</div>
-                                    <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>Recent Avg</div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+                {(mgdStudentList || []).map((s: any) => (
+                  <div key={s.id} className="sf-exam-item" style={{ cursor: "default", padding: "12px 14px", justifyContent: "space-between" }}>
+                    <div>
+                      <div className="sf-exam-name">{s.studentName}</div>
+                      <div className="sf-exam-meta">Admission: {s.admissionNumber} · Class {s.class}-{s.section} · {s.sessionYear}</div>
+                      {s.email && <div className="sf-exam-meta">{s.email}</div>}
+                    </div>
+                    <div style={{ position: "relative" }}>
+                      <button onClick={() => setBulkDotMenu(bulkDotMenu === s.id + 10000 ? null : s.id + 10000)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", cursor: "pointer", fontSize: 16 }}>⋮</button>
+                      {bulkDotMenu === s.id + 10000 && (
+                        <div style={{ position: "absolute", right: 0, top: 32, background: "white", border: "1px solid var(--rule)", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.12)", zIndex: 100, minWidth: 140 }}>
+                          <button onClick={() => { setBulkDotMenu(null); setEditingMgdStudent(s); setShowAddMgdStudent(false); setMgdStudentForm({ studentName: s.studentName, phoneNumber: s.phoneNumber || "", email: s.email || "", admissionNumber: s.admissionNumber, class: s.class, section: s.section, sessionYear: s.sessionYear }); setMgdStudentErrors({}); }} style={{ display: "block", width: "100%", padding: "10px 14px", textAlign: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}>✏️ Edit</button>
+                          <button onClick={() => { setBulkDotMenu(null); setDeleteConfirm({ type: "mgdStudent", id: s.id }); setDeletePassword(""); setDeleteError(""); }} style={{ display: "block", width: "100%", padding: "10px 14px", textAlign: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#c05050" }}>🗑 Delete</button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -800,92 +870,179 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* ── QUESTION QUALITY TAB ── */}
-        {activeSection === "question-quality" && (
+        {/* ── MANAGED TEACHERS TAB ── */}
+        {activeSection === "mgd-teachers" && (
           <div className="sf-panel">
-            <div className="sf-panel-title">Question Quality Analysis — School-Wide</div>
-            <div className="sf-panel-sub">Questions with low average scores flagged for review — click any item to see detailed insight</div>
-            {adminQQLoading ? (
-              <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
-            ) : !adminQQ || adminQQ.length === 0 ? (
-              <div className="sf-empty"><div className="sf-empty-icon">📊</div>No question quality signals detected yet. More evaluations are needed to generate analysis.</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {adminQQ.map((q: any, i: number) => {
-                  const isExpanded = expandedQQItem === i;
-                  const qualityScore = Math.round(q.avgPct || 0);
-                  const qualityLabel = qualityScore < 30 ? "Critical" : qualityScore < 45 ? "Poor" : "Needs Review";
-                  const qualityColor = qualityScore < 30 ? "#d94f4f" : qualityScore < 45 ? "#d08a2b" : "#c07a20";
-                  const deviations: string[] = q.sampleDeviations || [];
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+              <div>
+                <div className="sf-panel-title">Teacher Management</div>
+                <div className="sf-panel-sub">Add teachers and assign class-section-subject combinations</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button variant="outline" onClick={() => downloadTemplate("mgdTeacher")} style={{ fontSize: 12 }}>⬇ Template</Button>
+                <label style={{ cursor: "pointer" }}>
+                  <span style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", display: "inline-block" }}>⬆ Upload Excel</span>
+                  <input type="file" accept=".tsv,.csv" style={{ display: "none" }} onChange={e => { if (e.target.files?.[0]) handleExcelUpload(e.target.files[0], "mgdTeacher"); }} />
+                </label>
+                <Button onClick={() => { setShowAddMgdTeacher(true); setEditingMgdTeacher(null); setMgdTeacherForm({ teacherName: "", employeeId: "", email: "", phoneNumber: "", assignments: [], isClassTeacher: false, classTeacherOf: "" }); setMgdTeacherErrors({}); setTeacherAssignClass(""); setTeacherAssignSection(""); setTeacherAssignSubjects([]); }}>
+                  <Plus size={14} style={{ marginRight: 8 }} /> Add Teacher
+                </Button>
+              </div>
+            </div>
 
-                  const insights: string[] = [];
-                  if (qualityScore < 30) insights.push("Critically low class performance — possible teaching gap or unclear question framing.");
-                  if (qualityScore < 45) insights.push("More than half of students scored below 50% on this question.");
-                  if (deviations.length > 0) insights.push(`Common deviation patterns: "${deviations[0]}"`);
-                  if (q.studentsAffected && q.studentsAffected > 3) insights.push(`${q.studentsAffected} students affected — this may indicate a recurring conceptual gap.`);
-                  const memoryBased = deviations.some((d: string) => /memory|rote|recall|definition/i.test(d));
-                  if (memoryBased) insights.push("Pattern suggests over-reliance on memory-based question formats rather than conceptual depth.");
-                  if (insights.length === 0) insights.push("Question shows consistently low student performance. Review difficulty calibration and answer scheme clarity.");
+            {bulkUploadResult && (
+              <div style={{ marginTop: 12, padding: "10px 14px", background: "#f0fdf4", borderRadius: 8, border: "1px solid #86efac", fontSize: 13 }}>
+                ✅ Created {bulkUploadResult.created} records.
+                {bulkUploadResult.duplicates.length > 0 && ` Duplicates skipped: ${bulkUploadResult.duplicates.join(", ")}`}
+                <button onClick={() => setBulkUploadResult(null)} style={{ marginLeft: 12, fontSize: 11, color: "var(--mid)", background: "none", border: "none", cursor: "pointer" }}>Dismiss</button>
+              </div>
+            )}
 
-                  return (
-                    <div key={i} data-testid={`admin-qq-item-${i}`} style={{ borderRadius: 13, border: "1.5px solid var(--rule)", overflow: "hidden", background: "var(--pane)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, padding: "14px 16px", cursor: "pointer" }}
-                        onClick={() => setExpandedQQItem(isExpanded ? null : i)}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--ink)", marginBottom: 4 }}>
-                            Q{q.questionNumber}: {q.examName || q.subject}
-                          </div>
-                          <div style={{ fontSize: 12, color: "var(--mid)", marginBottom: 5 }}>
-                            {q.teacherName || "Unknown Teacher"} &nbsp;·&nbsp; {q.subject} &nbsp;·&nbsp; {q.studentsAffected || 0} students evaluated
-                          </div>
-                          <div style={{ fontSize: 12, color: qualityColor, fontWeight: 500 }}>
-                            {q.flagReason || "Low student performance flagged for quality review."}
-                          </div>
-                        </div>
-                        <div style={{ textAlign: "right", flexShrink: 0 }}>
-                          <div style={{ fontSize: 18, fontWeight: 700, color: qualityColor }}>{qualityScore}%</div>
-                          <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>avg score</div>
-                          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", marginTop: 5 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 5, background: "#fff0f0", color: qualityColor }}>{qualityLabel}</span>
-                            <span style={{ fontSize: 10, color: "var(--mid)" }}>{isExpanded ? "▲" : "▼"}</span>
-                          </div>
-                        </div>
+            {(showAddMgdTeacher || !!editingMgdTeacher) && (() => {
+              const availableSections = teacherAssignClass && classSectionList
+                ? (classSectionList || []).filter((c: any) => String(c.className) === teacherAssignClass).map((c: any) => c.section)
+                : [];
+              const availableSubjects = teacherAssignClass && teacherAssignSection && classSectionList
+                ? (() => { const cs = (classSectionList || []).find((c: any) => String(c.className) === teacherAssignClass && c.section === teacherAssignSection); try { return cs ? JSON.parse(cs.subjects) : []; } catch { return []; } })()
+                : [];
+              return (
+                <div className="sf-card" style={{ marginTop: 16 }}>
+                  <div className="sf-card-title">{editingMgdTeacher ? "Edit Teacher" : "Add Teacher"}</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 12 }}>
+                    <div>
+                      <Input placeholder="Teacher Name" value={mgdTeacherForm.teacherName} onChange={e => setMgdTeacherForm(v => ({ ...v, teacherName: e.target.value }))} />
+                      {mgdTeacherErrors.teacherName && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdTeacherErrors.teacherName}</div>}
+                    </div>
+                    <div>
+                      <Input placeholder="Employee ID" value={mgdTeacherForm.employeeId} onChange={e => setMgdTeacherForm(v => ({ ...v, employeeId: e.target.value }))} />
+                      {mgdTeacherErrors.employeeId && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdTeacherErrors.employeeId}</div>}
+                    </div>
+                    <Input placeholder="Email" value={mgdTeacherForm.email} onChange={e => setMgdTeacherForm(v => ({ ...v, email: e.target.value }))} />
+                    <Input placeholder="Phone Number" value={mgdTeacherForm.phoneNumber} onChange={e => setMgdTeacherForm(v => ({ ...v, phoneNumber: e.target.value }))} />
+                  </div>
+
+                  <div style={{ marginTop: 14, padding: "12px 14px", background: "rgba(0,0,0,0.03)", borderRadius: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--mid)", marginBottom: 8 }}>ASSIGN SUBJECTS</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 4 }}>Step 1 — Class</div>
+                        <select value={teacherAssignClass} onChange={e => { setTeacherAssignClass(e.target.value); setTeacherAssignSection(""); setTeacherAssignSubjects([]); }} style={{ width: "100%", height: 36, borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", padding: "0 10px", fontSize: 13 }}>
+                          <option value="">— Class —</option>
+                          {[...new Set((classSectionList || []).map((c: any) => String(c.className)))].sort().map(cn => (
+                            <option key={cn} value={cn}>Class {cn}</option>
+                          ))}
+                        </select>
                       </div>
-                      {isExpanded && (
-                        <div style={{ padding: "0 16px 16px", borderTop: "1px solid var(--rule)" }}>
-                          <div style={{ marginTop: 12, fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Quality Insights</div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                            {insights.map((insight, idx) => (
-                              <div key={idx} style={{ display: "flex", gap: 8, padding: "9px 12px", background: "#fff8ed", borderRadius: 8, fontSize: 13, color: "var(--ink)", lineHeight: 1.55 }}>
-                                <span style={{ flexShrink: 0, color: "#d08a2b" }}>⚠</span>
-                                <span>{insight}</span>
-                              </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 4 }}>Step 2 — Section</div>
+                        <select value={teacherAssignSection} onChange={e => { setTeacherAssignSection(e.target.value); setTeacherAssignSubjects([]); }} disabled={!teacherAssignClass} style={{ width: "100%", height: 36, borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", padding: "0 10px", fontSize: 13, opacity: !teacherAssignClass ? 0.5 : 1 }}>
+                          <option value="">— Section —</option>
+                          {availableSections.map((sec: string) => <option key={sec} value={sec}>Section {sec}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 4 }}>Step 3 — Subjects</div>
+                        {availableSubjects.length === 0 ? (
+                          <div style={{ fontSize: 12, color: "var(--dim)", padding: "9px 0" }}>Select class + section first</div>
+                        ) : (
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            {availableSubjects.map((sub: string) => (
+                              <label key={sub} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, cursor: "pointer", padding: "4px 10px", borderRadius: 8, border: `1.5px solid ${teacherAssignSubjects.includes(sub) ? "var(--ink)" : "var(--rule)"}`, background: teacherAssignSubjects.includes(sub) ? "var(--lav-card)" : "var(--pane)" }}>
+                                <input type="checkbox" checked={teacherAssignSubjects.includes(sub)} onChange={e => setTeacherAssignSubjects(v => e.target.checked ? [...v, sub] : v.filter(s => s !== sub))} style={{ display: "none" }} />
+                                {sub}
+                              </label>
                             ))}
                           </div>
-                          <div style={{ marginTop: 14 }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Quality Score Breakdown</div>
-                            <div style={{ height: 7, borderRadius: 4, background: "rgba(0,0,0,0.07)", marginBottom: 6 }}>
-                              <div style={{ height: "100%", borderRadius: 4, width: `${qualityScore}%`, background: qualityScore < 30 ? "#d94f4f" : qualityScore < 45 ? "#d08a2b" : "#c07a20", transition: "width 0.4s" }} />
-                            </div>
-                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--mid)" }}>
-                              <span>Class avg: <b style={{ color: qualityColor }}>{qualityScore}%</b></span>
-                              <span>Students affected: <b style={{ color: "var(--ink)" }}>{q.studentsAffected || 0}</b></span>
-                              <span>Exam: <b style={{ color: "var(--ink)" }}>{q.examName}</b></span>
-                            </div>
+                        )}
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" disabled={!teacherAssignClass || !teacherAssignSection || !teacherAssignSubjects.length}
+                      onClick={() => {
+                        const newAssignment = { class: teacherAssignClass, section: teacherAssignSection, subjects: teacherAssignSubjects };
+                        setMgdTeacherForm(v => ({ ...v, assignments: [...v.assignments.filter((a: any) => !(a.class === teacherAssignClass && a.section === teacherAssignSection)), newAssignment] }));
+                        setTeacherAssignClass(""); setTeacherAssignSection(""); setTeacherAssignSubjects([]);
+                      }}>
+                      + Add Assignment
+                    </Button>
+                    {mgdTeacherForm.assignments.length > 0 && (
+                      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                        {mgdTeacherForm.assignments.map((a: any, i: number) => (
+                          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", background: "var(--pane)", borderRadius: 7, fontSize: 12 }}>
+                            <span>Class {a.class}-{a.section}: {a.subjects.join(", ")}</span>
+                            <button onClick={() => setMgdTeacherForm(v => ({ ...v, assignments: v.assignments.filter((_: any, j: number) => j !== i) }))} style={{ background: "none", border: "none", cursor: "pointer", color: "#c05050", fontSize: 14 }}>×</button>
                           </div>
-                          {deviations.length > 0 && (
-                            <div style={{ marginTop: 14 }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Sample Student Deviation Patterns</div>
-                              {deviations.map((d: string, idx: number) => (
-                                <div key={idx} style={{ padding: "7px 11px", background: "rgba(0,0,0,0.03)", borderRadius: 7, fontSize: 12, color: "var(--mid)", marginBottom: 5, lineHeight: 1.5 }}>"{d}"</div>
-                              ))}
-                            </div>
-                          )}
-                          <div style={{ marginTop: 14, padding: "10px 13px", background: "#f0f4ff", borderRadius: 8, fontSize: 12.5, color: "#4460cc", lineHeight: 1.55 }}>
-                            <b>Recommendation:</b> Review this question with {q.teacherName || "the teacher"}. Consider rebalancing difficulty, adding analytical depth, or clarifying question framing.
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ marginTop: 12 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                      <input type="checkbox" checked={mgdTeacherForm.isClassTeacher} onChange={e => setMgdTeacherForm(v => ({ ...v, isClassTeacher: e.target.checked }))} />
+                      Is Class Teacher?
+                    </label>
+                    {mgdTeacherForm.isClassTeacher && (
+                      <select value={mgdTeacherForm.classTeacherOf} onChange={e => setMgdTeacherForm(v => ({ ...v, classTeacherOf: e.target.value }))} style={{ marginTop: 8, height: 36, borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", padding: "0 10px", fontSize: 13, minWidth: 200 }}>
+                        <option value="">— Select class-section —</option>
+                        {(classSectionList || []).map((c: any) => (
+                          <option key={c.id} value={`${c.className}-${c.section}`}>Class {c.className}-{c.section}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                    <Button onClick={() => {
+                      const errs: any = {};
+                      if (!mgdTeacherForm.teacherName.trim()) errs.teacherName = "Name required";
+                      if (!mgdTeacherForm.employeeId.trim()) errs.employeeId = "Employee ID required";
+                      if (!errs.employeeId) {
+                        const dup = (mgdTeacherList || []).find((t: any) => t.employeeId === mgdTeacherForm.employeeId && (!editingMgdTeacher || t.id !== editingMgdTeacher.id));
+                        if (dup) errs.employeeId = "Employee ID already exists";
+                      }
+                      if (Object.keys(errs).length) { setMgdTeacherErrors(errs); return; }
+                      setMgdTeacherErrors({});
+                      if (editingMgdTeacher) updateMgdTeacherMut.mutate({ id: editingMgdTeacher.id, ...mgdTeacherForm });
+                      else addMgdTeacherMut.mutate(mgdTeacherForm);
+                    }}>
+                      {editingMgdTeacher ? "Save" : "Create"}
+                    </Button>
+                    <Button variant="outline" onClick={() => { setShowAddMgdTeacher(false); setEditingMgdTeacher(null); setMgdTeacherErrors({}); }}>Cancel</Button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {mgdTeachersLoading ? (
+              <div style={{ textAlign: "center", padding: 32 }}><div className="sf-spinner" /></div>
+            ) : !(mgdTeacherList || []).length ? (
+              <div className="sf-empty"><div className="sf-empty-icon">👩‍🏫</div>No teachers added yet.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 16 }}>
+                {(mgdTeacherList || []).map((t: any) => {
+                  const assignments: any[] = (() => { try { return JSON.parse(t.assignments); } catch { return []; } })();
+                  return (
+                    <div key={t.id} className="sf-exam-item" style={{ cursor: "default", padding: "12px 14px", justifyContent: "space-between" }}>
+                      <div>
+                        <div className="sf-exam-name">{t.teacherName} ({t.employeeId})</div>
+                        <div className="sf-exam-meta">{t.email || ""}{t.phoneNumber ? ` · ${t.phoneNumber}` : ""}</div>
+                        {assignments.map((a: any, i: number) => (
+                          <div key={i} className="sf-exam-meta">Class {a.class}-{a.section}: {a.subjects?.join(", ")}</div>
+                        ))}
+                        {t.isClassTeacher === 1 && <div className="sf-exam-meta" style={{ color: "var(--green)" }}>Class Teacher: {t.classTeacherOf}</div>}
+                      </div>
+                      <div style={{ position: "relative" }}>
+                        <button onClick={() => setBulkDotMenu(bulkDotMenu === t.id + 20000 ? null : t.id + 20000)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", cursor: "pointer", fontSize: 16 }}>⋮</button>
+                        {bulkDotMenu === t.id + 20000 && (
+                          <div style={{ position: "absolute", right: 0, top: 32, background: "white", border: "1px solid var(--rule)", borderRadius: 10, boxShadow: "0 4px 20px rgba(0,0,0,0.12)", zIndex: 100, minWidth: 200 }}>
+                            <button onClick={() => { setBulkDotMenu(null); setEditingMgdTeacher(t); setShowAddMgdTeacher(false); setMgdTeacherForm({ teacherName: t.teacherName, employeeId: t.employeeId, email: t.email || "", phoneNumber: t.phoneNumber || "", assignments, isClassTeacher: t.isClassTeacher === 1, classTeacherOf: t.classTeacherOf || "" }); setMgdTeacherErrors({}); }} style={{ display: "block", width: "100%", padding: "10px 14px", textAlign: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}>✏️ Edit</button>
+                            {assignments.flatMap((a: any) => (a.subjects || []).map((sub: string) => (
+                              <button key={a.class + a.section + sub} onClick={() => { setBulkDotMenu(null); setDeleteConfirm({ type: "mgdTeacher", id: t.id, extra: { deleteSubjectOnly: true, className: a.class, section: a.section, subject: sub } }); setDeletePassword(""); setDeleteError(""); }} style={{ display: "block", width: "100%", padding: "10px 14px", textAlign: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#c05050" }}>🗑 Remove {sub} ({a.class}-{a.section})</button>
+                            )))}
+                            <button onClick={() => { setBulkDotMenu(null); setDeleteConfirm({ type: "mgdTeacher", id: t.id }); setDeletePassword(""); setDeleteError(""); }} style={{ display: "block", width: "100%", padding: "10px 14px", textAlign: "left", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#c05050" }}>🗑 Delete teacher entirely</button>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -894,7 +1051,40 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {/* ── DELETE CONFIRMATION MODAL ── */}
+        {deleteConfirm && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }}>
+            <div style={{ background: "white", borderRadius: 14, padding: "24px 28px", maxWidth: 380, width: "100%", boxShadow: "0 8px 40px rgba(0,0,0,0.2)" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)", marginBottom: 8 }}>Confirm Delete</div>
+              <div style={{ fontSize: 13, color: "var(--mid)", marginBottom: 16 }}>
+                {deleteConfirm.extra?.deleteSubject ? `Delete subject "${deleteConfirm.extra.deleteSubject}" from this class?` :
+                 deleteConfirm.extra?.deleteSubjectOnly ? `Remove subject assignment?` :
+                 "Delete this record permanently?"}
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ fontSize: 12, color: "var(--mid)", marginBottom: 4 }}>Enter Admin Password to Confirm</div>
+                <Input type="password" placeholder="Admin password" value={deletePassword} onChange={e => { setDeletePassword(e.target.value); setDeleteError(""); }} onKeyDown={e => { if (e.key === "Enter") handleDeleteConfirm(); }} />
+                {deleteError && <div style={{ fontSize: 11, color: "#d94f4f", marginTop: 4 }}>{deleteError}</div>}
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <Button variant="outline" onClick={() => { setDeleteConfirm(null); setDeletePassword(""); setDeleteError(""); }}>Cancel</Button>
+                <Button onClick={handleDeleteConfirm} style={{ background: "#d94f4f", color: "white" }}>Delete</Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Click outside to close dot menus */}
+        {bulkDotMenu !== null && <div style={{ position: "fixed", inset: 0, zIndex: 90 }} onClick={() => setBulkDotMenu(null)} />}
+
         {/* ── PROFILE TAB ── */}
+        {/* ── CUSTOM INSIGHTS TAB ── */}
+        {activeSection === "custom-insights" && (
+          <div className="sf-panel">
+            <CustomInsights role="admin" />
+          </div>
+        )}
+
         <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
 

@@ -4,10 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { BookOpen, Loader2 } from "lucide-react";
+import { BookOpen, Loader2, Phone, KeyRound } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { api } from "@shared/routes";
-import { insertTeacherSchema, insertStudentSchema } from "@shared/schema";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,37 +14,60 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
-  const [role, setRole] = useState<"teacher" | "student" | "admin">("student");
-  const { teacherLogin, studentLogin, adminLogin, teacherSignup, studentSignup } = useAuth();
+  // "student" | "teacher" | "school"  (school covers both admin + principal)
+  const [role, setRole] = useState<"teacher" | "student" | "school">("student");
+  const [otpStep, setOtpStep] = useState<"phone" | "verify">("phone");
+  const [otpPhone, setOtpPhone] = useState("");
+  const [otpIdentifier, setOtpIdentifier] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const { adminUserLogin, teacherSignup, studentSignup, requestOtp, verifyOtp } = useAuth();
 
   const isPending =
-    teacherLogin.isPending || studentLogin.isPending || adminLogin.isPending ||
-    teacherSignup.isPending || studentSignup.isPending;
+    adminUserLogin.isPending ||
+    teacherSignup.isPending || studentSignup.isPending ||
+    requestOtp.isPending || verifyOtp.isPending;
 
-  const adminLoginSchema = z.object({ employeeId: z.string().min(1, "Employee ID required"), password: z.string().min(1, "Password required") });
-  const teacherLoginSchema = z.object({ employeeId: z.string().min(1, "Employee ID required"), password: z.string().min(1, "Password required") });
-  const studentLoginSchema = z.object({ admissionNumber: z.string().min(1, "Admission Number required"), password: z.string().min(1, "Password required") });
-
-  const currentSchema =
-    role === "admin" ? adminLoginSchema :
-    mode === "login" ? (role === "teacher" ? teacherLoginSchema : studentLoginSchema) :
-    (role === "teacher" ? insertTeacherSchema : insertStudentSchema);
-
-  const form = useForm({
-    resolver: zodResolver(currentSchema),
-    defaultValues: { employeeId: "", admissionNumber: "", name: "", email: "", studentClass: "", section: "", password: "" }
+  const schoolLoginSchema = z.object({
+    employeeId: z.string().min(1, "Employee ID required"),
+    password: z.string().min(1, "Password required"),
   });
 
-  const onSubmit = (data: any) => {
-    if (role === "admin") {
-      adminLogin.mutate({ employeeId: data.employeeId, password: data.password });
-    } else if (mode === "login") {
-      if (role === "teacher") teacherLogin.mutate({ employeeId: data.employeeId, password: data.password });
-      else studentLogin.mutate({ admissionNumber: data.admissionNumber, password: data.password });
-    } else {
-      if (role === "teacher") teacherSignup.mutate(data);
-      else studentSignup.mutate(data);
-    }
+  const form = useForm({
+    resolver: zodResolver(schoolLoginSchema),
+    defaultValues: { employeeId: "", password: "" },
+  });
+
+  const handleOtpRequest = () => {
+    if (!otpIdentifier || !otpPhone) return;
+    requestOtp.mutate(
+      { phone: otpPhone, role: role as "teacher" | "student", identifier: otpIdentifier },
+      { onSuccess: () => setOtpStep("verify") }
+    );
+  };
+
+  const handleOtpVerify = () => {
+    if (!otpCode) return;
+    verifyOtp.mutate({
+      phone: otpPhone,
+      code: otpCode,
+      role: role as "teacher" | "student",
+      identifier: otpIdentifier,
+    });
+  };
+
+  // "School" tab — single login that server resolves to admin or principal
+  const onSubmit = (data: Record<string, unknown>) => {
+    const d = data as Record<string, string>;
+    adminUserLogin.mutate({ employeeId: d.employeeId, password: d.password });
+  };
+
+  const handleRoleChange = (v: string) => {
+    setRole(v as "teacher" | "student" | "school");
+    form.reset();
+    setOtpStep("phone");
+    setOtpCode("");
+    setOtpPhone("");
+    setOtpIdentifier("");
   };
 
   return (
@@ -55,7 +76,7 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
         <div className="h-8 w-8 bg-primary rounded-xl flex items-center justify-center shadow-md">
           <BookOpen className="h-4 w-4 text-primary-foreground" />
         </div>
-        <span className="font-display font-bold text-xl tracking-tight hidden sm:block">EduSync</span>
+        <span className="font-display font-bold text-xl tracking-tight hidden sm:block">ScholarFlow</span>
       </Link>
 
       <motion.div
@@ -70,133 +91,194 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
               {mode === "login" ? "Welcome back" : "Create an account"}
             </CardTitle>
             <CardDescription className="text-base mt-2">
-              {mode === "login" ? "Enter your credentials to access your dashboard" : "Join EduSync to manage your educational journey"}
+              {mode === "login" ? "Enter your credentials to access your dashboard" : "Join ScholarFlow to manage your educational journey"}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs value={role} onValueChange={(v) => { setRole(v as any); form.reset(); }} className="w-full mb-8">
+            {/* 3 tabs: Student · Teacher · School */}
+            <Tabs value={role} onValueChange={handleRoleChange} className="w-full mb-6">
               <TabsList className={`grid w-full p-1 bg-muted/50 rounded-xl ${mode === "login" ? "grid-cols-3" : "grid-cols-2"}`}>
                 <TabsTrigger value="student" className="rounded-lg font-medium data-[state=active]:shadow-sm">Student</TabsTrigger>
                 <TabsTrigger value="teacher" className="rounded-lg font-medium data-[state=active]:shadow-sm">Teacher</TabsTrigger>
                 {mode === "login" && (
-                  <TabsTrigger value="admin" className="rounded-lg font-medium data-[state=active]:shadow-sm">Admin</TabsTrigger>
+                  <TabsTrigger value="school" className="rounded-lg font-medium data-[state=active]:shadow-sm">School</TabsTrigger>
                 )}
               </TabsList>
             </Tabs>
 
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
-              <AnimatePresence mode="popLayout">
-                <motion.div
-                  key={`${mode}-${role}`}
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  transition={{ duration: 0.2 }}
-                  className="space-y-4"
-                >
-                  {/* ADMIN FIELDS */}
-                  {role === "admin" && (
-                    <>
-                      <div className="space-y-2">
-                        <Label htmlFor="employeeId">Admin Employee ID</Label>
-                        <Input id="employeeId" {...form.register("employeeId")} className="bg-background/50 h-11 rounded-xl" placeholder="A001" data-testid="input-admin-id" />
-                        {form.formState.errors.employeeId && <p className="text-xs text-destructive">{form.formState.errors.employeeId.message as string}</p>}
-                      </div>
-                      <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-300">
-                        Admin accounts are pre-provisioned by the system. Contact your administrator for access credentials.
-                      </div>
-                    </>
-                  )}
+            {/* OTP Login Flow for teacher / student */}
+            {role !== "school" && (
+              <div className="space-y-5">
+                {mode === "login" && (
+                  <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl">
+                    <Phone size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span className="text-xs text-blue-700 dark:text-blue-300">
+                      {role === "teacher" ? "Teachers" : "Students"} sign in via OTP verification only
+                    </span>
+                  </div>
+                )}
 
-                  {/* TEACHER FIELDS */}
-                  {role === "teacher" && (
+                <AnimatePresence mode="popLayout">
+                  <motion.div
+                    key={`otp-${role}-${otpStep}-${mode}`}
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.2 }}
+                    className="space-y-4"
+                  >
+                    {mode === "login" ? (
+                      otpStep === "phone" ? (
+                        <>
+                          <div className="space-y-2">
+                            <Label>{role === "teacher" ? "Employee ID" : "Admission Number"}</Label>
+                            <Input
+                              value={otpIdentifier}
+                              onChange={e => setOtpIdentifier(e.target.value)}
+                              className="bg-background/50 h-11 rounded-xl"
+                              placeholder={role === "teacher" ? "T001" : "S001"}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Phone Number</Label>
+                            <Input
+                              value={otpPhone}
+                              onChange={e => setOtpPhone(e.target.value)}
+                              className="bg-background/50 h-11 rounded-xl"
+                              placeholder="9876543210"
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-xl text-xs text-green-700 dark:text-green-300">
+                            OTP sent to {otpPhone}. Check your phone (or server console for demo).
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Enter OTP</Label>
+                            <Input
+                              value={otpCode}
+                              onChange={e => setOtpCode(e.target.value)}
+                              className="bg-background/50 h-11 rounded-xl text-center text-lg tracking-widest"
+                              placeholder="000000"
+                              maxLength={6}
+                            />
+                          </div>
+                          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setOtpStep("phone")}>
+                            Change phone number
+                          </button>
+                        </>
+                      )
+                    ) : (
+                      /* Signup */
+                      <>
+                        {role === "teacher" && (
+                          <>
+                            <div className="space-y-2"><Label htmlFor="employeeId">Employee ID</Label><Input id="employeeId" className="bg-background/50 h-11 rounded-xl" placeholder="T001" /></div>
+                            <div className="space-y-2"><Label htmlFor="name">Full Name</Label><Input id="name" className="bg-background/50 h-11 rounded-xl" placeholder="Ramesh Sharma" /></div>
+                            <div className="space-y-2"><Label htmlFor="email">Email Address</Label><Input id="email" type="email" className="bg-background/50 h-11 rounded-xl" placeholder="ramesh@school.edu" /></div>
+                            <div className="space-y-2"><Label htmlFor="phone">Phone Number</Label><Input id="phone" className="bg-background/50 h-11 rounded-xl" placeholder="9876543210" /></div>
+                          </>
+                        )}
+                        {role === "student" && (
+                          <>
+                            <div className="space-y-2"><Label htmlFor="admissionNumber">Admission Number</Label><Input id="admissionNumber" className="bg-background/50 h-11 rounded-xl" placeholder="S001" /></div>
+                            <div className="space-y-2"><Label htmlFor="name">Full Name</Label><Input id="name" className="bg-background/50 h-11 rounded-xl" placeholder="Aarav Sharma" /></div>
+                            <div className="space-y-2"><Label htmlFor="phone">Phone Number</Label><Input id="phone" className="bg-background/50 h-11 rounded-xl" placeholder="9876543210" /></div>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label>Class</Label>
+                                <select className="w-full h-11 rounded-xl border border-input bg-background/50 px-3 text-sm">
+                                  <option value="">Select class</option>
+                                  {["9", "10", "11", "12"].map(c => <option key={c} value={c}>Class {c}</option>)}
+                                </select>
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Section</Label>
+                                <select className="w-full h-11 rounded-xl border border-input bg-background/50 px-3 text-sm">
+                                  <option value="">Select section</option>
+                                  {["A", "B", "C", "D"].map(s => <option key={s} value={s}>Section {s}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </motion.div>
+                </AnimatePresence>
+
+                {mode === "login" && (
+                  <Button
+                    type="button"
+                    disabled={isPending}
+                    className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all"
+                    onClick={otpStep === "phone" ? handleOtpRequest : handleOtpVerify}
+                  >
+                    {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+                      otpStep === "phone" ? "Send OTP" : "Verify & Sign In"
+                    )}
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {/* School tab — single password login; server resolves to admin or principal */}
+            {role === "school" && (
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+                <AnimatePresence mode="popLayout">
+                  <motion.div
+                    key="school-login"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.2 }}
+                    className="space-y-4"
+                  >
+                    <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl">
+                      <KeyRound size={14} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span className="text-xs text-amber-700 dark:text-amber-300">
+                        School accounts use password authentication. You'll be redirected based on your role.
+                      </span>
+                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="employeeId">Employee ID</Label>
-                      <Input id="employeeId" {...form.register("employeeId")} className="bg-background/50 h-11 rounded-xl" placeholder="T001" data-testid="input-teacher-id" />
+                      <Input
+                        id="employeeId"
+                        {...form.register("employeeId")}
+                        className="bg-background/50 h-11 rounded-xl"
+                        placeholder="ADMIN001 or PRIN001"
+                        data-testid="input-admin-id"
+                      />
                       {form.formState.errors.employeeId && <p className="text-xs text-destructive">{form.formState.errors.employeeId.message as string}</p>}
                     </div>
-                  )}
-
-                  {mode === "signup" && role === "teacher" && (
-                    <>
-                      <div className="space-y-2">
-                        <Label htmlFor="name">Full Name</Label>
-                        <Input id="name" {...form.register("name")} className="bg-background/50 h-11 rounded-xl" placeholder="Ramesh Sharma" />
-                        {form.formState.errors.name && <p className="text-xs text-destructive">{form.formState.errors.name.message as string}</p>}
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="email">Email Address</Label>
-                        <Input id="email" type="email" {...form.register("email")} className="bg-background/50 h-11 rounded-xl" placeholder="ramesh@school.edu" />
-                        {form.formState.errors.email && <p className="text-xs text-destructive">{form.formState.errors.email.message as string}</p>}
-                      </div>
-                    </>
-                  )}
-
-                  {/* STUDENT FIELDS */}
-                  {role === "student" && (
-                    <div className="space-y-2">
-                      <Label htmlFor="admissionNumber">Admission Number</Label>
-                      <Input id="admissionNumber" {...form.register("admissionNumber")} className="bg-background/50 h-11 rounded-xl" placeholder="S001" data-testid="input-student-id" />
-                      {form.formState.errors.admissionNumber && <p className="text-xs text-destructive">{form.formState.errors.admissionNumber.message as string}</p>}
-                    </div>
-                  )}
-
-                  {mode === "signup" && role === "student" && (
-                    <>
-                      <div className="space-y-2">
-                        <Label htmlFor="studentName">Full Name</Label>
-                        <Input id="studentName" {...form.register("name")} className="bg-background/50 h-11 rounded-xl" placeholder="Aarav Sharma" />
-                        {form.formState.errors.name && <p className="text-xs text-destructive">{form.formState.errors.name.message as string}</p>}
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Class</Label>
-                          <select {...form.register("studentClass")} className="w-full h-11 rounded-xl border border-input bg-background/50 px-3 text-sm">
-                            <option value="">Select class</option>
-                            {["9", "10", "11", "12"].map(c => <option key={c} value={c}>Class {c}</option>)}
-                          </select>
-                          {form.formState.errors.studentClass && <p className="text-xs text-destructive">{form.formState.errors.studentClass.message as string}</p>}
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Section</Label>
-                          <select {...form.register("section")} className="w-full h-11 rounded-xl border border-input bg-background/50 px-3 text-sm">
-                            <option value="">Select section</option>
-                            {["A", "B", "C", "D"].map(s => <option key={s} value={s}>Section {s}</option>)}
-                          </select>
-                          {form.formState.errors.section && <p className="text-xs text-destructive">{form.formState.errors.section.message as string}</p>}
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  {/* COMMON PASSWORD FIELD */}
-                  {role !== "admin" && (
                     <div className="space-y-2 pb-2">
                       <Label htmlFor="password">Password</Label>
-                      <Input id="password" type="password" {...form.register("password")} className="bg-background/50 h-11 rounded-xl" placeholder="••••••••" data-testid="input-password" />
+                      <Input
+                        id="password"
+                        type="password"
+                        {...form.register("password")}
+                        className="bg-background/50 h-11 rounded-xl"
+                        placeholder="••••••••"
+                        data-testid="input-admin-password"
+                      />
                       {form.formState.errors.password && <p className="text-xs text-destructive">{form.formState.errors.password.message as string}</p>}
                     </div>
-                  )}
+                  </motion.div>
+                </AnimatePresence>
 
-                  {role === "admin" && (
-                    <div className="space-y-2 pb-2">
-                      <Label htmlFor="password">Password</Label>
-                      <Input id="password" type="password" {...form.register("password")} className="bg-background/50 h-11 rounded-xl" placeholder="••••••••" data-testid="input-admin-password" />
-                    </div>
-                  )}
+                <Button
+                  type="submit"
+                  disabled={isPending}
+                  className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all"
+                  data-testid="button-login"
+                >
+                  {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign In"}
+                </Button>
+              </form>
+            )}
 
-                </motion.div>
-              </AnimatePresence>
-
-              <Button type="submit" disabled={isPending} className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all" data-testid="button-login">
-                {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : (
-                  role === "admin" ? "Admin Sign In" :
-                  mode === "login" ? "Sign In" : "Create Account"
-                )}
-              </Button>
-            </form>
-
-            {role !== "admin" && (
+            {role !== "school" && (
               <div className="mt-8 text-center text-sm text-muted-foreground">
                 {mode === "login" ? (
                   <p>Don't have an account? <Link href="/signup" className="text-primary font-semibold hover:underline">Sign up</Link></p>
@@ -210,7 +292,8 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
 
         {mode === "login" && (
           <div className="mt-4 text-center text-xs text-muted-foreground space-y-1">
-            <p>Demo: Teacher <strong>T001</strong> · Student <strong>S001</strong> · Admin <strong>A001</strong> — password: <strong>123</strong></p>
+            <p>Demo: Teacher <strong>T001</strong> · Student <strong>S001</strong> — phone: <strong>any registered phone</strong></p>
+            <p>School → Admin: <strong>ADMIN001 / 123</strong> · Principal: <strong>PRIN001 / 123</strong></p>
           </div>
         )}
       </motion.div>

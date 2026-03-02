@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, X, Upload, MessageSquare, TrendingUp, Send, Star, Plus } from "lucide-react";
+import { Loader2, X, Upload, MessageSquare, TrendingUp, Send, Star, Plus, BookOpen as BookOpenIcon, BarChart2, ChevronDown, ChevronUp, Info } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +40,18 @@ import { fetchWithAuth } from "@/lib/fetcher";
 import ProfileDrawer from "@/components/ProfileDrawer";
 import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
+
+interface StructuredSubject {
+  name: string;
+  code: string;
+  className: string;
+  section: string;
+}
+
+interface ClassSection {
+  className: string;
+  section: string;
+}
 
 interface OcrResult {
   sheetId: number;
@@ -88,46 +100,337 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-function DropZone({ onFile, isProcessing }: { onFile: (dataUrl: string, filename: string) => void; isProcessing: boolean }) {
+type ScriptEntry = {
+  admissionNumber: string;
+  studentName: string;
+  pages: number;
+  status: "pending" | "evaluating" | "done" | "error";
+  scriptId?: number;
+  marks?: string;
+  maxMarks?: number;
+};
+
+function BulkUploadZone({
+  examId,
+  onUploadComplete,
+}: {
+  examId: number;
+  onUploadComplete: () => void;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadPhase, setUploadPhase] = useState<"" | "reading" | "ocr" | "done">("");
+  const [readDone, setReadDone] = useState(0);
+  const [grouped, setGrouped] = useState<ScriptEntry[]>([]);
+  const { toast } = useToast();
 
-  const processFile = async (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      alert("Only image files are supported (JPG, PNG, WEBP).");
-      return;
-    }
-    const dataUrl = await readFileAsDataUrl(file);
-    onFile(dataUrl, file.name);
+  const addFiles = (incoming: FileList | null) => {
+    if (!incoming) return;
+    const imgs = Array.from(incoming).filter(f => f.type.startsWith("image/"));
+    setFiles(prev => {
+      const names = new Set(prev.map(f => f.name));
+      return [...prev, ...imgs.filter(f => !names.has(f.name))];
+    });
   };
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
+  const removeFile = (idx: number) => setFiles(prev => prev.filter((_, i) => i !== idx));
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) processFile(file);
+    addFiles(e.dataTransfer.files);
   }, []);
 
+  const handleUpload = async () => {
+    if (!files.length) return;
+    setIsUploading(true);
+    setUploadPhase("reading");
+    setReadDone(0);
+    try {
+      const images: { imageBase64: string }[] = [];
+      for (let i = 0; i < files.length; i++) {
+        images.push({ imageBase64: await readFileAsDataUrl(files[i]) });
+        setReadDone(i + 1);
+      }
+      setUploadPhase("ocr");
+      const res = await fetchWithAuth(`/api/exams/${examId}/bulk-upload`, {
+        method: "POST",
+        body: JSON.stringify({ images }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.message || "Upload failed");
+
+      const scripts: any[] = result.mergedScripts || [];
+      const ocrDetails: any[] = result.ocrDetails || [];
+      const errors: string[] = result.errors || [];
+
+      // Log OCR details for debugging
+      if (ocrDetails.length > 0) {
+        console.log("[BULK] OCR details:", ocrDetails);
+      }
+
+      setGrouped(prev => {
+        const map = new Map(prev.map(e => [e.admissionNumber, e]));
+        for (const s of scripts) {
+          let pageCount = 1;
+          try {
+            const ids = typeof s.pageIds === "string" ? JSON.parse(s.pageIds) : s.pageIds;
+            pageCount = Array.isArray(ids) ? ids.length : 1;
+          } catch {}
+          map.set(s.admissionNumber, {
+            admissionNumber: s.admissionNumber,
+            studentName: s.studentName,
+            pages: pageCount,
+            status: "pending",
+            scriptId: s.id,
+          });
+        }
+        return Array.from(map.values());
+      });
+      setFiles([]);
+      setUploadPhase("done");
+
+      if (scripts.length === 0 && ocrDetails.length > 0) {
+        // OCR ran but grouping produced nothing — show diagnostic
+        const names = ocrDetails.map((d: any) => `${d.studentName} (adm: ${d.admissionNumber})`).join(", ");
+        toast({
+          title: "Pages read but not grouped",
+          description: `AI read ${ocrDetails.length} page(s): ${names}. ${errors.length > 0 ? errors.join("; ") : "Check that each page clearly shows the student's admission number."}`,
+          variant: "destructive",
+        });
+      } else if (scripts.length === 0) {
+        toast({
+          title: "No scripts grouped",
+          description: errors.length > 0 ? errors.join("; ") : "AI could not read student information from the pages. Ensure each page shows Name and Admission Number clearly.",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Upload complete", description: `${scripts.length} student script${scripts.length !== 1 ? "s" : ""} grouped — click Evaluate to grade.` });
+      }
+      onUploadComplete();
+    } catch (err: any) {
+      setUploadPhase("");
+      toast({ title: "Upload failed", description: err.message || "Something went wrong", variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const evaluateScript = async (idx: number) => {
+    const g = grouped[idx];
+    if (!g.scriptId) return;
+    setGrouped(prev => prev.map((s, i) => i === idx ? { ...s, status: "evaluating" } : s));
+    try {
+      const res = await fetchWithAuth(`/api/merged-scripts/${g.scriptId}/evaluate`, { method: "POST" });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.message || "Evaluation failed");
+      setGrouped(prev => prev.map((s, i) => i === idx
+        ? { ...s, status: "done", marks: String(result.totalMarks ?? "?"), maxMarks: result.maxMarks }
+        : s));
+      onUploadComplete();
+      toast({ title: "Evaluated", description: `${g.studentName} scored ${result.totalMarks ?? "?"} marks.` });
+    } catch (err: any) {
+      setGrouped(prev => prev.map((s, i) => i === idx ? { ...s, status: "error" } : s));
+      toast({ title: "Evaluation failed", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const evaluateAll = async () => {
+    const pending = grouped.map((g, i) => ({ g, i })).filter(({ g }) => g.status === "pending");
+    for (const { i } of pending) {
+      await evaluateScript(i);
+    }
+  };
+
+  const pendingCount = grouped.filter(g => g.status === "pending").length;
+  const doneCount = grouped.filter(g => g.status === "done").length;
+
   return (
-    <div
-      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-      onDragLeave={() => setIsDragging(false)}
-      onDrop={handleDrop}
-      onClick={() => !isProcessing && inputRef.current?.click()}
-      className={`relative border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all min-h-[180px] ${isDragging ? "border-primary bg-primary/5" : "border-border/50 bg-muted/20 hover:border-primary/40"} ${isProcessing ? "pointer-events-none opacity-60" : ""}`}
-    >
-      <input ref={inputRef} type="file" accept="image/*" className="hidden"
-        onChange={async (e) => { const f = e.target.files?.[0]; if (f) { await processFile(f); e.target.value = ""; } }} />
-      {isProcessing ? (
-        <><Loader2 className="h-8 w-8 text-primary animate-spin" /><p className="text-sm font-semibold text-muted-foreground">Processing with AI OCR…</p></>
-      ) : (
-        <>
-          <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center"><Upload className="h-6 w-6 text-primary" /></div>
-          <div className="text-center px-4">
-            <p className="font-semibold text-sm">Drop the answer sheet here</p>
-            <p className="text-xs text-muted-foreground mt-1">JPG, PNG, WEBP only</p>
+    <div>
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={handleDrop}
+        onClick={() => !isUploading && inputRef.current?.click()}
+        style={{
+          border: `2px dashed ${isDragging ? "var(--lavender)" : "var(--rule)"}`,
+          borderRadius: 16,
+          padding: "28px 20px",
+          textAlign: "center",
+          cursor: isUploading ? "default" : "pointer",
+          background: isDragging ? "var(--lav-bg)" : "var(--cream)",
+          transition: "all 0.15s",
+        }}
+      >
+        <input ref={inputRef} type="file" accept="image/*" multiple className="hidden"
+          onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
+        <div style={{ fontSize: 32, marginBottom: 8 }}>📸</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+          Drop all answer sheet pages here
+        </div>
+        <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 6, lineHeight: 1.5, maxWidth: 360, margin: "6px auto 0" }}>
+          Upload multiple images at once. Each page must clearly show the student's <strong>name</strong>, <strong>admission number</strong>, and <strong>page number</strong> — AI will read and group them per student automatically.
+        </div>
+        <div style={{ marginTop: 12, display: "flex", gap: 6, justifyContent: "center" }}>
+          {["JPG", "PNG", "WEBP"].map(fmt => (
+            <span key={fmt} style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: "var(--lav-bg)", color: "var(--ink2)" }}>{fmt}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* Selected file list */}
+      {files.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              {files.length} page{files.length !== 1 ? "s" : ""} selected
+            </span>
+            <button onClick={() => setFiles([])} style={{ fontSize: 11, color: "#d94f4f", background: "none", border: "none", cursor: "pointer" }}>
+              Remove all
+            </button>
           </div>
-        </>
+
+          {/* Scrollable file list */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 180, overflowY: "auto", marginBottom: 12, padding: "2px 0" }}>
+            {files.map((f, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, background: "var(--card)", border: "1px solid var(--rule)" }}>
+                <span style={{ fontSize: 14, flexShrink: 0 }}>🖼</span>
+                <span style={{ flex: 1, fontSize: 12, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.name}</span>
+                <span style={{ fontSize: 11, color: "var(--mid)", flexShrink: 0 }}>{f.size > 1024 * 1024 ? `${(f.size / 1024 / 1024).toFixed(1)}MB` : `${(f.size / 1024).toFixed(0)}KB`}</span>
+                <button
+                  onClick={e => { e.stopPropagation(); removeFile(i); }}
+                  style={{ width: 20, height: 20, borderRadius: 4, border: "none", background: "#fff0f0", color: "#b03030", cursor: "pointer", fontSize: 12, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+                >×</button>
+              </div>
+            ))}
+          </div>
+
+          {/* Upload progress bar */}
+          {isUploading && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--mid)", marginBottom: 5 }}>
+                <span>
+                  {uploadPhase === "reading" ? `Reading files… (${readDone}/${files.length})` : "AI OCR — reading handwriting and grouping by student…"}
+                </span>
+                {uploadPhase === "reading" && <span>{Math.round((readDone / files.length) * 100)}%</span>}
+              </div>
+              <div style={{ height: 6, borderRadius: 4, background: "var(--cream2)", overflow: "hidden" }}>
+                <div style={{
+                  height: "100%", borderRadius: 4,
+                  background: uploadPhase === "ocr" ? "var(--lavender)" : "var(--ink2)",
+                  width: uploadPhase === "ocr" ? "100%" : `${files.length > 0 ? (readDone / files.length) * 100 : 0}%`,
+                  transition: "width 0.3s",
+                  animation: uploadPhase === "ocr" ? "pulse 1.5s ease-in-out infinite" : "none",
+                }} />
+              </div>
+            </div>
+          )}
+
+          {/* Upload button */}
+          <button
+            onClick={handleUpload}
+            disabled={isUploading}
+            style={{
+              width: "100%", padding: "11px 0", borderRadius: 10, border: "none",
+              background: isUploading ? "var(--cream2)" : "var(--ink)",
+              color: isUploading ? "var(--mid)" : "white",
+              fontSize: 13, fontWeight: 700, cursor: isUploading ? "default" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            }}
+          >
+            {isUploading
+              ? <><Loader2 className="h-4 w-4 animate-spin" /> {uploadPhase === "reading" ? "Reading files…" : "AI is reading handwriting & grouping…"}</>
+              : <><Upload className="h-4 w-4" /> Process {files.length} page{files.length !== 1 ? "s" : ""} with AI OCR</>
+            }
+          </button>
+        </div>
+      )}
+
+      {/* Grouped scripts panel */}
+      {grouped.length > 0 && (
+        <div style={{ marginTop: 20, borderTop: "1px solid var(--rule)", paddingTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>
+                {grouped.length} student script{grouped.length !== 1 ? "s" : ""} grouped
+              </div>
+              <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>
+                {doneCount}/{grouped.length} evaluated
+              </div>
+            </div>
+            {pendingCount > 0 && (
+              <button
+                onClick={evaluateAll}
+                style={{
+                  fontSize: 12, fontWeight: 700, padding: "6px 14px", borderRadius: 8,
+                  background: "var(--ink)", color: "white", border: "none", cursor: "pointer",
+                  display: "flex", alignItems: "center", gap: 6,
+                }}
+              >
+                <Star className="h-3 w-3" /> Evaluate All ({pendingCount})
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {grouped.map((g, i) => {
+              const pct = g.marks && g.maxMarks ? Math.round((parseInt(g.marks) / g.maxMarks) * 100) : null;
+              const barColor = pct !== null ? (pct >= 75 ? "#2a9d6e" : pct >= 50 ? "#d08a2b" : "#d94f4f") : "var(--lavender)";
+              const statusBg = g.status === "done" ? "#f0faf4" : g.status === "error" ? "#fff0f0" : g.status === "evaluating" ? "#fff8ed" : "var(--card)";
+              const statusBorder = g.status === "done" ? "#2a9d6e30" : g.status === "error" ? "#d94f4f30" : "var(--rule)";
+
+              return (
+                <div key={g.admissionNumber} style={{ borderRadius: 12, border: `1.5px solid ${statusBorder}`, background: statusBg, overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px" }}>
+                    {/* Avatar */}
+                    <div style={{ width: 38, height: 38, borderRadius: "50%", background: "var(--lav-bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: "var(--ink2)", flexShrink: 0 }}>
+                      {g.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() || "??"}
+                    </div>
+                    {/* Info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.studentName}</div>
+                      <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>
+                        {g.admissionNumber} &nbsp;·&nbsp; {g.pages} page{g.pages !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                    {/* Status / score */}
+                    {g.status === "done" && (
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: barColor }}>{g.marks}{g.maxMarks ? `/${g.maxMarks}` : ""}</div>
+                        {pct !== null && <div style={{ fontSize: 10, color: "var(--mid)" }}>{pct}%</div>}
+                      </div>
+                    )}
+                    {g.status === "evaluating" && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#d08a2b", flexShrink: 0 }}>
+                        <Loader2 className="h-3 w-3 animate-spin" /> Evaluating…
+                      </div>
+                    )}
+                    {g.status === "error" && (
+                      <div style={{ fontSize: 12, color: "#d94f4f", flexShrink: 0 }}>✗ Error</div>
+                    )}
+                    {g.status === "pending" && (
+                      <button
+                        onClick={() => evaluateScript(i)}
+                        style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 8, background: "var(--ink)", color: "white", border: "none", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", gap: 4 }}
+                      >
+                        <Star className="h-3 w-3" /> Evaluate
+                      </button>
+                    )}
+                  </div>
+                  {/* Score bar for done */}
+                  {g.status === "done" && pct !== null && (
+                    <div style={{ height: 3, background: "var(--cream2)" }}>
+                      <div style={{ height: "100%", width: `${pct}%`, background: barColor, transition: "width 0.5s" }} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -157,9 +460,11 @@ export default function TeacherDashboard() {
 
   const [activeSection, setActiveSection] = useState("overview");
   const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
+  const [hoveredExamId, setHoveredExamId] = useState<number | null>(null);
+  const [showPaperModal, setShowPaperModal] = useState<any>(null);
+  const [eduQualityOpen, setEduQualityOpen] = useState<number | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [processingId, setProcessingId] = useState<number | null>(null);
   const [evaluatingId, setEvaluatingId] = useState<number | null>(null);
   const [chatMessage, setChatMessage] = useState("");
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -170,12 +475,6 @@ export default function TeacherDashboard() {
   const [subjectFilter, setSubjectFilter] = useState("");
   const [showAvaMenu, setShowAvaMenu] = useState(false);
   const [expandedEWStudent, setExpandedEWStudent] = useState<string | null>(null);
-  const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false);
-  const [bulkFiles, setBulkFiles] = useState<File[]>([]);
-  const [isBulkUploading, setIsBulkUploading] = useState(false);
-  const [bulkResult, setBulkResult] = useState<any>(null);
-  const [bulkEvaluatingId, setBulkEvaluatingId] = useState<number | null>(null);
-  const bulkInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const avaRef = useRef<HTMLDivElement>(null);
   const [isHwDialogOpen, setIsHwDialogOpen] = useState(false);
@@ -188,6 +487,19 @@ export default function TeacherDashboard() {
   const [isCreatingHw, setIsCreatingHw] = useState(false);
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<"subject" | "class">("subject");
+  // Exam create form enhancements
+  const [examSection, setExamSection] = useState("");
+  const [examSubjectCode, setExamSubjectCode] = useState("");
+  const [useNcert, setUseNcert] = useState(false);
+  const [questionImages, setQuestionImages] = useState<string[]>([]);
+  const [modelAnswerImages, setModelAnswerImages] = useState<string[]>([]);
+  const [isUploadingQImg, setIsUploadingQImg] = useState(false);
+  const [isUploadingAImg, setIsUploadingAImg] = useState(false);
+  const questionImgRef = useRef<HTMLInputElement>(null);
+  const modelAnswerImgRef = useRef<HTMLInputElement>(null);
+  // Results view
+  const [selectedResultExamId, setSelectedResultExamId] = useState<number | null>(null);
+  const [selectedStudentResult, setSelectedStudentResult] = useState<any | null>(null);
 
   const { data: examsList, isLoading: isLoadingExams } = useQuery<Exam[]>({
     queryKey: [api.exams.list.path],
@@ -224,9 +536,22 @@ export default function TeacherDashboard() {
     enabled: activeSection === "homework",
   });
 
-  const { data: teacherOptions } = useQuery<{ subjects: string[]; classes: string[]; sections: string[] }>({
+  const { data: teacherOptions } = useQuery<{
+    subjects: string[];
+    structuredSubjects: StructuredSubject[];
+    classes: string[];
+    classSections: ClassSection[];
+    sections: string[];
+  }>({
     queryKey: ["/api/teacher/options"],
     queryFn: () => fetchWithAuth("/api/teacher/options").then(r => r.json()),
+  });
+
+  // Results query for selected exam
+  const { data: examResults, isLoading: isLoadingResults } = useQuery<any>({
+    queryKey: ["/api/exams", selectedResultExamId, "results"],
+    queryFn: () => fetchWithAuth(`/api/exams/${selectedResultExamId}/results`).then(r => r.json()),
+    enabled: !!selectedResultExamId,
   });
 
   const createHomework = useMutation({
@@ -271,6 +596,19 @@ export default function TeacherDashboard() {
     enabled: activeSection === "overview",
   });
 
+  const { data: eduQuality, isLoading: isLoadingEduQuality } = useQuery<any[]>({
+    queryKey: ["/api/teacher/education-quality"],
+    queryFn: () => fetchWithAuth("/api/teacher/education-quality").then(r => r.json()),
+    enabled: activeSection === "education-quality",
+  });
+
+  const { data: examStats } = useQuery<any>({
+    queryKey: ["/api/exams", hoveredExamId, "stats"],
+    queryFn: () => fetchWithAuth(`/api/exams/${hoveredExamId}/stats`).then(r => r.json()),
+    enabled: !!hoveredExamId,
+    staleTime: 60000,
+  });
+
   const { data: earlyWarnings, isLoading: isLoadingEW } = useQuery<any[]>({
     queryKey: ["/api/teacher/early-warning"],
     queryFn: () => fetchWithAuth("/api/teacher/early-warning").then(r => r.json()),
@@ -307,22 +645,6 @@ export default function TeacherDashboard() {
     onError: () => toast({ title: "Error", description: "Failed to send message.", variant: "destructive" }),
   });
 
-  const handleAnswerSheetUpload = async (dataUrl: string, _filename: string) => {
-    if (!selectedExamId) return;
-    const examId = parseInt(selectedExamId);
-    setProcessingId(examId);
-    try {
-      const res = await fetchWithAuth(buildUrl(api.exams.processAnswerSheet.path, { id: examId }), { method: "POST", body: JSON.stringify({ imageBase64: dataUrl }) });
-      const result = await res.json();
-      if (!res.ok) { toast({ title: "Upload Failed", description: result.message || "Failed to process answer sheet", variant: "destructive" }); return; }
-      setOcrResult({ ...result, sheetId: result.id, examId });
-      setIsOcrDialogOpen(true);
-      refetchSheets();
-      toast({ title: "OCR Complete", description: `Mapped to: ${result.studentName}` });
-    } catch { toast({ title: "Error", description: "Failed to process answer sheet", variant: "destructive" }); }
-    finally { setProcessingId(null); }
-  };
-
   const handleEvaluate = async (sheetId: number) => {
     setEvaluatingId(sheetId);
     try {
@@ -333,35 +655,6 @@ export default function TeacherDashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/analytics"] });
     } catch { toast({ title: "Error", description: "Failed to evaluate", variant: "destructive" }); }
     finally { setEvaluatingId(null); }
-  };
-
-  const handleBulkUpload = async () => {
-    if (!selectedExamId || bulkFiles.length === 0) return;
-    setIsBulkUploading(true); setBulkResult(null);
-    try {
-      const images = await Promise.all(bulkFiles.map(file => new Promise<{ imageBase64: string }>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve({ imageBase64: reader.result as string });
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      })));
-      const res = await fetchWithAuth(`/api/exams/${selectedExamId}/bulk-upload`, { method: "POST", body: JSON.stringify({ images }) });
-      const result = await res.json();
-      setBulkResult(result); refetchMergedScripts();
-      toast({ title: "Bulk upload complete", description: `${result.pagesProcessed} pages processed.` });
-    } catch (err: any) { toast({ title: "Upload failed", description: err?.message || "Something went wrong", variant: "destructive" }); }
-    finally { setIsBulkUploading(false); setBulkFiles([]); }
-  };
-
-  const handleBulkEvaluate = async (scriptId: number) => {
-    setBulkEvaluatingId(scriptId);
-    try {
-      await fetchWithAuth(`/api/merged-scripts/${scriptId}/evaluate`, { method: "POST" });
-      refetchMergedScripts(); refetchSheets();
-      queryClient.invalidateQueries({ queryKey: ["/api/analytics"] });
-      toast({ title: "Evaluation complete" });
-    } catch { toast({ title: "Evaluation failed", variant: "destructive" }); }
-    finally { setBulkEvaluatingId(null); }
   };
 
   const form = useForm({
@@ -390,10 +683,37 @@ export default function TeacherDashboard() {
 
   const onSubmit = async (values: any) => {
     try {
-      await apiRequest("POST", api.exams.create.path, { ...values, examName: generatedExamName, questionText: values.questionText || null, modelAnswerText: values.modelAnswerText || null, markingSchemeText: values.markingSchemeText || null });
+      await apiRequest("POST", api.exams.create.path, {
+        ...values,
+        examName: generatedExamName,
+        questionText: values.questionText || null,
+        modelAnswerText: values.modelAnswerText || null,
+        markingSchemeText: values.markingSchemeText || null,
+        questionImages: questionImages.length > 0 ? JSON.stringify(questionImages) : null,
+        modelAnswerImages: modelAnswerImages.length > 0 ? JSON.stringify(modelAnswerImages) : null,
+        section: examSection || null,
+        subjectCode: examSubjectCode || null,
+        useNcert: useNcert ? 1 : 0,
+      });
       queryClient.invalidateQueries({ queryKey: [api.exams.list.path] });
-      toast({ title: "Exam created" }); setIsDialogOpen(false); form.reset();
+      toast({ title: "Exam created" });
+      setIsDialogOpen(false);
+      form.reset();
+      setExamSection(""); setExamSubjectCode(""); setUseNcert(false);
+      setQuestionImages([]); setModelAnswerImages([]);
     } catch { toast({ title: "Error", description: "Failed to create exam", variant: "destructive" }); }
+  };
+
+  // Handle image upload for questions/model answers
+  const handleImageUpload = async (files: FileList | null, target: "question" | "answer") => {
+    if (!files) return;
+    const setter = target === "question" ? setQuestionImages : setModelAnswerImages;
+    const setLoading = target === "question" ? setIsUploadingQImg : setIsUploadingAImg;
+    setLoading(true);
+    try {
+      const base64s = await Promise.all(Array.from(files).map(f => readFileAsDataUrl(f)));
+      setter(prev => [...prev, ...base64s]);
+    } finally { setLoading(false); }
   };
 
   const userName = (user as any)?.name || "Teacher";
@@ -506,21 +826,22 @@ export default function TeacherDashboard() {
             </svg>
             Analytics
           </button>
-          <button className="sf-nav-tab" onClick={() => setIsProfilePanelOpen(true)}>
+          <button className={`sf-nav-tab${activeSection === "results" ? " on" : ""}`} onClick={() => setActiveSection("results")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
             </svg>
-            Profile
+            Results
           </button>
+          <button className={`sf-nav-tab${activeSection === "education-quality" ? " on" : ""}`} onClick={() => setActiveSection("education-quality")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+            Quality of Education
+          </button>
+
         </div>
 
         <div className="sf-nav-right">
-          <div className="sf-search">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: "var(--dim)", flexShrink: 0 }}>
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-            </svg>
-            <input placeholder="Search…" />
-          </div>
           <div className="sf-ic-btn">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -544,6 +865,7 @@ export default function TeacherDashboard() {
             {initials}
             {showAvaMenu && (
               <div className="sf-ava-menu">
+                <button className="sf-ava-menu-item" onClick={() => { setIsProfilePanelOpen(true); setShowAvaMenu(false); }}>My Profile</button>
                 <button className="sf-ava-menu-item danger" onClick={() => logout()}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                   Sign Out
@@ -595,43 +917,7 @@ export default function TeacherDashboard() {
           </div>
         </div>
 
-        {/* SECTION TABS */}
-        <div className="sf-section-tabs">
-          <button className={`sf-stab${activeSection === "overview" ? " on" : ""}`} onClick={() => setActiveSection("overview")}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
-              <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
-            </svg>
-            Overview
-          </button>
-          <button className={`sf-stab${activeSection === "exams" ? " on" : ""}`} onClick={() => setActiveSection("exams")}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-            </svg>
-            Exams
-          </button>
-          <button className={`sf-stab${activeSection === "homework" ? " on" : ""}`} onClick={() => setActiveSection("homework")}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-            </svg>
-            Homework
-          </button>
-          <button className={`sf-stab${activeSection === "sheets" ? " on" : ""}`} onClick={() => setActiveSection("sheets")}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/>
-            </svg>
-            Answer Sheets
-          </button>
-          <button className="sf-stab" onClick={() => setIsProfilePanelOpen(true)}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-            </svg>
-            Profile
-          </button>
-        </div>
+
 
         {/* ── OVERVIEW TAB ── */}
         {activeSection === "overview" && (
@@ -838,7 +1124,14 @@ export default function TeacherDashboard() {
                       <div key={exam.id} className="sf-exam-item" onClick={() => { setSelectedExamId(String(exam.id)); setActiveSection("sheets"); }}>
                         <div className="sf-exam-subj" style={{ background: "var(--lav-bg)" }}>{subjectEmoji}</div>
                         <div className="sf-exam-info">
-                          <div className="sf-exam-name">{exam.examName || `${exam.subject} Exam`}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <div className="sf-exam-name">{exam.examName || `${exam.subject} Exam`}</div>
+                            {exam.category && (() => {
+                              const clr: Record<string, string> = { unit_test: "#6c47d8", class_test: "#2563c0", homework: "#1a7a54", half_yearly: "#92400e", annual: "#b91c1c", quiz: "#1e40af", assignment: "#7e22ce" };
+                              const lbl: Record<string, string> = { unit_test: "Unit Test", class_test: "Class Test", homework: "Homework", half_yearly: "Half Yearly", annual: "Annual Exam", quiz: "Quiz", assignment: "Assignment" };
+                              return <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 10, background: `${clr[exam.category] || "#6c47d8"}18`, color: clr[exam.category] || "#6c47d8", fontWeight: 700, border: `1px solid ${clr[exam.category] || "#6c47d8"}30` }}>{lbl[exam.category] || exam.category}</span>;
+                            })()}
+                          </div>
                           <div className="sf-exam-meta">{new Date(exam.createdAt || Date.now()).toDateString()} · {exam.totalMarks} marks · {exam.sheetsEvaluated || 0} evaluated</div>
                         </div>
                         <span className={`sf-exam-status ${evaluated ? "sf-es-done" : "sf-es-draft"}`}>{evaluated ? "Evaluated" : "Pending"}</span>
@@ -1259,7 +1552,14 @@ export default function TeacherDashboard() {
                       >
                         <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", flexShrink: 0 }}>{subjectIcon}</div>
                         <div className="sf-exam-info" style={{ flex: 1 }}>
-                          <div className="sf-exam-name">{exam.examName || `${exam.subject} Exam`}</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span className="sf-exam-name">{exam.examName || `${exam.subject} Exam`}</span>
+                            {exam.category && (() => {
+                              const clr: Record<string, string> = { unit_test: "#6c47d8", class_test: "#2563c0", homework: "#1a7a54", half_yearly: "#92400e", annual: "#b91c1c", quiz: "#1e40af", assignment: "#7e22ce" };
+                              const lbl: Record<string, string> = { unit_test: "Unit Test", class_test: "Class Test", homework: "Homework", half_yearly: "Half Yearly", annual: "Annual Exam", quiz: "Quiz", assignment: "Assignment" };
+                              return <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 10, background: `${clr[exam.category] || "#6c47d8"}18`, color: clr[exam.category] || "#6c47d8", fontWeight: 700 }}>{lbl[exam.category] || exam.category}</span>;
+                            })()}
+                          </div>
                           <div className="sf-exam-meta">
                             Class {exam.className} · {exam.totalMarks} marks · {new Date(exam.createdAt || Date.now()).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {exam.sheetsEvaluated || 0} evaluated
                           </div>
@@ -1279,66 +1579,25 @@ export default function TeacherDashboard() {
                             </div>
                           </div>
 
-                          {/* Upload area */}
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Upload Answer Sheets</div>
-                          <DropZone onFile={handleAnswerSheetUpload} isProcessing={processingId !== null} />
+                          {/* Bulk Upload Zone */}
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, marginTop: 16 }}>Upload Answer Sheets</div>
+                          <BulkUploadZone
+                            examId={exam.id}
+                            onUploadComplete={() => { refetchSheets(); refetchMergedScripts(); queryClient.invalidateQueries({ queryKey: ["/api/analytics"] }); }}
+                          />
 
-                          {/* Bulk upload */}
-                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 10 }}>
-                            <Button variant="outline" size="sm" className="rounded-xl gap-2" onClick={() => bulkInputRef.current?.click()} data-testid={`button-bulk-upload-${exam.id}`}>
-                              <Upload className="h-3 w-3" /> Add bulk images
-                            </Button>
-                            <input ref={bulkInputRef} type="file" accept="image/*" multiple className="hidden"
-                              onChange={e => { const files = Array.from(e.target.files || []); setBulkFiles(prev => [...prev, ...files]); e.target.value = ""; }} />
-                            {bulkFiles.length > 0 && (
-                              <Button size="sm" className="rounded-xl gap-2" disabled={isBulkUploading} onClick={handleBulkUpload} data-testid={`button-bulk-submit-${exam.id}`}>
-                                {isBulkUploading ? <><Loader2 className="h-3 w-3 animate-spin" /> Processing…</> : `Upload ${bulkFiles.length} images`}
-                              </Button>
-                            )}
-                          </div>
-                          {bulkFiles.length > 0 && <p style={{ fontSize: 12, color: "var(--mid)", marginTop: 6 }}>{bulkFiles.length} file(s): {bulkFiles.map(f => f.name).join(", ")}</p>}
-
-                          {/* Answer sheets for this exam */}
-                          {isThisExam && answerSheets && answerSheets.length > 0 && (
+                          {/* Evaluated sheets (from single upload) */}
+                          {isThisExam && answerSheets && answerSheets.filter((s: any) => s.status === "evaluated").length > 0 && (
                             <div style={{ marginTop: 16 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Submitted Sheets</div>
-                              {answerSheets.map((sheet: any) => (
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Evaluated Results</div>
+                              {answerSheets.filter((s: any) => s.status === "evaluated").map((sheet: any) => (
                                 <div key={sheet.id} className="sf-exam-item" style={{ cursor: "default" }}>
-                                  <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", fontSize: 12 }}>{getInitials(sheet.studentName || sheet.admissionNumber)}</div>
+                                  <div className="sf-exam-subj" style={{ background: "var(--green-bg)", fontSize: 12 }}>{getInitials(sheet.studentName || sheet.admissionNumber)}</div>
                                   <div className="sf-exam-info">
                                     <div className="sf-exam-name">{sheet.studentName || sheet.admissionNumber}</div>
-                                    <div className="sf-exam-meta">{sheet.admissionNumber} · {sheet.status}</div>
+                                    <div className="sf-exam-meta">{sheet.admissionNumber}</div>
                                   </div>
-                                  {sheet.status === "evaluated" ? (
-                                    <span className="sf-exam-status sf-es-done">{sheet.totalMarks}/{sheet.maxMarks}</span>
-                                  ) : (
-                                    <Button size="sm" className="rounded-xl gap-1" disabled={evaluatingId === sheet.id} onClick={() => handleEvaluate(sheet.id)} data-testid={`button-evaluate-${sheet.id}`}>
-                                      {evaluatingId === sheet.id ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <><Star className="h-3 w-3" /> Evaluate</>}
-                                    </Button>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Merged bulk scripts */}
-                          {isThisExam && mergedScripts && mergedScripts.length > 0 && (
-                            <div style={{ marginTop: 14 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Bulk Scripts</div>
-                              {mergedScripts.map((ms: any) => (
-                                <div key={ms.id} className="sf-exam-item" style={{ cursor: "default" }}>
-                                  <div className="sf-exam-subj" style={{ background: "var(--blue-bg)", fontSize: 12 }}>{getInitials(ms.studentName || ms.admissionNumber)}</div>
-                                  <div className="sf-exam-info">
-                                    <div className="sf-exam-name">{ms.studentName || ms.admissionNumber}</div>
-                                    <div className="sf-exam-meta">{ms.totalPages} pages · {ms.status}</div>
-                                  </div>
-                                  {ms.status === "evaluated" ? (
-                                    <span className="sf-exam-status sf-es-done">{ms.totalMarks}/{ms.maxMarks}</span>
-                                  ) : (
-                                    <Button size="sm" className="rounded-xl gap-1" disabled={bulkEvaluatingId === ms.id} onClick={() => handleBulkEvaluate(ms.id)} data-testid={`button-bulk-evaluate-${ms.id}`}>
-                                      {bulkEvaluatingId === ms.id ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <><Star className="h-3 w-3" /> Evaluate</>}
-                                    </Button>
-                                  )}
+                                  <span className="sf-exam-status sf-es-done">{sheet.evaluation?.totalMarks ?? sheet.totalMarks ?? "?"}/{exam.totalMarks}</span>
                                 </div>
                               ))}
                             </div>
@@ -1355,105 +1614,836 @@ export default function TeacherDashboard() {
           </div>
         )}
 
-        {/* ── SHEETS TAB (Analytics detail) ── */}
+        {/* ── SHEETS TAB (standalone upload view) ── */}
         {activeSection === "sheets" && (
           <div className="sf-panel">
-            <div className="sf-panel-title">Answer Sheets & Evaluation</div>
-            <div className="sf-panel-sub">Upload and evaluate individual answer sheets per exam</div>
-            <select className="sf-fsel" style={{ width: "100%", marginBottom: 16 }} value={selectedExamId} onChange={e => setSelectedExamId(e.target.value)}>
+            <div className="sf-panel-title">Upload Answer Sheets</div>
+            <div className="sf-panel-sub">Select an exam then upload all answer sheet pages at once — AI groups by student automatically</div>
+            <select className="sf-fsel" style={{ width: "100%", marginBottom: 20 }} value={selectedExamId} onChange={e => setSelectedExamId(e.target.value)}>
               <option value="">— Select an exam —</option>
-              {(examsList || []).map((e: any) => <option key={e.id} value={e.id}>{e.examName || `${e.subject} Exam`}</option>)}
+              {(examsList || []).map((e: any) => <option key={e.id} value={e.id}>{e.examName || `${e.subject} Exam`} — Class {e.className}</option>)}
             </select>
-            {selectedExamId && (
-              <>
-                <DropZone onFile={handleAnswerSheetUpload} isProcessing={processingId !== null} />
-                {answerSheets && answerSheets.length > 0 && (
-                  <div style={{ marginTop: 16 }}>
-                    {answerSheets.map((sheet: any) => (
-                      <div key={sheet.id} className="sf-exam-item" style={{ cursor: "default" }}>
-                        <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", fontSize: 12 }}>{getInitials(sheet.studentName || "?")}</div>
-                        <div className="sf-exam-info">
-                          <div className="sf-exam-name">{sheet.studentName || sheet.admissionNumber}</div>
-                          <div className="sf-exam-meta">{sheet.admissionNumber} · {sheet.status}</div>
-                        </div>
-                        {sheet.status === "evaluated" ? (
-                          <span className="sf-exam-status sf-es-done">{sheet.totalMarks}/{sheet.maxMarks}</span>
-                        ) : (
-                          <Button size="sm" className="rounded-xl gap-1" disabled={evaluatingId === sheet.id} onClick={() => handleEvaluate(sheet.id)}>
-                            {evaluatingId === sheet.id ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <><Star className="h-3 w-3" /> Evaluate</>}
-                          </Button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
+            {selectedExamId ? (
+              <BulkUploadZone
+                examId={parseInt(selectedExamId)}
+                onUploadComplete={() => { refetchSheets(); refetchMergedScripts(); queryClient.invalidateQueries({ queryKey: ["/api/analytics"] }); }}
+              />
+            ) : (
+              <div className="sf-empty"><div className="sf-empty-icon">📂</div>Select an exam above to upload answer sheets.</div>
             )}
           </div>
         )}
+        {/* ── RESULTS TAB ── */}
+        {activeSection === "results" && (
+          <div className="sf-panel">
+            {!selectedStudentResult ? (
+              <>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+                  <div>
+                    <div className="sf-panel-title">Exam Results</div>
+                    <div className="sf-panel-sub">View evaluated results, student scores and class-level analytics</div>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <select className="sf-fsel" style={{ minWidth: 240 }} value={selectedResultExamId || ""} onChange={e => { setSelectedResultExamId(e.target.value ? parseInt(e.target.value) : null); setSelectedStudentResult(null); setHoveredExamId(e.target.value ? parseInt(e.target.value) : null); }}>
+                      <option value="">— Select an exam —</option>
+                      {(examsList || []).map((e: any) => {
+                        const catLabel: Record<string, string> = { unit_test: "Unit Test", class_test: "Class Test", homework: "Homework", half_yearly: "Half Yearly", annual: "Annual Exam", quiz: "Quiz", assignment: "Assignment" };
+                        return <option key={e.id} value={e.id}>[{catLabel[e.category] || e.category}] {e.examName || `${e.subject} Exam`}</option>;
+                      })}
+                    </select>
+                    {/* Exam type + stats strip */}
+                    {selectedResultExamId && examStats && examStats.count > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: "var(--lav-bg)", color: "var(--lavender)", fontWeight: 700, border: "1.5px solid var(--lav-card)" }}>{examStats.category}</span>
+                        <span style={{ fontSize: 11, color: "var(--mid)" }}>·</span>
+                        <span style={{ fontSize: 11, color: "var(--ink)", fontWeight: 600 }}>Mean: <b>{examStats.mean}%</b></span>
+                        <span style={{ fontSize: 11, color: "var(--mid)" }}>·</span>
+                        <span style={{ fontSize: 11, color: "var(--ink)", fontWeight: 600 }}>Median: <b>{examStats.median}%</b></span>
+                        <span style={{ fontSize: 11, color: "var(--mid)" }}>·</span>
+                        <span style={{ fontSize: 11, color: "var(--ink)", fontWeight: 600 }}>Mode: <b>{examStats.mode?.join(", ")}%</b></span>
+                        <span style={{ fontSize: 11, color: "var(--mid)" }}>·</span>
+                        <span style={{ fontSize: 11, color: "var(--ink)", fontWeight: 600 }}>σ: <b>{examStats.stdDev}%</b></span>
+                        {examStats.questionText && (
+                          <button onClick={() => setShowPaperModal(examStats)} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: "var(--ink)", color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                            📄 View Paper
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {!selectedResultExamId && (
+                  <div className="sf-empty"><div className="sf-empty-icon">📊</div>Select an exam above to view its results.</div>
+                )}
+
+                {selectedResultExamId && isLoadingResults && (
+                  <div style={{ textAlign: "center", padding: 32 }}><div className="sf-spinner" /></div>
+                )}
+
+                {selectedResultExamId && examResults && (() => {
+                  const { exam, students, classSummary } = examResults;
+                  const sortedStudents = [...(students || [])].sort((a, b) => b.percentage - a.percentage);
+                  const dist = classSummary?.distribution || {};
+                  const distEntries = [
+                    { label: "90-100%", key: "90-100", color: "#2a9d6e" },
+                    { label: "75-89%", key: "75-89", color: "#3a8ab0" },
+                    { label: "60-74%", key: "60-74", color: "#d08a2b" },
+                    { label: "40-59%", key: "40-59", color: "#c47a1e" },
+                    { label: "0-39%", key: "0-39", color: "#d94f4f" },
+                  ];
+                  const maxDistVal = Math.max(...distEntries.map(d => dist[d.key] || 0), 1);
+                  const chapterAnalysis = classSummary?.chapterAnalysis || [];
+                  const strongChapters = chapterAnalysis.filter((c: any) => c.status === "strong");
+                  const weakChapters = chapterAnalysis.filter((c: any) => c.status === "weak");
+
+                  const catColors: Record<string, { bg: string; color: string; border: string }> = {
+                    "Unit Test":   { bg: "#f0edff", color: "#6c47d8", border: "#c7b8f5" },
+                    "Class Test":  { bg: "#eff6ff", color: "#2563c0", border: "#93c5fd" },
+                    "Homework":    { bg: "#f0faf4", color: "#1a7a54", border: "#86efac" },
+                    "Half Yearly": { bg: "#fffbeb", color: "#92400e", border: "#fcd34d" },
+                    "Annual Exam": { bg: "#fff0f0", color: "#b91c1c", border: "#fca5a5" },
+                    "Quiz":        { bg: "#f0f8ff", color: "#1e40af", border: "#bfdbfe" },
+                    "Assignment":  { bg: "#fdf4ff", color: "#7e22ce", border: "#d8b4fe" },
+                  };
+                  const examCat = examStats?.category || exam?.name?.toLowerCase().includes("unit") ? "Unit Test" : exam?.name?.toLowerCase().includes("class") ? "Class Test" : exam?.name?.toLowerCase().includes("homework") ? "Homework" : "Evaluation";
+                  const catStyle = catColors[examCat] || { bg: "var(--lav-bg)", color: "var(--lavender)", border: "var(--lav-card)" };
+                  const catEmoji = examCat === "Homework" ? "📝" : examCat === "Unit Test" ? "📋" : examCat === "Class Test" ? "✏️" : examCat === "Quiz" ? "⚡" : examCat === "Half Yearly" ? "📅" : examCat === "Annual Exam" ? "🎓" : "📄";
+
+                  return (
+                    <>
+                      {/* Exam type header banner — clearly shows what type of evaluation this is */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: catStyle.bg, border: `1.5px solid ${catStyle.border}`, borderRadius: 12, marginBottom: 16 }}>
+                        <div style={{ fontSize: 24 }}>{catEmoji}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: catStyle.color }}>{exam?.name}</div>
+                          <div style={{ display: "flex", gap: 8, marginTop: 3, flexWrap: "wrap", alignItems: "center" }}>
+                            <span style={{ fontSize: 11, padding: "2px 9px", borderRadius: 20, background: catStyle.color, color: "white", fontWeight: 700 }}>{examCat}</span>
+                            <span style={{ fontSize: 11, color: "var(--mid)" }}>{exam?.subject} · Class {exam?.className}{exam?.section ? ` ${exam.section}` : ""} · {exam?.totalMarks} marks</span>
+                          </div>
+                        </div>
+                        {examStats?.questionText && (
+                          <button onClick={() => setShowPaperModal(examStats)} style={{ fontSize: 12, padding: "6px 14px", borderRadius: 20, background: catStyle.color, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                            📄 View Full Paper
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Exam summary strip */}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 20 }}>
+                        {[
+                          { label: "Total Students", value: classSummary?.totalStudents || 0, sub: null },
+                          { label: "Mean Score", value: examStats?.mean != null ? `${examStats.mean}%` : `${classSummary?.avgScore || 0}%`, sub: "arithmetic mean" },
+                          { label: "Median Score", value: examStats?.median != null ? `${examStats.median}%` : "—", sub: "middle value" },
+                          { label: "Mode Score", value: examStats?.mode?.length ? `${examStats.mode[0]}%` : "—", sub: "most frequent" },
+                          { label: "Std Deviation", value: examStats?.stdDev != null ? `${examStats.stdDev}%` : "—", sub: "score spread" },
+                          { label: "Highest", value: sortedStudents.length ? `${sortedStudents[0].percentage}%` : "—", sub: null },
+                          { label: "Lowest", value: sortedStudents.length ? `${sortedStudents[sortedStudents.length - 1].percentage}%` : "—", sub: null },
+                        ].map(kpi => (
+                          <div key={kpi.label} style={{ background: "var(--lav-bg)", borderRadius: 12, padding: "12px 14px", textAlign: "center" }}>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: "var(--ink)" }}>{kpi.value}</div>
+                            <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>{kpi.label}</div>
+                            {kpi.sub && <div style={{ fontSize: 9, color: "var(--dim)", marginTop: 1 }}>{kpi.sub}</div>}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Charts row */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 20 }}>
+                        {/* Score distribution bar chart */}
+                        <div style={{ background: "var(--card)", border: "1px solid var(--rule)", borderRadius: 14, padding: "14px 16px" }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)", marginBottom: 12 }}>Score Distribution</div>
+                          {distEntries.map(d => (
+                            <div key={d.key} style={{ marginBottom: 8 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                                <span style={{ color: "var(--mid)" }}>{d.label}</span>
+                                <span style={{ fontWeight: 700, color: d.color }}>{dist[d.key] || 0} students</span>
+                              </div>
+                              <div style={{ height: 7, borderRadius: 4, background: "var(--cream2)" }}>
+                                <div style={{ height: "100%", borderRadius: 4, width: `${((dist[d.key] || 0) / maxDistVal) * 100}%`, background: d.color, transition: "width 0.4s" }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Chapter strength/weakness */}
+                        <div style={{ background: "var(--card)", border: "1px solid var(--rule)", borderRadius: 14, padding: "14px 16px" }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)", marginBottom: 12 }}>Chapter Analysis</div>
+                          {chapterAnalysis.length === 0 && <div style={{ fontSize: 12, color: "var(--mid)", textAlign: "center", paddingTop: 20 }}>No chapter data yet</div>}
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 160, overflowY: "auto" }}>
+                            {chapterAnalysis.map((ch: any) => (
+                              <div key={ch.chapter} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontSize: 10, flexShrink: 0 }}>{ch.status === "strong" ? "🟢" : "🔴"}</span>
+                                <span style={{ flex: 1, fontSize: 12, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ch.chapter}</span>
+                                <span style={{ fontSize: 11, fontWeight: 700, color: ch.status === "strong" ? "#2a9d6e" : "#d94f4f", flexShrink: 0 }}>{ch.avgPct}%</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Strong / Weak summary pills */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+                        <div style={{ background: "#f0faf4", border: "1px solid #2a9d6e22", borderRadius: 12, padding: "12px 14px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#2a9d6e", marginBottom: 6 }}>🟢 Strong Areas</div>
+                          {strongChapters.length === 0 ? <div style={{ fontSize: 12, color: "var(--mid)" }}>None identified yet</div> : strongChapters.slice(0, 4).map((c: any) => (
+                            <span key={c.chapter} style={{ display: "inline-block", fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "#2a9d6e18", color: "#1a7a54", fontWeight: 600, margin: "2px 3px 2px 0" }}>{c.chapter} ({c.avgPct}%)</span>
+                          ))}
+                        </div>
+                        <div style={{ background: "#fff5f5", border: "1px solid #d94f4f22", borderRadius: 12, padding: "12px 14px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#d94f4f", marginBottom: 6 }}>🔴 Weak Areas</div>
+                          {weakChapters.length === 0 ? <div style={{ fontSize: 12, color: "var(--mid)" }}>None identified yet</div> : weakChapters.slice(0, 4).map((c: any) => (
+                            <span key={c.chapter} style={{ display: "inline-block", fontSize: 11, padding: "2px 8px", borderRadius: 6, background: "#d94f4f18", color: "#a03030", fontWeight: 600, margin: "2px 3px 2px 0" }}>{c.chapter} ({c.avgPct}%)</span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Student results list */}
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Student Results</div>
+                      {sortedStudents.length === 0 && <div className="sf-empty"><div className="sf-empty-icon">📭</div>No evaluated sheets for this exam yet.</div>}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {sortedStudents.map((student: any, idx: number) => {
+                          const pctColor2 = student.percentage >= 75 ? "#2a9d6e" : student.percentage >= 50 ? "#d08a2b" : "#d94f4f";
+                          const grade = student.percentage >= 90 ? "A+" : student.percentage >= 75 ? "A" : student.percentage >= 60 ? "B" : student.percentage >= 40 ? "C" : "D";
+                          return (
+                            <div
+                              key={student.admissionNumber}
+                              style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 12, border: "1.5px solid var(--rule)", background: "var(--card)", cursor: "pointer", transition: "all 0.15s" }}
+                              onClick={() => setSelectedStudentResult(student)}
+                            >
+                              <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--lav-bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "var(--ink2)", flexShrink: 0 }}>
+                                #{idx + 1}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{student.studentName}</div>
+                                <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>{student.admissionNumber}</div>
+                              </div>
+                              <div style={{ textAlign: "center", flexShrink: 0 }}>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: pctColor2 }}>{student.totalMarks}/{student.maxMarks}</div>
+                                <div style={{ fontSize: 11, color: "var(--mid)" }}>{student.percentage}%</div>
+                              </div>
+                              <div style={{ width: 100, flexShrink: 0 }}>
+                                <div style={{ height: 6, borderRadius: 3, background: "var(--cream2)", overflow: "hidden" }}>
+                                  <div style={{ height: "100%", borderRadius: 3, width: `${student.percentage}%`, background: pctColor2 }} />
+                                </div>
+                              </div>
+                              <div style={{ fontSize: 15, fontWeight: 700, color: pctColor2, width: 28, textAlign: "center", flexShrink: 0 }}>{grade}</div>
+                              <div style={{ fontSize: 11, color: "var(--mid)", flexShrink: 0 }}>▶ Details</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  );
+                })()}
+              </>
+            ) : (
+              /* Student detail view */
+              <div>
+                <button onClick={() => setSelectedStudentResult(null)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--mid)", background: "none", border: "none", cursor: "pointer", marginBottom: 16, fontFamily: "inherit" }}>
+                  ← Back to results
+                </button>
+
+                {/* Student header */}
+                <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 18px", background: "var(--lav-bg)", borderRadius: 14, marginBottom: 18 }}>
+                  <div style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--ink)", color: "var(--cream)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, flexShrink: 0 }}>
+                    {selectedStudentResult.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)" }}>{selectedStudentResult.studentName}</div>
+                    <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>{selectedStudentResult.admissionNumber}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 24, fontWeight: 700, color: pctColor(selectedStudentResult.percentage) }}>{selectedStudentResult.totalMarks}/{selectedStudentResult.maxMarks}</div>
+                    <div style={{ fontSize: 13, color: "var(--mid)" }}>{selectedStudentResult.percentage}%</div>
+                  </div>
+                </div>
+
+                {/* Overall feedback */}
+                {selectedStudentResult.overallFeedback && (
+                  <div style={{ padding: "12px 16px", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 12, marginBottom: 16, fontSize: 13, color: "var(--ink)", lineHeight: 1.6 }}>
+                    <span style={{ fontWeight: 700 }}>Overall Feedback: </span>{selectedStudentResult.overallFeedback}
+                  </div>
+                )}
+
+                {/* Areas of improvement */}
+                {(selectedStudentResult.areasOfImprovement || []).length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Areas of Improvement</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {selectedStudentResult.areasOfImprovement.map((area: any, i: number) => (
+                        <div key={i} style={{ padding: "8px 12px", background: "#fff8ed", borderRadius: 10, border: "1px solid #d08a2b22" }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#d08a2b" }}>⚠ {area.topic}</div>
+                          {area.detail && <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 3 }}>{area.detail}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Per-question breakdown */}
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Question-by-Question Breakdown</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {(selectedStudentResult.questions || []).map((q: any) => {
+                    const qPct = q.maxMarks > 0 ? Math.round((q.marksAwarded / q.maxMarks) * 100) : 0;
+                    const qColor = qPct >= 70 ? "#2a9d6e" : qPct >= 40 ? "#d08a2b" : "#d94f4f";
+                    return (
+                      <div key={q.questionNumber} style={{ border: "1.5px solid var(--rule)", borderRadius: 12, overflow: "hidden" }}>
+                        {/* Question header */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "var(--pane)" }}>
+                          <div style={{ width: 30, height: 30, borderRadius: 8, background: `${qColor}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: qColor, flexShrink: 0 }}>
+                            Q{q.questionNumber}
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>{q.chapter || "General"}</div>
+                          </div>
+                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                            <div style={{ fontSize: 15, fontWeight: 700, color: qColor }}>{q.marksAwarded}/{q.maxMarks}</div>
+                            <div style={{ fontSize: 10, color: "var(--mid)" }}>{qPct}%</div>
+                          </div>
+                        </div>
+                        {/* Marks bar */}
+                        <div style={{ height: 4, background: "var(--cream2)" }}>
+                          <div style={{ height: "100%", width: `${qPct}%`, background: qColor, transition: "width 0.4s" }} />
+                        </div>
+                        {/* Deviation & improvement */}
+                        <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
+                          {q.deviationReason && (
+                            <div style={{ fontSize: 12, color: "var(--mid)" }}>
+                              <span style={{ fontWeight: 600, color: "var(--ink)" }}>What was missing: </span>{q.deviationReason}
+                            </div>
+                          )}
+                          {q.improvementSuggestion && (
+                            <div style={{ fontSize: 12, color: "#2563c0", background: "var(--blue-bg)", padding: "6px 10px", borderRadius: 8 }}>
+                              <span style={{ fontWeight: 600 }}>💡 Suggestion: </span>{q.improvementSuggestion}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── QUALITY OF EDUCATION TAB ── */}
+        {activeSection === "education-quality" && (
+          <div className="sf-panel">
+            <div className="sf-analytics-head">
+              <div>
+                <div className="sf-panel-title">Quality of Education</div>
+                <div className="sf-panel-sub">AI-powered analysis: are your questions at the right NCERT depth for the class?</div>
+              </div>
+              <span style={{ fontSize: 11, padding: "4px 12px", borderRadius: 20, background: "var(--lav-bg)", color: "var(--lavender)", fontWeight: 700, border: "1.5px solid var(--lav-card)" }}>✦ AI Analysis</span>
+            </div>
+
+            {isLoadingEduQuality && (
+              <div style={{ textAlign: "center", padding: 48 }}>
+                <div className="sf-spinner" />
+                <div style={{ marginTop: 12, fontSize: 13, color: "var(--mid)" }}>Analysing question papers against NCERT curriculum…</div>
+              </div>
+            )}
+
+            {!isLoadingEduQuality && (!eduQuality || eduQuality.length === 0) && (
+              <div className="sf-empty">
+                <div className="sf-empty-icon">📚</div>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>No exam papers to analyse yet</div>
+                <div style={{ fontSize: 12 }}>Create exams with question text to unlock AI curriculum depth analysis</div>
+              </div>
+            )}
+
+            {!isLoadingEduQuality && eduQuality && eduQuality.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+                {/* Summary bar — overall depth distribution across all exams */}
+                {(() => {
+                  const counts = { below: 0, at: 0, above: 0, mixed: 0 };
+                  eduQuality.forEach((eq: any) => {
+                    const r = eq.overallDepthRating || "";
+                    if (r.includes("Below")) counts.below++;
+                    else if (r.includes("Above")) counts.above++;
+                    else if (r.includes("Mixed")) counts.mixed++;
+                    else counts.at++;
+                  });
+                  const total = eduQuality.length;
+                  return (
+                    <div className="sf-chart-card" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                      {[
+                        { label: "Below NCERT Level", count: counts.below, color: "#d08a2b", bg: "var(--amber-bg)", icon: "⬇" },
+                        { label: "At NCERT Level", count: counts.at, color: "var(--green)", bg: "var(--green-bg)", icon: "✓" },
+                        { label: "Above NCERT Level", count: counts.above, color: "#2563c0", bg: "var(--blue-bg)", icon: "⬆" },
+                        { label: "Mixed Level", count: counts.mixed, color: "var(--lavender)", bg: "var(--lav-bg)", icon: "~" },
+                      ].map(item => (
+                        <div key={item.label} style={{ background: item.bg, borderRadius: 12, padding: "14px 16px", textAlign: "center" }}>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: item.color }}>{item.count}</div>
+                          <div style={{ fontSize: 10, color: "var(--mid)", marginTop: 3, fontWeight: 600 }}>{item.label}</div>
+                          <div style={{ fontSize: 9, color: "var(--dim)", marginTop: 2 }}>of {total} exams</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                {/* Per-exam cards */}
+                {eduQuality.map((eq: any, idx: number) => {
+                  const isOpen = eduQualityOpen === idx;
+                  const depthColor = eq.overallDepthRating?.includes("Below") ? "#d08a2b"
+                    : eq.overallDepthRating?.includes("Above") ? "#2563c0"
+                    : eq.overallDepthRating?.includes("Mixed") ? "var(--lavender)"
+                    : "var(--green)";
+                  const depthBg = eq.overallDepthRating?.includes("Below") ? "var(--amber-bg)"
+                    : eq.overallDepthRating?.includes("Above") ? "var(--blue-bg)"
+                    : eq.overallDepthRating?.includes("Mixed") ? "var(--lav-bg)"
+                    : "var(--green-bg)";
+
+                  // Category labels
+                  const catColors: Record<string, { bg: string; color: string }> = {
+                    "Unit Test":     { bg: "var(--lav-bg)",   color: "var(--lavender)" },
+                    "Class Test":    { bg: "var(--blue-bg)",  color: "#2563c0" },
+                    "Homework":      { bg: "var(--green-bg)", color: "var(--green)" },
+                    "Half Yearly":   { bg: "var(--amber-bg)", color: "var(--amber)" },
+                    "Annual Exam":   { bg: "#fff0f0",         color: "var(--red)" },
+                    "Quiz":          { bg: "#f0f8ff",         color: "#3a8ab0" },
+                    "Assignment":    { bg: "#f5f0ff",         color: "#7c5cbf" },
+                  };
+                  const catStyle = catColors[eq.category] || { bg: "var(--lav-bg)", color: "var(--lavender)" };
+
+                  // Bloom's level color
+                  const bloomColors: Record<string, string> = {
+                    "Remember": "#9e9e9e", "Understand": "#5c85d6", "Apply": "#2a9d6e",
+                    "Analyse": "#d08a2b", "Evaluate": "#9c4dcc", "Create": "#d94f4f",
+                  };
+
+                  // Depth gauge
+                  const gaugeVal = Math.min(100, Math.max(0, eq.depthScore ?? 50));
+                  const gaugeColor = gaugeVal < 40 ? "#d08a2b" : gaugeVal > 65 ? "#2563c0" : "var(--green)";
+
+                  return (
+                    <div key={eq.examId} className="sf-chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                      {/* Exam header row */}
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", cursor: "pointer", background: isOpen ? "var(--pane)" : "transparent" }}
+                        onClick={() => setEduQualityOpen(isOpen ? null : idx)}
+                      >
+                        {/* Category pill */}
+                        <span style={{ fontSize: 10, padding: "3px 9px", borderRadius: 20, background: catStyle.bg, color: catStyle.color, fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap" }}>
+                          {eq.category}
+                        </span>
+
+                        {/* Title */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {eq.examName}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--mid)" }}>Class {eq.className} · {eq.subject} · {eq.totalMarks} marks</div>
+                        </div>
+
+                        {/* Depth gauge bar */}
+                        <div style={{ flexShrink: 0, width: 120 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "var(--mid)", marginBottom: 3 }}>
+                            <span>Below</span><span>NCERT</span><span>Above</span>
+                          </div>
+                          <div style={{ height: 6, background: "var(--rule)", borderRadius: 3, position: "relative" }}>
+                            <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", height: 10, width: 2, background: "var(--mid)", borderRadius: 1 }} />
+                            <div style={{ height: "100%", width: `${gaugeVal}%`, background: gaugeColor, borderRadius: 3, transition: "width 0.6s" }} />
+                          </div>
+                        </div>
+
+                        {/* Overall rating badge */}
+                        <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 8, background: depthBg, color: depthColor, fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap" }}>
+                          {eq.overallDepthRating}
+                        </span>
+
+                        {/* Expand toggle */}
+                        <svg style={{ width: 16, height: 16, color: "var(--mid)", flexShrink: 0, transition: "transform 0.2s", transform: isOpen ? "rotate(180deg)" : "rotate(0)" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                      </div>
+
+                      {/* Expanded content */}
+                      {isOpen && (
+                        <div style={{ borderTop: "1px solid var(--rule)", padding: "18px 18px 20px" }}>
+
+                          {/* Summary */}
+                          <div style={{ fontSize: 13, color: "var(--ink)", lineHeight: 1.65, marginBottom: 16, padding: "10px 14px", background: "var(--pane)", borderRadius: 10, borderLeft: `3px solid ${depthColor}` }}>
+                            {eq.summary}
+                          </div>
+
+                          {/* Two-column: Strengths + Concerns */}
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                            <div style={{ background: "var(--green-bg)", border: "1px solid rgba(42,157,110,0.2)", borderRadius: 10, padding: "12px 14px" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", marginBottom: 8 }}>✅ STRENGTHS</div>
+                              {(eq.strengths || []).length === 0
+                                ? <div style={{ fontSize: 12, color: "var(--mid)" }}>None identified</div>
+                                : (eq.strengths || []).map((s: string, i: number) => (
+                                  <div key={i} style={{ fontSize: 12, color: "var(--ink)", marginBottom: 5, display: "flex", gap: 6 }}>
+                                    <span style={{ color: "var(--green)", flexShrink: 0 }}>→</span>{s}
+                                  </div>
+                                ))}
+                            </div>
+                            <div style={{ background: "#fff8ed", border: "1px solid rgba(208,138,43,0.2)", borderRadius: 10, padding: "12px 14px" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--amber)", marginBottom: 8 }}>⚠ CONCERNS</div>
+                              {(eq.concerns || []).length === 0
+                                ? <div style={{ fontSize: 12, color: "var(--mid)" }}>None identified</div>
+                                : (eq.concerns || []).map((c: string, i: number) => (
+                                  <div key={i} style={{ fontSize: 12, color: "var(--ink)", marginBottom: 5, display: "flex", gap: 6 }}>
+                                    <span style={{ color: "var(--amber)", flexShrink: 0 }}>→</span>{c}
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+
+                          {/* Question-level analysis table */}
+                          {(eq.questionAnalysis || []).length > 0 && (
+                            <div style={{ marginBottom: 16 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", letterSpacing: "0.08em", marginBottom: 10 }}>QUESTION-BY-QUESTION DEPTH ANALYSIS</div>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                {eq.questionAnalysis.map((qa: any, qi: number) => {
+                                  const dlColor = qa.depthLevel === "Below" ? "#d08a2b" : qa.depthLevel === "Above" ? "#2563c0" : qa.depthLevel === "Beyond Syllabus" ? "#d94f4f" : "var(--green)";
+                                  const dlBg = qa.depthLevel === "Below" ? "var(--amber-bg)" : qa.depthLevel === "Above" ? "var(--blue-bg)" : qa.depthLevel === "Beyond Syllabus" ? "#fff0f0" : "var(--green-bg)";
+                                  const bloomColor = bloomColors[qa.bloomsLevel] || "var(--mid)";
+                                  return (
+                                    <div key={qi} style={{ border: "1.5px solid var(--rule)", borderRadius: 10, padding: "10px 14px", background: "var(--card)" }}>
+                                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                        <div style={{ width: 26, height: 26, borderRadius: 7, background: "var(--lav-bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "var(--lavender)", flexShrink: 0 }}>Q{qi + 1}</div>
+                                        <div style={{ flex: 1 }}>
+                                          <div style={{ fontSize: 12, color: "var(--ink)", marginBottom: 6 }}>{qa.questionSnippet}</div>
+                                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: dlBg, color: dlColor, fontWeight: 700 }}>{qa.depthLevel}</span>
+                                            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: `${bloomColor}18`, color: bloomColor, fontWeight: 700 }}>Bloom's: {qa.bloomsLevel}</span>
+                                            {qa.ncertChapter && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: "var(--pane)", color: "var(--mid)", border: "1px solid var(--rule)" }}>📖 {qa.ncertChapter}</span>}
+                                          </div>
+                                          {qa.concern && <div style={{ fontSize: 11, color: "#d08a2b", marginTop: 6, display: "flex", gap: 5 }}><span>⚠</span>{qa.concern}</div>}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Recommendations */}
+                          {(eq.recommendations || []).length > 0 && (
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", letterSpacing: "0.08em", marginBottom: 8 }}>RECOMMENDATIONS</div>
+                              {eq.recommendations.map((r: string, i: number) => (
+                                <div key={i} style={{ fontSize: 12, color: "var(--ink)", marginBottom: 6, display: "flex", gap: 8, padding: "8px 12px", background: "var(--blue-bg)", borderRadius: 8 }}>
+                                  <span style={{ color: "#2563c0", flexShrink: 0 }}>💡</span>{r}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── PAPER MODAL ── */}
+        {showPaperModal && (
+          <div
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 24 }}
+            onClick={() => setShowPaperModal(null)}
+          >
+            <div
+              style={{ background: "white", borderRadius: 16, maxWidth: 680, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 16px 60px rgba(0,0,0,0.25)" }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Modal header */}
+              <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--rule)", display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>{showPaperModal.examName}</div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, background: "var(--lav-bg)", color: "var(--lavender)", fontWeight: 700 }}>{showPaperModal.category}</span>
+                    <span style={{ fontSize: 10, color: "var(--mid)" }}>{showPaperModal.subject} · Class {showPaperModal.className} · {showPaperModal.totalMarks} marks</span>
+                  </div>
+                </div>
+                <button onClick={() => setShowPaperModal(null)} style={{ width: 30, height: 30, borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: "var(--mid)" }}>✕</button>
+              </div>
+
+              {/* Stats strip */}
+              <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--rule)" }}>
+                {[
+                  { label: "Students", value: showPaperModal.count },
+                  { label: "Mean", value: `${showPaperModal.mean}%` },
+                  { label: "Median", value: `${showPaperModal.median}%` },
+                  { label: "Mode", value: `${showPaperModal.mode?.[0]}%` },
+                  { label: "Std Dev (σ)", value: `${showPaperModal.stdDev}%` },
+                  { label: "Highest", value: `${showPaperModal.max}%` },
+                  { label: "Lowest", value: `${showPaperModal.min}%` },
+                ].map((s, i) => (
+                  <div key={i} style={{ flex: 1, padding: "10px 8px", textAlign: "center", borderRight: i < 6 ? "1px solid var(--rule)" : "none", background: "var(--pane)" }}>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)" }}>{s.value}</div>
+                    <div style={{ fontSize: 9, color: "var(--mid)", marginTop: 2 }}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Bell-curve score distribution */}
+              <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--rule)" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", marginBottom: 10, letterSpacing: "0.06em" }}>SCORE DISTRIBUTION</div>
+                {(() => {
+                  const buckets = [
+                    { label: "0–19%", color: "#d94f4f", count: (showPaperModal.scores || []).filter((s: number) => s < 20).length },
+                    { label: "20–39%", color: "#e07030", count: (showPaperModal.scores || []).filter((s: number) => s >= 20 && s < 40).length },
+                    { label: "40–59%", color: "#d08a2b", count: (showPaperModal.scores || []).filter((s: number) => s >= 40 && s < 60).length },
+                    { label: "60–74%", color: "#3a8ab0", count: (showPaperModal.scores || []).filter((s: number) => s >= 60 && s < 75).length },
+                    { label: "75–89%", color: "#2a9d6e", count: (showPaperModal.scores || []).filter((s: number) => s >= 75 && s < 90).length },
+                    { label: "90–100%", color: "#1a7a54", count: (showPaperModal.scores || []).filter((s: number) => s >= 90).length },
+                  ];
+                  const maxCount = Math.max(...buckets.map(b => b.count), 1);
+                  return (
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 70 }}>
+                      {buckets.map((b, i) => (
+                        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: b.color }}>{b.count > 0 ? b.count : ""}</div>
+                          <div style={{ width: "100%", height: Math.max(4, Math.round((b.count / maxCount) * 50)), background: b.color, borderRadius: "3px 3px 0 0", transition: "height 0.4s" }} />
+                          <div style={{ fontSize: 9, color: "var(--mid)", textAlign: "center", lineHeight: 1.2 }}>{b.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Question paper text */}
+              <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", marginBottom: 10, letterSpacing: "0.06em" }}>QUESTION PAPER</div>
+                <pre style={{ fontFamily: "DM Sans, sans-serif", fontSize: 13, color: "var(--ink)", lineHeight: 1.8, whiteSpace: "pre-wrap", margin: 0 }}>
+                  {showPaperModal.questionText}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
+
         <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
 
       {/* ── CREATE EXAM DIALOG ── */}
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="sm:max-w-[520px] rounded-2xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={isDialogOpen} onOpenChange={(open) => {
+        setIsDialogOpen(open);
+        if (!open) { setQuestionImages([]); setModelAnswerImages([]); setExamSection(""); setExamSubjectCode(""); setUseNcert(false); }
+      }}>
+        <DialogContent className="sm:max-w-[600px] rounded-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Create New Exam</DialogTitle></DialogHeader>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5 pt-2">
-              <div className="grid grid-cols-2 gap-4">
-                <FormField control={form.control} name="subject" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Subject</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl><SelectTrigger className="rounded-xl" data-testid="select-exam-subject"><SelectValue placeholder="Select subject…" /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        {(teacherOptions?.subjects || ["Mathematics", "Science", "English", "Social Studies", "Hindi"]).map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                        <SelectItem value="_custom">Other (type below)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {field.value === "_custom" && <Input placeholder="Enter subject name" className="rounded-xl mt-1" onChange={e => field.onChange(e.target.value)} data-testid="input-exam-subject-custom" />}
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={form.control} name="className" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Class</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl><SelectTrigger className="rounded-xl" data-testid="select-exam-class"><SelectValue placeholder="Select class…" /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        {(teacherOptions?.classes || ["8", "9", "10", "11", "12"]).map(c => <SelectItem key={c} value={c}>Class {c}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              </div>
-              <FormField control={form.control} name="category" render={({ field }) => (
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
+              {/* Step 1: Class */}
+              <FormField control={form.control} name="className" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Exam Category</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl><SelectTrigger className="rounded-xl" data-testid="select-exam-category"><SelectValue placeholder="Select category…" /></SelectTrigger></FormControl>
-                    <SelectContent>{EXAM_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
+                  <FormLabel>Class *</FormLabel>
+                  <Select onValueChange={(val) => {
+                    field.onChange(val);
+                    setExamSection("");
+                    form.setValue("subject", "");
+                    setExamSubjectCode("");
+                  }} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger className="rounded-xl" data-testid="select-exam-class">
+                        <SelectValue placeholder="Select your assigned class…" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {(teacherOptions?.classes?.length ? teacherOptions.classes : ["8", "9", "10", "11", "12"]).map(c => (
+                        <SelectItem key={c} value={c}>Class {c}</SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
                   <FormMessage />
                 </FormItem>
               )} />
+
+              {/* Step 2: Section — enabled only after class chosen, shows only sections assigned to this teacher for that class */}
+              {(() => {
+                const cls = form.watch("className");
+                const sectionOpts = cls
+                  ? [...new Set((teacherOptions?.classSections || []).filter(cs => cs.className === cls).map(cs => cs.section))]
+                  : [];
+                const disabled = !cls;
+                const noSectionsAssigned = cls && sectionOpts.length === 0;
+                return (
+                  <div>
+                    <label style={{ fontSize: 14, fontWeight: 500, opacity: disabled ? 0.4 : 1, display: "block", marginBottom: 6 }}>
+                      Section *
+                    </label>
+                    <Select
+                      onValueChange={(val) => { setExamSection(val); form.setValue("subject", ""); setExamSubjectCode(""); }}
+                      value={examSection}
+                      disabled={disabled || noSectionsAssigned}
+                    >
+                      <SelectTrigger className="rounded-xl" data-testid="select-exam-section" style={{ opacity: disabled ? 0.5 : 1 }}>
+                        <SelectValue placeholder={
+                          disabled ? "Select class first…"
+                          : noSectionsAssigned ? "No sections assigned for this class"
+                          : "Select section…"
+                        } />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sectionOpts.map((s: string) => (
+                          <SelectItem key={s} value={s}>Section {s}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {noSectionsAssigned && (
+                      <p style={{ fontSize: 11, color: "#d08a2b", marginTop: 4 }}>
+                        ⚠ No sections assigned for Class {cls}. Ask admin to assign subjects to you for this class.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Step 3: Subject — strictly filtered to this teacher's assignments for chosen class+section */}
+              {(() => {
+                const cls = form.watch("className");
+                const disabled = !examSection;
+                const filteredSubjects = examSection
+                  ? (teacherOptions?.structuredSubjects || []).filter(
+                      ss => ss.className === cls && ss.section === examSection
+                    )
+                  : [];
+                const noSubjectsAssigned = !disabled && filteredSubjects.length === 0;
+                return (
+                  <FormField control={form.control} name="subject" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel style={{ opacity: disabled ? 0.4 : 1 }}>Subject *</FormLabel>
+                      <Select
+                        disabled={disabled || noSubjectsAssigned}
+                        onValueChange={(val) => {
+                          field.onChange(val);
+                          const ss = filteredSubjects.find(s => s.name === val);
+                          setExamSubjectCode(ss?.code || "");
+                        }}
+                        value={field.value}
+                      >
+                        <FormControl>
+                          <SelectTrigger className="rounded-xl" data-testid="select-exam-subject" style={{ opacity: disabled ? 0.5 : 1 }}>
+                            <SelectValue placeholder={
+                              disabled ? "Select section first…"
+                              : noSubjectsAssigned ? "No subjects assigned for this class/section"
+                              : `${filteredSubjects.length} subject${filteredSubjects.length !== 1 ? "s" : ""} available — select one…`
+                            } />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {filteredSubjects.map((ss: StructuredSubject) => (
+                            <SelectItem key={ss.name} value={ss.name}>
+                              {ss.name}{ss.code ? ` (${ss.code})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {noSubjectsAssigned && (
+                        <p style={{ fontSize: 11, color: "#d08a2b", marginTop: 4 }}>
+                          ⚠ No subjects assigned for Class {cls} Section {examSection}. Ask admin to assign subjects.
+                        </p>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                );
+              })()}
+
+              {/* Subject Code — auto-filled, editable */}
+              <div>
+                <label className="text-sm font-medium">Subject Code <span className="text-muted-foreground font-normal text-xs">(auto-filled)</span></label>
+                <Input placeholder="e.g. MATH9A" value={examSubjectCode} onChange={e => setExamSubjectCode(e.target.value)} className="rounded-xl mt-1" />
+              </div>
+              {/* Category + Total Marks */}
+              <div className="grid grid-cols-2 gap-4">
+                <FormField control={form.control} name="category" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Exam Category</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl><SelectTrigger className="rounded-xl" data-testid="select-exam-category"><SelectValue placeholder="Select category…" /></SelectTrigger></FormControl>
+                      <SelectContent>{EXAM_CATEGORIES.map(c => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="totalMarks" render={({ field }) => (
+                  <FormItem><FormLabel>Total Marks</FormLabel><FormControl><Input type="number" placeholder="100" {...field} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
+                )} />
+              </div>
+              {/* Auto-name */}
               <div className="p-3 bg-muted/30 rounded-xl border border-border/30">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide font-bold mb-1">Auto-generated Exam Name</p>
                 <p className="text-sm font-mono font-semibold text-primary">{generatedExamName}</p>
               </div>
-              <FormField control={form.control} name="totalMarks" render={({ field }) => (
-                <FormItem><FormLabel>Total Marks</FormLabel><FormControl><Input type="number" placeholder="100" {...field} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
-              )} />
-              <FormField control={form.control} name="questionText" render={({ field }) => (
-                <FormItem><FormLabel>Questions</FormLabel><FormControl><Textarea placeholder={"Q1 (10 marks): Explain photosynthesis.\nQ2 (10 marks): State Newton's First Law."} className="rounded-xl min-h-[90px] text-sm" data-testid="input-question-text" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
-              <FormField control={form.control} name="modelAnswerText" render={({ field }) => (
-                <FormItem><FormLabel>Model Answer Key</FormLabel><FormControl><Textarea placeholder={"Q1: Photosynthesis is the process by which plants use sunlight, CO₂, and water…"} className="rounded-xl min-h-[90px] text-sm" data-testid="input-model-answer-text" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
+
+              {/* Questions — text OR images */}
+              <div>
+                <label className="text-sm font-medium block mb-1">Questions</label>
+                <FormField control={form.control} name="questionText" render={({ field }) => (
+                  <FormItem>
+                    <FormControl><Textarea placeholder={"Q1 (10 marks): Explain photosynthesis.\nQ2 (10 marks): State Newton's First Law."} className="rounded-xl min-h-[80px] text-sm" data-testid="input-question-text" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-muted-foreground">Or upload question paper images:</span>
+                  <Button type="button" variant="outline" size="sm" className="rounded-lg h-7 gap-1 text-xs" onClick={() => questionImgRef.current?.click()} disabled={isUploadingQImg}>
+                    {isUploadingQImg ? <><Loader2 className="h-3 w-3 animate-spin" />Uploading…</> : <><Upload className="h-3 w-3" />Add Images</>}
+                  </Button>
+                  <input ref={questionImgRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleImageUpload(e.target.files, "question")} />
+                  {questionImages.map((_, i) => (
+                    <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded-md flex items-center gap-1">
+                      🖼 Img {i+1} <button type="button" onClick={() => setQuestionImages(p => p.filter((_, j) => j !== i))} className="ml-1 text-muted-foreground hover:text-destructive">×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Model Answer — text OR images */}
+              <div>
+                <label className="text-sm font-medium block mb-1">Model Answer Key</label>
+                <FormField control={form.control} name="modelAnswerText" render={({ field }) => (
+                  <FormItem>
+                    <FormControl><Textarea placeholder={"Q1: Photosynthesis is the process by which plants use sunlight, CO₂, and water…"} className="rounded-xl min-h-[80px] text-sm" data-testid="input-model-answer-text" {...field} /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-muted-foreground">Or upload model answer images:</span>
+                  <Button type="button" variant="outline" size="sm" className="rounded-lg h-7 gap-1 text-xs" onClick={() => modelAnswerImgRef.current?.click()} disabled={isUploadingAImg}>
+                    {isUploadingAImg ? <><Loader2 className="h-3 w-3 animate-spin" />Uploading…</> : <><Upload className="h-3 w-3" />Add Images</>}
+                  </Button>
+                  <input ref={modelAnswerImgRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleImageUpload(e.target.files, "answer")} />
+                  {modelAnswerImages.map((_, i) => (
+                    <span key={i} className="text-xs bg-muted px-2 py-0.5 rounded-md flex items-center gap-1">
+                      🖼 Img {i+1} <button type="button" onClick={() => setModelAnswerImages(p => p.filter((_, j) => j !== i))} className="ml-1 text-muted-foreground hover:text-destructive">×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
               <FormField control={form.control} name="markingSchemeText" render={({ field }) => (
-                <FormItem><FormLabel>Marking Scheme <span className="text-muted-foreground font-normal">(optional)</span></FormLabel><FormControl><Textarea placeholder={"Award full marks for complete accurate answers.\nPartial marks for partial answers."} className="rounded-xl min-h-[70px] text-sm" data-testid="input-marking-scheme-text" {...field} /></FormControl><FormMessage /></FormItem>
+                <FormItem><FormLabel>Marking Scheme <span className="text-muted-foreground font-normal">(optional)</span></FormLabel><FormControl><Textarea placeholder={"Award full marks for complete accurate answers.\nPartial marks for partial answers."} className="rounded-xl min-h-[60px] text-sm" data-testid="input-marking-scheme-text" {...field} /></FormControl><FormMessage /></FormItem>
               )} />
+
+              {/* NCERT checkbox */}
+              <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/20">
+                <input
+                  type="checkbox"
+                  id="useNcert"
+                  checked={useNcert}
+                  onChange={e => setUseNcert(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded cursor-pointer accent-primary"
+                />
+                <div>
+                  <label htmlFor="useNcert" className="text-sm font-semibold cursor-pointer">Reference NCERT Books</label>
+                  <p className="text-xs text-muted-foreground mt-0.5">If enabled, AI will also cross-reference NCERT chapter content when evaluating student answers, in addition to the model answer.</p>
+                </div>
+              </div>
+
               <Button type="submit" className="w-full rounded-xl" disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Exam"}
               </Button>

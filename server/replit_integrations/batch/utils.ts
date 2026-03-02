@@ -135,7 +135,7 @@ export async function batchProcessWithSSE<T, R>(
   sendEvent: (event: { type: string; [key: string]: unknown }) => void,
   options: Omit<BatchOptions, "concurrency" | "onProgress"> = {}
 ): Promise<R[]> {
-  const { retries = 5, minTimeout = 1000, maxTimeout = 15008 } = options;
+  const { retries = 5, minTimeout = 1000, maxTimeout = 15000 } = options;
 
   sendEvent({ type: "started", total: items.length });
 

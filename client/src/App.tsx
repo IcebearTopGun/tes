@@ -13,6 +13,7 @@ import AuthPage from "./pages/auth/AuthPage";
 import TeacherDashboard from "./pages/dashboard/TeacherDashboard";
 import StudentDashboard from "./pages/dashboard/StudentDashboard";
 import AdminDashboard from "./pages/dashboard/AdminDashboard";
+import PrincipalDashboard from "./pages/dashboard/PrincipalDashboard";
 import NcertChapters from "./pages/NcertChapters";
 import NotFound from "./pages/not-found";
 
@@ -24,7 +25,7 @@ function ProtectedRoute({
   allowedRole 
 }: { 
   component: React.ComponentType, 
-  allowedRole: "teacher" | "student" | "admin"
+  allowedRole: "teacher" | "student" | "admin" | "principal"
 }) {
   const { user, role, isLoading } = useAuth();
   const [, setLocation] = useLocation();
@@ -36,6 +37,7 @@ function ProtectedRoute({
       } else if (role !== allowedRole) {
         if (role === "teacher") setLocation("/teacher-dashboard");
         else if (role === "admin") setLocation("/admin-dashboard");
+        else if (role === "principal") setLocation("/principal-dashboard");
         else setLocation("/student-dashboard");
       }
     }
@@ -79,6 +81,9 @@ function Router() {
       </Route>
       <Route path="/admin-dashboard">
         {() => <ProtectedRoute component={AdminDashboard} allowedRole="admin" />}
+      </Route>
+      <Route path="/principal-dashboard">
+        {() => <ProtectedRoute component={PrincipalDashboard} allowedRole="principal" />}
       </Route>
 
       <Route component={NotFound} />

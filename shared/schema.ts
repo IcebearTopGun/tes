@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -55,6 +55,12 @@ export const exams = pgTable("exams", {
   questionText: text("question_text"),
   modelAnswerText: text("model_answer_text"),
   markingSchemeText: text("marking_scheme_text"),
+  questionImages: text("question_images"), // JSON array of base64 image strings
+  modelAnswerImages: text("model_answer_images"), // JSON array of base64 image strings
+  section: text("section"),
+  subjectCode: text("subject_code"),
+  useNcert: integer("use_ncert").default(0), // 0 = no, 1 = yes
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const answerSheets = pgTable("answer_sheets", {
@@ -263,6 +269,115 @@ export type InsertHomework = z.infer<typeof insertHomeworkSchema>;
 export type HomeworkSubmission = typeof homeworkSubmissions.$inferSelect;
 export type InsertHomeworkSubmission = z.infer<typeof insertHomeworkSubmissionSchema>;
 
+export const classes = pgTable("classes", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  section: text("section").notNull(),
+  description: text("description"),
+  classTeacherId: integer("class_teacher_id").references(() => teachers.id),
+});
+
+export const subjects = pgTable("subjects", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  code: text("code"),
+  description: text("description"),
+  className: text("class_name"),
+  section: text("section"),
+  teacherId: integer("teacher_id").references(() => teachers.id),
+});
+
+export const otpCodes = pgTable("otp_codes", {
+  id: serial("id").primaryKey(),
+  phone: text("phone").notNull(),
+  code: text("code").notNull(),
+  role: text("role").notNull(), // 'teacher' | 'student'
+  identifier: text("identifier").notNull(), // employeeId or admissionNumber
+  expiresAt: text("expires_at").notNull(),
+  verified: integer("verified").notNull().default(0),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 export const insertAdminSchema = createInsertSchema(admins).omit({ id: true });
 export type Admin = typeof admins.$inferSelect;
 export type InsertAdmin = z.infer<typeof insertAdminSchema>;
+
+export const insertClassSchema = createInsertSchema(classes).omit({ id: true });
+export type Class = typeof classes.$inferSelect;
+export type InsertClass = z.infer<typeof insertClassSchema>;
+
+export const insertSubjectSchema = createInsertSchema(subjects).omit({ id: true });
+export type Subject = typeof subjects.$inferSelect;
+export type InsertSubject = z.infer<typeof insertSubjectSchema>;
+
+export type OtpCode = typeof otpCodes.$inferSelect;
+
+// ─── ADMIN USER TABLE (ADMIN + PRINCIPAL roles) ────────────────────────────
+import { pgEnum } from "drizzle-orm/pg-core";
+
+export const adminRoleEnum = pgEnum("admin_role", ["ADMIN", "PRINCIPAL"]);
+
+export const adminUsers = pgTable("admin_users", {
+  id: serial("id").primaryKey(),
+  employeeId: text("employee_id").notNull().unique(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  phoneNumber: text("phone_number"),
+  role: text("role").notNull().default("ADMIN"), // "ADMIN" | "PRINCIPAL"
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// ─── CLASS-SUBJECT MAPPING TABLE ─────────────────────────────────────────────
+export const classSections = pgTable("class_sections", {
+  id: serial("id").primaryKey(),
+  className: integer("class_name").notNull(), // integer only
+  section: text("section").notNull(),         // capital alphabet
+  subjects: text("subjects").notNull(),       // JSON array: ["English","Maths",...]
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// ─── MANAGED STUDENTS TABLE ──────────────────────────────────────────────────
+export const managedStudents = pgTable("managed_students", {
+  id: serial("id").primaryKey(),
+  studentName: text("student_name").notNull(),
+  phoneNumber: text("phone_number"),
+  email: text("email"),
+  admissionNumber: text("admission_number").notNull().unique(),
+  class: text("class").notNull(),
+  section: text("section").notNull(),
+  sessionYear: text("session_year").notNull(),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// ─── MANAGED TEACHERS TABLE ──────────────────────────────────────────────────
+export const managedTeachers = pgTable("managed_teachers", {
+  id: serial("id").primaryKey(),
+  teacherName: text("teacher_name").notNull(),
+  employeeId: text("employee_id").notNull().unique(),
+  email: text("email"),
+  phoneNumber: text("phone_number"),
+  // JSON: [{class, section, subjects:[]}]
+  assignments: text("assignments").notNull().default("[]"),
+  isClassTeacher: integer("is_class_teacher").notNull().default(0),
+  classTeacherOf: text("class_teacher_of"), // "5-A"
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertAdminUserSchema = createInsertSchema(adminUsers).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertClassSectionSchema = createInsertSchema(classSections).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertManagedStudentSchema = createInsertSchema(managedStudents).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertManagedTeacherSchema = createInsertSchema(managedTeachers).omit({ id: true, createdAt: true, updatedAt: true });
+
+export type AdminUser = typeof adminUsers.$inferSelect;
+export type InsertAdminUser = z.infer<typeof insertAdminUserSchema>;
+export type ClassSection = typeof classSections.$inferSelect;
+export type InsertClassSection = z.infer<typeof insertClassSectionSchema>;
+export type ManagedStudent = typeof managedStudents.$inferSelect;
+export type InsertManagedStudent = z.infer<typeof insertManagedStudentSchema>;
+export type ManagedTeacher = typeof managedTeachers.$inferSelect;
+export type InsertManagedTeacher = z.infer<typeof insertManagedTeacherSchema>;
