@@ -127,7 +127,7 @@ export default function PrincipalDashboard() {
   const si = schoolInsights || {};
   const filteredClasses = classFilter ? allClasses.filter((c: any) => String(c.class) === classFilter) : allClasses;
   const filteredTeachers = teacherFilter ? allTeachers.filter((t: any) => String(t.teacherId) === teacherFilter) : allTeachers;
-  const uniqueClasses = Array.from(new Set(allClasses.map((c: any) => c.class))).sort();
+  const uniqueClasses = [...new Set(allClasses.map((c: any) => c.class))].sort();
 
   const classBars = filteredClasses.slice(0, 8).map((c: any, i: number) => ({
     label: `${c.class}-${c.section}`, pct: c.avgScore,
