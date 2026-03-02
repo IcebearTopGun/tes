@@ -928,7 +928,7 @@ export default function AdminDashboard() {
                         <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 4 }}>Step 1 — Class</div>
                         <select value={teacherAssignClass} onChange={e => { setTeacherAssignClass(e.target.value); setTeacherAssignSection(""); setTeacherAssignSubjects([]); }} style={{ width: "100%", height: 36, borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", padding: "0 10px", fontSize: 13 }}>
                           <option value="">— Class —</option>
-                          {[...new Set((classSectionList || []).map((c: any) => String(c.className)))].sort().map(cn => (
+                          {Array.from(new Set((classSectionList || []).map((c: any) => String(c.className)))).sort().map(cn => (
                             <option key={cn} value={cn}>Class {cn}</option>
                           ))}
                         </select>
