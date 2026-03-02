@@ -817,3 +817,36 @@
   animation: sf-spin .7s linear infinite;
 }
 @keyframes sf-spin { to { transform: rotate(360deg); } }
+
+/* ─── Rich Text Editor (Homework) ─────────────────────────────────────────── */
+.hw-rte-content:empty::before {
+  content: attr(data-placeholder);
+  color: var(--mid);
+  pointer-events: none;
+}
+.hw-rte-content:focus { outline: none; }
+.hw-rte-content h3 { font-size: 14px; font-weight: 700; margin: 6px 0 3px; color: var(--ink); }
+.hw-rte-content p { margin: 0 0 4px; }
+.hw-rte-content ul, .hw-rte-content ol { padding-left: 20px; margin: 4px 0; }
+.hw-rte-content li { margin: 2px 0; line-height: 1.6; }
+.hw-rte-content b, .hw-rte-content strong { font-weight: 700; }
+.hw-rte-content i, .hw-rte-content em { font-style: italic; }
+.hw-rte-content u { text-decoration: underline; }
+
+/* Submission progress bar animation */
+@keyframes hw-progress { from { width: 0%; } }
+
+/* ─── Homework AI Chat Panel ─────────────────────────────────────────────── */
+@keyframes hwChatFadeIn  { from { opacity: 0 } to { opacity: 1 } }
+@keyframes hwChatSlideIn { from { transform: translateX(100%) } to { transform: translateX(0) } }
+@keyframes hwDot {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.3 }
+  40%           { transform: scale(1);   opacity: 1   }
+}
+
+/* ─── Homework Class Group ───────────────────────────────────────────────── */
+.hw-group-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0 0 16px;
+}

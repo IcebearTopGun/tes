@@ -2062,19 +2062,158 @@ Generate 5 practice questions that target the student's specific gaps. Vary ques
   app.post("/api/teacher/homework", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
     try {
-      const { subject, studentClass, section, description, modelSolution, dueDate } = req.body;
+      const { subject, studentClass, section, description, questionsText, questionImages, modelSolution, modelAnswerImages, useNcertReference, dueDate } = req.body;
+      // Validate due date is today or future
+      const todayStr = new Date().toISOString().split("T")[0];
+      if (dueDate && dueDate < todayStr) {
+        return res.status(400).json({ message: "Due date cannot be in the past." });
+      }
       const hw = await storage.createHomework({
         teacherId: req.user.id,
         subject,
         className: studentClass || req.body.className || "",
         section: section || "",
         description,
+        questionsText: questionsText || null,
+        questionImages: questionImages ? JSON.stringify(questionImages) : null,
         modelSolutionText: modelSolution || req.body.modelSolutionText || null,
+        modelAnswerImages: modelAnswerImages ? JSON.stringify(modelAnswerImages) : null,
+        useNcertReference: useNcertReference ? 1 : 0,
         dueDate,
       });
       res.status(201).json(hw);
     } catch (err: any) {
       res.status(500).json({ message: "Failed to create homework", detail: err?.message });
+    }
+  });
+
+  // Teacher: update homework (only before due date)
+  app.put("/api/teacher/homework/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const hwId = parseInt(req.params.id);
+      const hw = await storage.getHomeworkById(hwId);
+      if (!hw) return res.status(404).json({ message: "Homework not found" });
+      if (hw.teacherId !== req.user.id) return res.status(403).json({ message: "Forbidden" });
+      // Check if past due date
+      const today = new Date().toISOString().split("T")[0];
+      if (hw.dueDate < today) return res.status(400).json({ message: "Cannot edit homework after due date" });
+      const { subject, studentClass, section, description, questionsText, questionImages, modelSolution, modelAnswerImages, useNcertReference, dueDate } = req.body;
+      const updated = await storage.updateHomework(hwId, {
+        subject: subject ?? hw.subject,
+        className: studentClass ?? hw.className,
+        section: section ?? hw.section,
+        description: description ?? hw.description,
+        questionsText: questionsText ?? hw.questionsText,
+        questionImages: questionImages ?? hw.questionImages,
+        modelSolutionText: modelSolution ?? hw.modelSolutionText,
+        modelAnswerImages: modelAnswerImages ?? hw.modelAnswerImages,
+        useNcertReference: useNcertReference !== undefined ? (useNcertReference ? 1 : 0) : hw.useNcertReference,
+        dueDate: dueDate ?? hw.dueDate,
+      });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to update homework", detail: err?.message });
+    }
+  });
+
+  // Teacher: delete homework (only allowed if not past due)
+  app.delete("/api/teacher/homework/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const hwId = parseInt(req.params.id);
+      const hw = await storage.getHomeworkById(hwId);
+      if (!hw) return res.status(404).json({ message: "Homework not found" });
+      if (hw.teacherId !== req.user.id) return res.status(403).json({ message: "Forbidden" });
+      const todayStr = new Date().toISOString().split("T")[0];
+      if (hw.dueDate < todayStr) {
+        return res.status(400).json({ message: "Cannot delete homework after its due date has passed. Past records are locked for academic integrity." });
+      }
+      await storage.deleteHomework(hwId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to delete homework", detail: err?.message });
+    }
+  });
+
+  // Teacher: get evaluations for a homework
+  app.get("/api/teacher/homework/:id/evaluations", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const hwId = parseInt(req.params.id);
+      const hw = await storage.getHomeworkById(hwId);
+      if (!hw) return res.status(404).json({ message: "Homework not found" });
+      if (hw.teacherId !== req.user.id) return res.status(403).json({ message: "Forbidden" });
+      const evaluations = await storage.getHomeworkEvaluations(hwId);
+      res.json(evaluations);
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to load evaluations", detail: err?.message });
+    }
+  });
+
+  // ─── HOMEWORK AI CHAT ──────────────────────────────────────────────────────
+  // Stateless per-homework AI endpoint (no conversation history needed)
+  app.post("/api/teacher/homework/:id/chat", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const hwId = parseInt(req.params.id);
+      const hw = await storage.getHomeworkById(hwId);
+      if (!hw) return res.status(404).json({ message: "Homework not found" });
+      if (hw.teacherId !== req.user.id) return res.status(403).json({ message: "Forbidden" });
+
+      const { question, history = [] } = req.body;
+
+      // Fetch evaluations/submissions for context
+      const evals = await storage.getHomeworkEvaluations(hwId);
+      const submissionCount = evals.length;
+      const scoredEvals = evals.filter((e: any) => e.correctnessScore != null);
+      const avgScore = scoredEvals.length > 0
+        ? Math.round(scoredEvals.reduce((a: number, e: any) => a + e.correctnessScore, 0) / scoredEvals.length)
+        : null;
+      const onTimeCount = evals.filter((e: any) => e.isOnTime).length;
+
+      const hwContext = `
+HOMEWORK DETAILS:
+- Subject: ${hw.subject}
+- Class: ${hw.className}, Section: ${hw.section}
+- Due Date: ${hw.dueDate}
+- Description: ${hw.description || "N/A"}
+- Questions: ${hw.questionsText || "N/A"}
+- Model Answer: ${hw.modelSolutionText || "N/A"}
+- NCERT Reference: ${hw.useNcertReference ? "Yes" : "No"}
+
+SUBMISSION STATS:
+- Total submissions: ${submissionCount}
+- Average score: ${avgScore !== null ? avgScore + "/100" : "Not yet evaluated"}
+- Submitted on time: ${onTimeCount} / ${submissionCount}
+- Score breakdown: ${scoredEvals.map((e: any) => `${e.studentName || e.admissionNumber}: ${e.correctnessScore}/100`).join(", ") || "None yet"}
+
+INDIVIDUAL RESULTS:
+${evals.map((e: any) => `- ${e.studentName || e.admissionNumber} (${e.admissionNumber}): Score=${e.correctnessScore ?? "Pending"}, OnTime=${e.isOnTime ? "Yes" : "No"}, Feedback="${(e.aiFeedback || "").slice(0, 100)}"`).join("\n") || "No submissions yet"}
+`.trim();
+
+      const systemPrompt = `You are an AI assistant helping a teacher understand a specific homework assignment and its student results.
+Only answer questions about this homework. Be concise and helpful.
+
+${hwContext}`;
+
+      const messages: any[] = [
+        { role: "system", content: systemPrompt },
+        ...history.slice(-8).map((m: any) => ({ role: m.role, content: m.content })),
+        { role: "user", content: question }
+      ];
+
+      const response = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages,
+        max_tokens: 500,
+      });
+
+      const answer = response.choices[0].message.content || "I couldn't analyze that.";
+      res.json({ answer });
+    } catch (err: any) {
+      console.error("Homework chat error:", err);
+      res.status(500).json({ message: "Chat failed", detail: err?.message });
     }
   });
 

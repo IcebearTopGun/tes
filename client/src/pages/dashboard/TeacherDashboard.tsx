@@ -447,6 +447,1118 @@ function getInitials(name: string) {
   return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
 }
 
+// ─── Rich Text Mini-Editor ────────────────────────────────────────────────────
+// A lightweight contenteditable-based rich text editor that stores HTML
+function RichTextEditor({
+  value, onChange, placeholder, minHeight = 120, "data-testid": testId
+}: { value: string; onChange: (v: string) => void; placeholder?: string; minHeight?: number; "data-testid"?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const isInitialized = useRef(false);
+
+  // Sync external value changes only on first mount
+  useEffect(() => {
+    if (ref.current && !isInitialized.current) {
+      ref.current.innerHTML = value || "";
+      isInitialized.current = true;
+    }
+  }, []);
+
+  const execCmd = (cmd: string, val?: string) => {
+    ref.current?.focus();
+    document.execCommand(cmd, false, val);
+    ref.current?.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  const tools: { icon: string; cmd: string; val?: string; title: string }[] = [
+    { icon: "B", cmd: "bold", title: "Bold" },
+    { icon: "I", cmd: "italic", title: "Italic" },
+    { icon: "U", cmd: "underline", title: "Underline" },
+    { icon: "H₁", cmd: "formatBlock", val: "h3", title: "Heading" },
+    { icon: "¶", cmd: "formatBlock", val: "p", title: "Paragraph" },
+    { icon: "• —", cmd: "insertUnorderedList", title: "Bullet list" },
+    { icon: "1. —", cmd: "insertOrderedList", title: "Numbered list" },
+  ];
+
+  return (
+    <div style={{
+      border: "1.5px solid var(--border)", borderRadius: 12, overflow: "hidden",
+      background: "#fff", transition: "border-color 0.15s",
+      boxShadow: "0 1px 3px rgba(0,0,0,.04)"
+    }}
+      onFocusCapture={e => (e.currentTarget.style.borderColor = "var(--ink)")}
+      onBlurCapture={e => (e.currentTarget.style.borderColor = "var(--border)")}
+    >
+      {/* Toolbar */}
+      <div style={{
+        display: "flex", gap: 2, padding: "6px 10px", background: "#f8f7f5",
+        borderBottom: "1px solid var(--border)", flexWrap: "wrap", alignItems: "center"
+      }}>
+        {tools.map(t => (
+          <button
+            key={t.cmd + (t.val || "")}
+            title={t.title}
+            onMouseDown={e => { e.preventDefault(); execCmd(t.cmd, t.val); }}
+            style={{
+              padding: "3px 8px", fontSize: 11, fontWeight: 700,
+              border: "1px solid transparent", borderRadius: 5,
+              background: "transparent", cursor: "pointer",
+              color: "var(--ink2)", fontFamily: "inherit",
+              transition: "all 0.1s",
+              minWidth: 28, textAlign: "center"
+            }}
+            onMouseEnter={e => { (e.target as HTMLElement).style.background = "var(--cream)"; (e.target as HTMLElement).style.borderColor = "var(--border)"; }}
+            onMouseLeave={e => { (e.target as HTMLElement).style.background = "transparent"; (e.target as HTMLElement).style.borderColor = "transparent"; }}
+          >{t.icon}</button>
+        ))}
+        <div style={{ width: 1, height: 16, background: "var(--border)", margin: "0 4px" }} />
+        <button
+          title="Clear formatting"
+          onMouseDown={e => { e.preventDefault(); execCmd("removeFormat"); }}
+          style={{ padding: "3px 8px", fontSize: 11, border: "1px solid transparent", borderRadius: 5, background: "transparent", cursor: "pointer", color: "var(--mid)", fontFamily: "inherit" }}
+        >✕</button>
+      </div>
+      {/* Editable area */}
+      <div
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        data-testid={testId}
+        data-placeholder={placeholder}
+        className="hw-rte-content"
+        onInput={() => { if (ref.current) onChange(ref.current.innerHTML); }}
+        style={{
+          minHeight, padding: "12px 14px", outline: "none",
+          fontSize: 13, lineHeight: 1.65, color: "var(--ink)",
+          fontFamily: "inherit",
+        }}
+      />
+    </div>
+  );
+}
+
+// ─── OcrImageUploader ─────────────────────────────────────────────────────────
+function OcrImageUploader({
+  images,
+  onImages,
+  isProcessing,
+  onProcess,
+  label = "Upload question images",
+  readFileAsDataUrl
+}: {
+  images: string[];
+  onImages: (imgs: string[]) => void;
+  isProcessing: boolean;
+  onProcess: () => void;
+  label?: string;
+  readFileAsDataUrl: (f: File) => Promise<string>;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const addImages = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setIsUploading(true);
+    const newImgs: string[] = [];
+    for (const file of Array.from(files)) {
+      try { newImgs.push(await readFileAsDataUrl(file)); } catch {}
+    }
+    onImages([...images, ...newImgs]);
+    setIsUploading(false);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={e => { e.preventDefault(); setIsDragging(false); addImages(e.dataTransfer.files); }}
+        onClick={() => inputRef.current?.click()}
+        style={{
+          border: `2px dashed ${isDragging ? "var(--ink)" : "var(--border)"}`,
+          borderRadius: 12, padding: "18px 16px", textAlign: "center",
+          cursor: "pointer", background: isDragging ? "var(--cream)" : "#fafaf9",
+          transition: "all 0.15s"
+        }}
+      >
+        {isUploading ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--mid)", fontSize: 13 }}>
+            <Loader2 style={{ width: 16, height: 16, animation: "spin 1s linear infinite" }} />
+            Reading images…
+          </div>
+        ) : (
+          <div style={{ color: "var(--mid)", fontSize: 13 }}>
+            <div style={{ fontSize: 22, marginBottom: 4 }}>📎</div>
+            <div style={{ fontWeight: 600, color: "var(--ink2)" }}>{label}</div>
+            <div style={{ fontSize: 11, marginTop: 2 }}>Click or drag & drop · PNG, JPG, WEBP</div>
+          </div>
+        )}
+        <input ref={inputRef} type="file" accept="image/*" multiple className="hidden"
+          onChange={e => addImages(e.target.files)} />
+      </div>
+
+      {/* Image previews */}
+      {images.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+          {images.map((img, i) => (
+            <div key={i} style={{
+              position: "relative", borderRadius: 10, overflow: "hidden",
+              border: "1.5px solid var(--border)", aspectRatio: "1",
+              boxShadow: "0 1px 4px rgba(0,0,0,.06)"
+            }}>
+              <img src={img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              <button
+                onClick={e => { e.stopPropagation(); onImages(images.filter((_, j) => j !== i)); }}
+                style={{
+                  position: "absolute", top: 4, right: 4,
+                  width: 20, height: 20, borderRadius: "50%",
+                  background: "#d94f4fee", color: "#fff", border: "none",
+                  cursor: "pointer", fontSize: 11, display: "flex",
+                  alignItems: "center", justifyContent: "center", fontWeight: 700
+                }}
+              >✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* OCR button */}
+      {images.length > 0 && (
+        <button
+          onClick={onProcess}
+          disabled={isProcessing}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+            padding: "8px 16px", borderRadius: 8, border: "1.5px solid var(--border)",
+            background: isProcessing ? "var(--cream)" : "#fff", cursor: isProcessing ? "not-allowed" : "pointer",
+            fontSize: 12, fontWeight: 600, color: "var(--ink2)", transition: "all 0.15s",
+            width: "100%"
+          }}
+        >
+          {isProcessing
+            ? <><Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} /> Processing text…</>
+            : <><span style={{ fontSize: 14 }}>🔍</span> Extract text via OCR</>
+          }
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── HwTabBar ─────────────────────────────────────────────────────────────────
+function HwTabBar({ active, onChange, errorTabs = [] }: {
+  active: string;
+  onChange: (t: "description"|"questions"|"answers") => void;
+  errorTabs?: string[];
+}) {
+  const tabs = [
+    { id: "description", icon: "📋", label: "Description" },
+    { id: "questions",   icon: "❓", label: "Questions" },
+    { id: "answers",     icon: "✅", label: "Model Answers" },
+  ] as const;
+  return (
+    <div style={{ display: "flex", background: "#f5f4f1", borderRadius: 10, padding: 3, gap: 2 }}>
+      {tabs.map(t => {
+        const isActive = active === t.id;
+        const hasError = errorTabs.includes(t.id);
+        return (
+          <button
+            key={t.id}
+            onClick={() => onChange(t.id)}
+            style={{
+              flex: 1, padding: "7px 4px", borderRadius: 8,
+              border: hasError && !isActive ? "1.5px solid #fca5a5" : "none",
+              background: isActive ? (hasError ? "#fff5f5" : "#fff") : "transparent",
+              boxShadow: isActive ? "0 1px 4px rgba(0,0,0,.08)" : "none",
+              color: hasError ? (isActive ? "#dc2626" : "#ef4444") : (isActive ? "var(--ink)" : "var(--mid)"),
+              fontWeight: isActive ? 700 : 500,
+              fontSize: 12, cursor: "pointer", transition: "all 0.15s",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+              position: "relative",
+            }}
+          >
+            <span>{t.icon}</span>
+            {t.label}
+            {hasError && (
+              <span style={{
+                position: "absolute", top: 3, right: 5,
+                width: 7, height: 7, borderRadius: "50%",
+                background: "#ef4444",
+              }} />
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── HwAiChat ────────────────────────────────────────────────────────────────
+function HwAiChat({ hw, onClose }: { hw: any; onClose: () => void }) {
+  const [input, setInput] = useState("");
+  const [history, setHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    // Auto-focus on open
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }, []);
+
+  useEffect(() => {
+    // Scroll to bottom on new message
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [history, loading]);
+
+  const QUICK_PROMPTS = [
+    "Summarise all submissions",
+    "Who scored highest?",
+    "What evaluation criteria was used?",
+    "How many submitted on time?",
+    "What are the common mistakes?",
+  ];
+
+  const send = async (text: string) => {
+    if (!text.trim() || loading) return;
+    const userMsg = { role: "user" as const, content: text };
+    setHistory(h => [...h, userMsg]);
+    setInput("");
+    setLoading(true);
+    try {
+      const res = await fetchWithAuth(`/api/teacher/homework/${hw.id}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ question: text, history }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed");
+      setHistory(h => [...h, { role: "assistant", content: data.answer }]);
+    } catch (err: any) {
+      toast({ title: "AI Error", description: err.message, variant: "destructive" });
+      setHistory(h => h.slice(0, -1)); // remove optimistic user message
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isPastDue = hw.dueDate < new Date().toISOString().split("T")[0];
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 100,
+      display: "flex", alignItems: "flex-end", justifyContent: "flex-end",
+      pointerEvents: "none",
+    }}>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "absolute", inset: 0, background: "rgba(26,26,46,0.22)",
+          backdropFilter: "blur(3px)", pointerEvents: "all",
+          animation: "hwChatFadeIn 0.18s ease",
+        }}
+      />
+      {/* Panel */}
+      <div style={{
+        position: "relative", width: 400, height: "100vh",
+        background: "#0f0f1e", display: "flex", flexDirection: "column",
+        boxShadow: "-8px 0 40px rgba(0,0,0,0.3)", pointerEvents: "all",
+        animation: "hwChatSlideIn 0.22s cubic-bezier(0.22,1,0.36,1)",
+      }}>
+
+        {/* ── Header ── */}
+        <div style={{
+          padding: "16px 20px 14px", background: "#13132a",
+          borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <div style={{
+                  width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+                  background: "linear-gradient(135deg, #6c47d8, #3b82f6)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 13,
+                }}>✦</div>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: "rgba(255,255,255,0.45)", textTransform: "uppercase" }}>Homework AI</span>
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", lineHeight: 1.3, paddingRight: 8 }}>
+                {hw.subject} — Class {hw.className}{hw.section ? ` · ${hw.section}` : ""}
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                <span style={{
+                  fontSize: 10, padding: "2px 7px", borderRadius: 4, fontWeight: 600,
+                  background: isPastDue ? "rgba(251,191,36,0.15)" : "rgba(34,197,94,0.15)",
+                  color: isPastDue ? "#fbbf24" : "#4ade80",
+                  border: `1px solid ${isPastDue ? "rgba(251,191,36,0.25)" : "rgba(34,197,94,0.25)"}`,
+                }}>
+                  {isPastDue ? "🔒 Past due" : `📅 Due ${new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}
+                </span>
+                <span style={{
+                  fontSize: 10, padding: "2px 7px", borderRadius: 4, fontWeight: 600,
+                  background: "rgba(99,102,241,0.15)", color: "#a5b4fc",
+                  border: "1px solid rgba(99,102,241,0.25)",
+                }}>
+                  👥 {hw.submissionCount ?? 0}/{hw.totalStudents ?? 0} submitted
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+                background: "rgba(255,255,255,0.08)", border: "none",
+                cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 14,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all 0.15s"
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.15)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
+            >✕</button>
+          </div>
+        </div>
+
+        {/* ── Messages ── */}
+        <div ref={scrollRef} style={{
+          flex: 1, overflowY: "auto", padding: "16px 16px 8px",
+          display: "flex", flexDirection: "column", gap: 12,
+          background: "#0d0d1f",
+        }}>
+          {history.length === 0 && !loading && (
+            <div style={{ padding: "12px 0" }}>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginBottom: 14, textAlign: "center" }}>
+                Ask anything about this homework assignment
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {QUICK_PROMPTS.map(q => (
+                  <button
+                    key={q}
+                    onClick={() => send(q)}
+                    style={{
+                      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 10, padding: "10px 14px", textAlign: "left",
+                      fontSize: 13, color: "rgba(255,255,255,0.7)", cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 10, transition: "all 0.15s",
+                      fontFamily: "inherit",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(108,71,216,0.12)"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.3)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
+                  >
+                    <span style={{ fontSize: 10, opacity: 0.5 }}>↗</span> {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {history.map((msg, i) => (
+            <div key={i} style={{
+              display: "flex", gap: 10, alignItems: "flex-end",
+              justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+            }}>
+              {msg.role === "assistant" && (
+                <div style={{
+                  width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+                  background: "linear-gradient(135deg,#6c47d8,#3b82f6)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 11, color: "#fff", fontWeight: 700,
+                }}>✦</div>
+              )}
+              <div style={{
+                maxWidth: "82%", padding: "10px 13px", borderRadius: 12,
+                fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap",
+                ...(msg.role === "user" ? {
+                  background: "linear-gradient(135deg,#6c47d8,#4f46e5)",
+                  color: "#fff", borderBottomRightRadius: 4,
+                } : {
+                  background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.88)",
+                  border: "1px solid rgba(255,255,255,0.08)", borderBottomLeftRadius: 4,
+                })
+              }}>{msg.content}</div>
+            </div>
+          ))}
+
+          {loading && (
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+              <div style={{ width: 24, height: 24, borderRadius: 6, background: "linear-gradient(135deg,#6c47d8,#3b82f6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#fff", fontWeight: 700 }}>✦</div>
+              <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px 12px 12px 4px", padding: "10px 14px", display: "flex", gap: 5 }}>
+                {[0,1,2].map(i => (
+                  <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.4)", animation: `hwDot 1.2s ${i * 0.2}s infinite` }} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Input ── */}
+        <div style={{
+          padding: "12px 16px 16px", borderTop: "1px solid rgba(255,255,255,0.07)",
+          background: "#13132a", flexShrink: 0
+        }}>
+          <form
+            onSubmit={e => { e.preventDefault(); send(input); }}
+            style={{ display: "flex", gap: 8, alignItems: "center" }}
+          >
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="Ask about submissions, scores, criteria…"
+              disabled={loading}
+              style={{
+                flex: 1, background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10,
+                padding: "10px 14px", fontSize: 13, color: "#fff",
+                outline: "none", fontFamily: "inherit", transition: "border-color 0.15s",
+              }}
+              onFocus={e => (e.currentTarget.style.borderColor = "rgba(108,71,216,0.6)")}
+              onBlur={e => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)")}
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || loading}
+              style={{
+                width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+                background: input.trim() && !loading ? "linear-gradient(135deg,#6c47d8,#4f46e5)" : "rgba(255,255,255,0.08)",
+                border: "none", cursor: input.trim() && !loading ? "pointer" : "default",
+                color: "#fff", fontSize: 16, display: "flex",
+                alignItems: "center", justifyContent: "center", transition: "all 0.15s",
+              }}
+            >↑</button>
+          </form>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 8, textAlign: "center" }}>
+            Powered by AI · answers are based on this homework's data only
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── HwClassGroup ─────────────────────────────────────────────────────────────
+// Collapsible group header for a class+section
+function HwClassGroup({ label, count, activeCount, children }: {
+  label: string; count: number; activeCount: number; children: React.ReactNode;
+}) {
+  const [collapsed, setCollapsed] = useState(true); // start collapsed by default
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        style={{
+          display: "flex", alignItems: "center", gap: 10, width: "100%",
+          background: "none", border: "none", cursor: "pointer", padding: "4px 0 10px",
+          textAlign: "left",
+        }}
+      >
+        <div style={{
+          width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+          background: "var(--lav-bg)", display: "flex",
+          alignItems: "center", justifyContent: "center",
+          fontSize: 13, fontWeight: 800, color: "var(--ink2)",
+          transition: "transform 0.15s",
+        }}>
+          {label.replace("Class ", "").split(" ")[0]}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{label}</div>
+          <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>
+            {count} assignment{count !== 1 ? "s" : ""}
+            {activeCount > 0 && <span style={{ color: "#166534", marginLeft: 6 }}>· {activeCount} active</span>}
+          </div>
+        </div>
+        <div style={{
+          width: 22, height: 22, borderRadius: 6,
+          background: "var(--cream)", display: "flex",
+          alignItems: "center", justifyContent: "center",
+          fontSize: 11, color: "var(--mid)", transition: "all 0.15s",
+          transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)",
+        }}>▾</div>
+      </button>
+      {!collapsed && (
+        <div style={{ paddingLeft: 0 }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── HwListItem ─────────────────────────────────────────────────────────────
+function HwListItem({ hw, today, onEval, onEdit, onDelete, onChat }: {
+  hw: any; today: string;
+  onEval: () => void; onEdit: () => void; onDelete: () => void; onChat: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isPastDue = hw.dueDate < today;
+  const subCount = hw.submissionCount ?? 0;
+  const totalStu = hw.totalStudents ?? 0;
+  const pct = totalStu > 0 ? Math.round((subCount / totalStu) * 100) : 0;
+
+  return (
+    <div style={{
+      borderRadius: 14,
+      border: `1.5px solid ${isPastDue ? "rgba(26,26,46,.07)" : "rgba(26,26,46,.1)"}`,
+      marginBottom: 8, background: isPastDue ? "#fafaf8" : "#fff",
+      overflow: "visible", opacity: isPastDue ? 0.85 : 1,
+      transition: "box-shadow 0.15s",
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", padding: "13px 14px", gap: 12 }}>
+        {/* Subject icon */}
+        <div style={{
+          width: 40, height: 40, borderRadius: 10,
+          background: isPastDue ? "var(--cream)" : "var(--lav-bg)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 18, flexShrink: 0, marginTop: 1
+        }}>📝</div>
+
+        {/* Main info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{hw.subject}</div>
+            {hw.useNcertReference ? (
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#eff6ff", color: "#1d4ed8", fontWeight: 700 }}>NCERT</span>
+            ) : null}
+            {(hw.questionsText || hw.questionImages) ? (
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#fefce8", color: "#854d0e", fontWeight: 700 }}>Questions</span>
+            ) : null}
+          </div>
+
+          {/* Description preview */}
+          <div
+            style={{ fontSize: 12, color: "var(--mid)", marginTop: 3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical" }}
+            dangerouslySetInnerHTML={{ __html: hw.description }}
+          />
+
+          {/* Badges */}
+          <div style={{ display: "flex", gap: 7, marginTop: 7, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600,
+              color: isPastDue ? "#92400e" : "#166534",
+              background: isPastDue ? "#fef3c7" : "#dcfce7",
+              padding: "2px 8px", borderRadius: 6,
+            }}>
+              {isPastDue ? "🔒" : "📅"} Due {new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+            </span>
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600,
+              color: pct === 100 ? "#166534" : pct > 50 ? "#92400e" : "var(--mid)",
+              background: pct === 100 ? "#dcfce7" : pct > 50 ? "#fef3c7" : "var(--cream)",
+              padding: "2px 8px", borderRadius: 6,
+            }}>
+              👥 {subCount}/{totalStu}{totalStu > 0 ? ` (${pct}%)` : ""}
+            </span>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+          {/* AI Chat icon — the new feature */}
+          <button
+            onClick={onChat}
+            title="Ask AI about this homework"
+            data-testid={`btn-hw-chat-${hw.id}`}
+            style={{
+              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+              border: "1.5px solid rgba(108,71,216,0.25)",
+              background: "linear-gradient(135deg,rgba(108,71,216,0.08),rgba(59,130,246,0.08))",
+              cursor: "pointer", fontSize: 15, color: "#6c47d8",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "rgba(108,71,216,0.18)"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.5)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg,rgba(108,71,216,0.08),rgba(59,130,246,0.08))"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.25)"; }}
+          >✦</button>
+
+          {/* Evaluations */}
+          <button
+            onClick={onEval}
+            data-testid={`btn-hw-eval-${hw.id}`}
+            style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "6px 11px", borderRadius: 8,
+              border: "1.5px solid var(--border)", background: "#fff",
+              fontSize: 12, fontWeight: 600, color: "var(--ink2)",
+              cursor: "pointer", transition: "all 0.15s",
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = "var(--lav-bg)")}
+            onMouseLeave={e => (e.currentTarget.style.background = "#fff")}
+          >
+            <span>📊</span> Results
+          </button>
+
+          {/* Three-dot menu */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setMenuOpen(p => !p)}
+              data-testid={`btn-hw-menu-${hw.id}`}
+              style={{
+                width: 32, height: 32, borderRadius: 8,
+                border: "1.5px solid var(--border)", background: "#fff",
+                cursor: "pointer", fontSize: 17, color: "var(--mid)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all 0.15s"
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "var(--cream)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "#fff")}
+            >⋮</button>
+            {menuOpen && (
+              <div
+                style={{
+                  position: "absolute", right: 0, top: 36, zIndex: 50,
+                  background: "#fff", border: "1.5px solid var(--border)", borderRadius: 12,
+                  boxShadow: "0 6px 24px rgba(0,0,0,.12)", minWidth: 172, overflow: "hidden"
+                }}
+                onMouseLeave={() => setMenuOpen(false)}
+              >
+                {!isPastDue ? (
+                  <button
+                    style={{ width: "100%", padding: "11px 16px", textAlign: "left", fontSize: 13, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "var(--cream)")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                    onClick={() => { setMenuOpen(false); onEdit(); }}
+                  ><span>✏️</span> Edit Homework</button>
+                ) : (
+                  <div style={{ padding: "11px 16px", fontSize: 12, color: "var(--mid)", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span>🔒</span> Editing locked
+                  </div>
+                )}
+                <div style={{ height: 1, background: "var(--border)", margin: "0 12px" }} />
+                {!isPastDue ? (
+                  <button
+                    style={{ width: "100%", padding: "11px 16px", textAlign: "left", fontSize: 13, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", color: "#d94f4f", display: "flex", alignItems: "center", gap: 8 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "#fff0f0")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                    onClick={() => { setMenuOpen(false); onDelete(); }}
+                  ><span>🗑️</span> Delete</button>
+                ) : (
+                  <div style={{ padding: "11px 16px", fontSize: 12, color: "var(--mid)", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span>🔒</span> Deletion locked
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      {totalStu > 0 && (
+        <div style={{ padding: "0 14px 10px", marginTop: -4 }}>
+          <div style={{ height: 3, background: "var(--cream)", borderRadius: 99, overflow: "hidden" }}>
+            <div style={{
+              height: "100%", borderRadius: 99,
+              width: `${pct}%`, transition: "width 0.5s ease",
+              background: pct === 100 ? "#22c55e" : pct > 50 ? "#f59e0b" : "var(--lav-card)"
+            }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── HwFormBody ─────────────────────────────────────────────────────────────────
+// Shared form body used in both Create and Edit dialogs
+function HwFormBody({
+  activeTab, onTabChange,
+  description, onDescription,
+  questionsText, onQuestionsText,
+  questionImages, onQuestionImages,
+  modelSolution, onModelSolution,
+  modelAnswerImages, onModelAnswerImages,
+  useNcert, onUseNcert,
+  hwClass, hwSubject,
+  readFileAsDataUrl,
+  requiredTabs = [],
+}: {
+  activeTab: "description"|"questions"|"answers";
+  onTabChange: (t: "description"|"questions"|"answers") => void;
+  description: string; onDescription: (v: string) => void;
+  questionsText: string; onQuestionsText: (v: string) => void;
+  questionImages: string[]; onQuestionImages: (v: string[]) => void;
+  modelSolution: string; onModelSolution: (v: string) => void;
+  modelAnswerImages: string[]; onModelAnswerImages: (v: string[]) => void;
+  useNcert: boolean; onUseNcert: (v: boolean) => void;
+  hwClass: string; hwSubject: string;
+  readFileAsDataUrl: (f: File) => Promise<string>;
+  requiredTabs?: string[];
+}) {
+  const [isOcrQProcessing, setIsOcrQProcessing] = useState(false);
+  const [isOcrAProcessing, setIsOcrAProcessing] = useState(false);
+
+  const simulateOcr = async (
+    images: string[],
+    currentText: string,
+    onText: (v: string) => void,
+    setProcessing: (v: boolean) => void
+  ) => {
+    if (!images.length) return;
+    setProcessing(true);
+    // In production this would call a real OCR endpoint
+    // For now we simulate with a delay and append a placeholder
+    await new Promise(r => setTimeout(r, 1400));
+    onText(currentText + (currentText ? "\n" : "") + "[OCR text extracted from images — replace with actual OCR integration]");
+    setProcessing(false);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Compute which required tabs are still empty */}
+      {(() => {
+        const isEmpty = (v: string) => !v || v === "<br>" || v === "<p><br></p>" || v.trim() === "";
+        const errorTabs = requiredTabs.filter(t =>
+          (t === "description" && isEmpty(description)) ||
+          (t === "questions"   && isEmpty(questionsText))
+        );
+        return <HwTabBar active={activeTab} onChange={onTabChange} errorTabs={errorTabs} />;
+      })()}
+
+      {/* ── DESCRIPTION TAB ── */}
+      {activeTab === "description" && (
+        <div>
+          <div style={{ marginBottom: 6 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <label className="sf-fld-lbl">Task Description</label>
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#fee2e2", color: "#dc2626", fontWeight: 700 }}>Required</span>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>Describe what students need to do. Rich formatting is supported.</div>
+          </div>
+          <RichTextEditor
+            value={description}
+            onChange={onDescription}
+            placeholder="e.g. Read Chapter 3 and answer the following questions…"
+            minHeight={140}
+            data-testid="input-hw-description"
+          />
+        </div>
+      )}
+
+      {/* ── QUESTIONS TAB ── */}
+      {activeTab === "questions" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <label className="sf-fld-lbl">Write Questions</label>
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#fee2e2", color: "#dc2626", fontWeight: 700 }}>Required</span>
+            </div>
+            <RichTextEditor
+              value={questionsText}
+              onChange={onQuestionsText}
+              placeholder="Q1. Define photosynthesis.&#10;Q2. Explain the process of…"
+              minHeight={130}
+            />
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>or upload images</span>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+
+          <OcrImageUploader
+            images={questionImages}
+            onImages={onQuestionImages}
+            isProcessing={isOcrQProcessing}
+            onProcess={() => simulateOcr(questionImages, questionsText, onQuestionsText, setIsOcrQProcessing)}
+            label="Upload question paper images"
+            readFileAsDataUrl={readFileAsDataUrl}
+          />
+        </div>
+      )}
+
+      {/* ── ANSWERS TAB ── */}
+      {activeTab === "answers" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label className="sf-fld-lbl" style={{ marginBottom: 6, display: "block" }}>Model Answer (rich text)</label>
+            <RichTextEditor
+              value={modelSolution}
+              onChange={onModelSolution}
+              placeholder="Provide the expected answer for AI to grade against…"
+              minHeight={130}
+              data-testid="input-hw-solution"
+            />
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.08em", flexShrink: 0 }}>or upload images</span>
+            <div style={{ flex: 1, height: 1, background: "var(--border)" }} />
+          </div>
+
+          <OcrImageUploader
+            images={modelAnswerImages}
+            onImages={onModelAnswerImages}
+            isProcessing={isOcrAProcessing}
+            onProcess={() => simulateOcr(modelAnswerImages, modelSolution, onModelSolution, setIsOcrAProcessing)}
+            label="Upload model answer images"
+            readFileAsDataUrl={readFileAsDataUrl}
+          />
+
+          {/* NCERT toggle */}
+          <button
+            type="button"
+            onClick={() => onUseNcert(!useNcert)}
+            style={{
+              display: "flex", alignItems: "flex-start", gap: 12,
+              padding: "12px 14px", borderRadius: 12, cursor: "pointer",
+              border: `1.5px solid ${useNcert ? "#3b82f6" : "var(--border)"}`,
+              background: useNcert ? "#eff6ff" : "#fafaf9",
+              textAlign: "left", width: "100%", transition: "all 0.15s"
+            }}
+          >
+            <div style={{
+              width: 18, height: 18, borderRadius: 5, marginTop: 1, flexShrink: 0,
+              border: `2px solid ${useNcert ? "#3b82f6" : "var(--border)"}`,
+              background: useNcert ? "#3b82f6" : "transparent",
+              display: "flex", alignItems: "center", justifyContent: "center"
+            }}>
+              {useNcert && <span style={{ color: "#fff", fontSize: 11, fontWeight: 900 }}>✓</span>}
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>📚 Reference NCERT books for evaluation</div>
+              <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>
+                AI will use the NCERT textbook for Class {hwClass || "—"}, {hwSubject || "—"} when grading student submissions.
+              </div>
+            </div>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── EditHwForm ─────────────────────────────────────────────────
+function EditHwForm({ hw, teacherOptions, onSave, isSaving, sectionsForClass, subjectsForClassSection, readFileAsDataUrl }: {
+  hw: any;
+  teacherOptions: any;
+  onSave: (data: any) => void;
+  isSaving: boolean;
+  sectionsForClass: (cls: string) => string[];
+  subjectsForClassSection: (cls: string, sec: string) => string[];
+  readFileAsDataUrl: (file: File) => Promise<string>;
+}) {
+  const today = new Date().toISOString().split("T")[0];
+  const [cls, setCls] = useState(hw.className || "");
+  const [sec, setSec] = useState(hw.section || "");
+  const [subj, setSubj] = useState(hw.subject || "");
+  const [desc, setDesc] = useState(hw.description || "");
+  const [qText, setQText] = useState(hw.questionsText || "");
+  const [qImgs, setQImgs] = useState<string[]>(() => { try { return hw.questionImages ? JSON.parse(hw.questionImages) : []; } catch { return []; } });
+  const [mText, setMText] = useState(hw.modelSolutionText || "");
+  const [mImgs, setMImgs] = useState<string[]>(() => { try { return hw.modelAnswerImages ? JSON.parse(hw.modelAnswerImages) : []; } catch { return []; } });
+  const [ncert, setNcert] = useState(!!hw.useNcertReference);
+  const [dueDate, setDueDate] = useState(hw.dueDate || "");
+  const [activeTab, setActiveTab] = useState<"description"|"questions"|"answers">("description");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 4 }}>
+      {/* Header fields */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div>
+          <label className="sf-fld-lbl">Class *</label>
+          <select className="sf-fsel" style={{ width: "100%", marginTop: 4 }} value={cls}
+            onChange={e => { setCls(e.target.value); setSec(""); setSubj(""); }}>
+            {(teacherOptions?.classSections?.length
+              ? [...new Set(teacherOptions.classSections.map((cs: any) => cs.className))].sort()
+              : teacherOptions?.classes || []
+            ).map((c: string) => <option key={c} value={c}>Class {c}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="sf-fld-lbl">Section *</label>
+          <select className="sf-fsel" style={{ width: "100%", marginTop: 4 }} value={sec}
+            onChange={e => { setSec(e.target.value); setSubj(""); }}>
+            {sectionsForClass(cls).map((s: string) => <option key={s} value={s}>Section {s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="sf-fld-lbl">Subject *</label>
+          <select className="sf-fsel" style={{ width: "100%", marginTop: 4 }} value={subj}
+            onChange={e => setSubj(e.target.value)}>
+            {subjectsForClassSection(cls, sec).map((s: string) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="sf-fld-lbl">Due Date *</label>
+          <Input type="date" value={dueDate} min={today} onChange={e => setDueDate(e.target.value)} style={{ marginTop: 4 }} />
+        </div>
+      </div>
+
+      <HwFormBody
+        activeTab={activeTab} onTabChange={setActiveTab}
+        description={desc} onDescription={setDesc}
+        questionsText={qText} onQuestionsText={setQText}
+        questionImages={qImgs} onQuestionImages={setQImgs}
+        modelSolution={mText} onModelSolution={setMText}
+        modelAnswerImages={mImgs} onModelAnswerImages={setMImgs}
+        useNcert={ncert} onUseNcert={setNcert}
+        hwClass={cls} hwSubject={subj}
+        readFileAsDataUrl={readFileAsDataUrl}
+      />
+
+      <Button
+        disabled={isSaving || !subj || !cls || !sec || !desc || !dueDate}
+        onClick={() => onSave({ subject: subj, studentClass: cls, section: sec, description: desc,
+          questionsText: qText, questionImages: qImgs, modelSolution: mText,
+          modelAnswerImages: mImgs, useNcertReference: ncert, dueDate })}
+        style={{ marginTop: 4 }}
+      >
+        {isSaving ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Saving…</> : "Save Changes"}
+      </Button>
+    </div>
+  );
+}
+
+// ─── HwEvaluationsModal ─────────────────────────────────────────────────────
+function HwEvaluationsModal({ hwId, onClose }: { hwId: number; onClose: () => void }) {
+  const { toast } = useToast();
+  const { data: evals, isLoading } = useQuery<any[]>({
+    queryKey: ["/api/teacher/homework", hwId, "evaluations"],
+    queryFn: () => fetchWithAuth(`/api/teacher/homework/${hwId}/evaluations`).then(r => r.json()),
+    enabled: !!hwId,
+  });
+
+  const downloadExcel = () => {
+    if (!evals?.length) return;
+    const rows = [
+      ["Admission No.", "Student Name", "Score (/100)", "Status", "On Time", "Submitted At", "AI Feedback"],
+      ...evals.map(e => [
+        e.admissionNumber, e.studentName || "—", e.correctnessScore ?? "Pending", e.status,
+        e.isOnTime ? "Yes" : "No",
+        e.submittedAt ? new Date(e.submittedAt).toLocaleString("en-IN") : "—",
+        (e.aiFeedback || "—").replace(/"/g, "'")
+      ])
+    ];
+    const csv = rows.map(row => row.map(cell => `"${cell}"`).join(",")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `homework_${hwId}_evaluations.csv`; a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Downloaded!", description: "Evaluation results exported." });
+  };
+
+  return (
+    <Dialog open onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent style={{ maxWidth: 700, maxHeight: "88vh", overflowY: "auto" }}>
+        <DialogHeader>
+          <DialogTitle style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 22 }}>📊</span> Homework Evaluations
+          </DialogTitle>
+        </DialogHeader>
+        <div style={{ marginTop: 8 }}>
+          {isLoading ? (
+            <div style={{ padding: "32px 0", textAlign: "center" }}><Spinner /></div>
+          ) : !evals?.length ? (
+            <div className="sf-empty">
+              <div className="sf-empty-icon">📭</div>
+              No submissions yet for this homework.
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, padding: "10px 14px", borderRadius: 10, background: "var(--cream)" }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>
+                  {evals.length} submission{evals.length !== 1 ? "s" : ""}
+                  <span style={{ fontWeight: 400, color: "var(--mid)", marginLeft: 8 }}>
+                    Avg score: {evals.filter(e => e.correctnessScore != null).length > 0
+                      ? Math.round(evals.filter(e => e.correctnessScore != null).reduce((a, e) => a + e.correctnessScore, 0) / evals.filter(e => e.correctnessScore != null).length)
+                      : "—"}/100
+                  </span>
+                </div>
+                <button
+                  onClick={downloadExcel}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    padding: "7px 14px", borderRadius: 8,
+                    border: "1.5px solid var(--border)", background: "#fff",
+                    fontSize: 12, fontWeight: 600, color: "var(--ink2)",
+                    cursor: "pointer", transition: "all 0.15s"
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "var(--lav-bg)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "#fff")}
+                >
+                  <span>⬇️</span> Export CSV
+                </button>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {evals.map((e: any) => {
+                  const score = e.correctnessScore;
+                  const scoreBg = score == null ? "#f3f4f6" : score >= 75 ? "#f0faf4" : score >= 50 ? "#fff8ed" : "#fff0f0";
+                  const scoreColor = score == null ? "#6b7280" : score >= 75 ? "#1a7a54" : score >= 50 ? "#d08a2b" : "#d94f4f";
+                  return (
+                    <div key={e.submissionId} style={{
+                      borderRadius: 12, border: "1.5px solid var(--border)",
+                      padding: "12px 14px", background: "#fff",
+                      transition: "box-shadow 0.15s"
+                    }}>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                        {/* Score circle */}
+                        <div style={{
+                          width: 44, height: 44, borderRadius: "50%",
+                          background: scoreBg, display: "flex", alignItems: "center",
+                          justifyContent: "center", fontSize: 13, fontWeight: 800,
+                          color: scoreColor, flexShrink: 0, border: `2px solid ${scoreColor}22`
+                        }}>
+                          {score != null ? score : "—"}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+                              {e.studentName || e.admissionNumber}
+                            </div>
+                            <span style={{ fontSize: 11, color: "var(--mid)" }}>{e.admissionNumber}</span>
+                            <span style={{ fontSize: 11, padding: "1px 7px", borderRadius: 5, fontWeight: 600,
+                              background: e.isOnTime ? "#dcfce7" : "#fef3c7",
+                              color: e.isOnTime ? "#166534" : "#92400e"
+                            }}>
+                              {e.isOnTime ? "✅ On time" : "⏰ Late"}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 3 }}>
+                            Submitted: {e.submittedAt ? new Date(e.submittedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                          </div>
+                          {e.aiFeedback && (
+                            <div style={{ fontSize: 11.5, color: "var(--ink2)", marginTop: 6, fontStyle: "italic", lineHeight: 1.5, background: "#fafaf9", padding: "6px 10px", borderRadius: 8, borderLeft: `3px solid ${scoreColor}` }}>
+                              "{e.aiFeedback.slice(0, 200)}{e.aiFeedback.length > 200 ? "…" : ""}"
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{
+                            fontSize: 15, fontWeight: 800,
+                            color: scoreColor, padding: "4px 10px",
+                            borderRadius: 8, background: scoreBg,
+                            border: `1.5px solid ${scoreColor}22`
+                          }}>
+                            {score != null ? `${score}/100` : "Pending"}
+                          </div>
+                          {e.fileBase64 && (
+                            <a href={e.fileBase64} target="_blank" rel="noopener noreferrer"
+                              style={{ display: "block", fontSize: 11, color: "var(--mid)", marginTop: 6, textDecoration: "underline" }}>
+                              📄 View sheet
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
 function pctColor(pct: number) {
   if (pct >= 75) return "var(--green)";
   if (pct >= 50) return "var(--amber)";
@@ -481,9 +1593,25 @@ export default function TeacherDashboard() {
   const [hwClass, setHwClass] = useState("");
   const [hwSection, setHwSection] = useState("");
   const [hwDescription, setHwDescription] = useState("");
+  const [hwQuestionsText, setHwQuestionsText] = useState("");
+  const [hwQuestionImages, setHwQuestionImages] = useState<string[]>([]);
   const [hwModelSolution, setHwModelSolution] = useState("");
+  const [hwModelAnswerImages, setHwModelAnswerImages] = useState<string[]>([]);
+  const [hwUseNcert, setHwUseNcert] = useState(false);
   const [hwDueDate, setHwDueDate] = useState("");
+  const [hwActiveTab, setHwActiveTab] = useState<"description"|"questions"|"answers">("description");
   const [isCreatingHw, setIsCreatingHw] = useState(false);
+  const [isUploadingHwQImg, setIsUploadingHwQImg] = useState(false);
+  const [isUploadingHwAImg, setIsUploadingHwAImg] = useState(false);
+  const hwQuestionImgRef = useRef<HTMLInputElement>(null);
+  const hwAnswerImgRef = useRef<HTMLInputElement>(null);
+  // Edit homework
+  const [editingHw, setEditingHw] = useState<any | null>(null);
+  const [isHwEditDialogOpen, setIsHwEditDialogOpen] = useState(false);
+  // Evaluations modal
+  const [hwEvalId, setHwEvalId] = useState<number | null>(null);
+  const [isHwEvalOpen, setIsHwEvalOpen] = useState(false);
+  const [hwChatHw, setHwChatHw] = useState<any | null>(null); // AI chat target homework
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<"subject" | "class">("subject");
   // Exam create form enhancements
@@ -553,19 +1681,56 @@ export default function TeacherDashboard() {
     enabled: !!selectedResultExamId,
   });
 
+  const resetHwForm = () => {
+    setHwSubject(""); setHwClass(""); setHwSection(""); setHwDescription("");
+    setHwQuestionsText(""); setHwQuestionImages([]); setHwModelSolution("");
+    setHwModelAnswerImages([]); setHwUseNcert(false); setHwDueDate("");
+    setHwActiveTab("description");
+  };
+
   const createHomework = useMutation({
     mutationFn: () => fetchWithAuth("/api/teacher/homework", {
       method: "POST",
-      body: JSON.stringify({ subject: hwSubject, studentClass: hwClass, section: hwSection, description: hwDescription, modelSolution: hwModelSolution, dueDate: hwDueDate }),
+      body: JSON.stringify({
+        subject: hwSubject, studentClass: hwClass, section: hwSection,
+        description: hwDescription, questionsText: hwQuestionsText,
+        questionImages: hwQuestionImages.length ? hwQuestionImages : undefined,
+        modelSolution: hwModelSolution,
+        modelAnswerImages: hwModelAnswerImages.length ? hwModelAnswerImages : undefined,
+        useNcertReference: hwUseNcert, dueDate: hwDueDate
+      }),
     }),
     onSuccess: () => {
       toast({ title: "Homework assigned!", description: "Students in the class can now submit." });
       setIsHwDialogOpen(false);
-      setHwSubject(""); setHwClass(""); setHwSection(""); setHwDescription(""); setHwModelSolution(""); setHwDueDate("");
+      resetHwForm();
       refetchTeacherHw();
     },
     onError: () => toast({ title: "Error", description: "Could not create homework.", variant: "destructive" }),
     onSettled: () => setIsCreatingHw(false),
+  });
+
+  const updateHomework = useMutation({
+    mutationFn: (data: any) => fetchWithAuth(`/api/teacher/homework/${editingHw?.id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+    onSuccess: () => {
+      toast({ title: "Homework updated!" });
+      setIsHwEditDialogOpen(false);
+      setEditingHw(null);
+      refetchTeacherHw();
+    },
+    onError: (err: any) => toast({ title: "Error", description: "Could not update homework.", variant: "destructive" }),
+  });
+
+  const deleteHomework = useMutation({
+    mutationFn: (id: number) => fetchWithAuth(`/api/teacher/homework/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      toast({ title: "Homework deleted." });
+      refetchTeacherHw();
+    },
+    onError: () => toast({ title: "Error", description: "Could not delete homework.", variant: "destructive" }),
   });
 
   const analyticsUrl = `/api/analytics?class=${classFilter}&subject=${subjectFilter}&viewMode=${viewMode}`;
@@ -871,37 +2036,39 @@ export default function TeacherDashboard() {
           </div>
         </div>
 
-        {/* FUNNEL */}
-        <div className="sf-funnel sf-funnel-4">
-          <div className="sf-f-col">
-            <div className="sf-f-cat">Exams Created</div>
-            <div className="sf-f-num">{totalExams}</div>
-            <div className="sf-f-delta sf-d-up">↑ +12%</div>
-            <div className="sf-f-desc">Mid-term exam created and <b>ready for evaluation</b>.</div>
-          </div>
-          <div className="sf-f-col">
-            <div className="sf-f-cat">Sheets Evaluated</div>
-            <div className="sf-f-num">{sheetsEvaluated}</div>
-            <div className={`sf-f-delta ${sheetsEvaluated > 0 ? "sf-d-up" : "sf-d-flat"}`}>
-              {sheetsEvaluated > 0 ? `↑ ${sheetsEvaluated} done` : "→ Pending"}
+        {/* FUNNEL — overview only */}
+        {activeSection === "overview" && (
+          <div className="sf-funnel sf-funnel-4">
+            <div className="sf-f-col">
+              <div className="sf-f-cat">Exams Created</div>
+              <div className="sf-f-num">{totalExams}</div>
+              <div className="sf-f-delta sf-d-up">↑ +12%</div>
+              <div className="sf-f-desc">Mid-term exam created and <b>ready for evaluation</b>.</div>
             </div>
-            <div className="sf-f-desc">Upload answer sheets to see <b>class averages</b>.</div>
-          </div>
-          <div className="sf-f-col">
-            <div className="sf-f-cat">Avg Performance</div>
-            <div className="sf-f-num">{avgPerformance}%</div>
-            <div className={`sf-f-delta ${avgPerformance > 0 ? "sf-d-up" : "sf-d-flat"}`}>
-              {avgPerformance > 0 ? `↑ ${avgPerformance}% avg` : "→ Awaiting"}
+            <div className="sf-f-col">
+              <div className="sf-f-cat">Sheets Evaluated</div>
+              <div className="sf-f-num">{sheetsEvaluated}</div>
+              <div className={`sf-f-delta ${sheetsEvaluated > 0 ? "sf-d-up" : "sf-d-flat"}`}>
+                {sheetsEvaluated > 0 ? `↑ ${sheetsEvaluated} done` : "→ Pending"}
+              </div>
+              <div className="sf-f-desc">Upload answer sheets to see <b>class averages</b>.</div>
             </div>
-            <div className="sf-f-desc">Average score once sheets are <b>evaluated</b>.</div>
+            <div className="sf-f-col">
+              <div className="sf-f-cat">Avg Performance</div>
+              <div className="sf-f-num">{avgPerformance}%</div>
+              <div className={`sf-f-delta ${avgPerformance > 0 ? "sf-d-up" : "sf-d-flat"}`}>
+                {avgPerformance > 0 ? `↑ ${avgPerformance}% avg` : "→ Awaiting"}
+              </div>
+              <div className="sf-f-desc">Average score once sheets are <b>evaluated</b>.</div>
+            </div>
+            <div className="sf-f-col">
+              <div className="sf-f-cat">Total Students</div>
+              <div className="sf-f-num">{totalStudents || 32}</div>
+              <div className="sf-f-delta sf-d-flat">Stable</div>
+              <div className="sf-f-desc">Students enrolled across <b>active classes</b> this term.</div>
+            </div>
           </div>
-          <div className="sf-f-col">
-            <div className="sf-f-cat">Total Students</div>
-            <div className="sf-f-num">{totalStudents || 32}</div>
-            <div className="sf-f-delta sf-d-flat">Stable</div>
-            <div className="sf-f-desc">Students enrolled across <b>active classes</b> this term.</div>
-          </div>
-        </div>
+        )}
 
 
 
@@ -1277,96 +2444,365 @@ export default function TeacherDashboard() {
         )}
 
         {/* ── HOMEWORK TAB ── */}
-        {activeSection === "homework" && (
-          <div>
-            <div className="sf-panel" style={{ marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                <div>
-                  <div className="sf-panel-title">Homework Assignments</div>
-                  <div className="sf-panel-sub">Assign homework to a class — students submit photos for AI evaluation</div>
-                </div>
-                <Button size="sm" className="rounded-xl gap-1" onClick={() => setIsHwDialogOpen(true)} data-testid="button-assign-homework">
-                  <Plus className="h-3 w-3" /> Assign Homework
-                </Button>
-              </div>
+        {activeSection === "homework" && (() => {
+          const today = new Date().toISOString().split("T")[0];
 
-              {!teacherHomework ? (
-                <div style={{ padding: "24px 0", textAlign: "center" }}><Spinner /></div>
-              ) : teacherHomework.length === 0 ? (
-                <div className="sf-empty"><div className="sf-empty-icon">📋</div>No homework assigned yet. Click "Assign Homework" to get started.</div>
-              ) : (
-                teacherHomework.map((hw: any) => (
-                  <div key={hw.id} className="sf-exam-item" style={{ cursor: "default", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "center", width: "100%", gap: 12 }}>
-                      <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", flexShrink: 0 }}>📝</div>
-                      <div className="sf-exam-info" style={{ flex: 1 }}>
-                        <div className="sf-exam-name">{hw.subject} — Class {hw.studentClass}{hw.section ? ` (${hw.section})` : ""}</div>
-                        <div className="sf-exam-meta">{hw.description}</div>
-                        <div className="sf-exam-meta">Due: {new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+          const assignedClasses = teacherOptions?.classSections?.length
+            ? [...new Set(teacherOptions.classSections.map((cs: ClassSection) => cs.className))].sort()
+            : teacherOptions?.classes || [];
+
+          const sectionsForClass = (cls: string) =>
+            teacherOptions?.classSections?.length
+              ? [...new Set(teacherOptions.classSections.filter((cs: ClassSection) => cs.className === cls).map((cs: ClassSection) => cs.section))]
+              : teacherOptions?.sections || [];
+
+          const subjectsForClassSection = (cls: string, sec: string) => {
+            if (!teacherOptions?.structuredSubjects?.length) return teacherOptions?.subjects || [];
+            const filtered = teacherOptions.structuredSubjects.filter(
+              (s: StructuredSubject) => s.className === cls && (s.section === sec || s.section === "")
+            );
+            return filtered.length ? filtered.map((s: StructuredSubject) => s.name) : teacherOptions?.subjects || [];
+          };
+
+          return (
+            <div>
+              {/* ── STATS SUMMARY ── */}
+              {teacherHomework && teacherHomework.length > 0 && (() => {
+                const activeHw    = teacherHomework.filter((h: any) => h.dueDate >= today);
+                const completedHw = teacherHomework.filter((h: any) => h.dueDate < today);
+                const totalSubs   = teacherHomework.reduce((s: number, h: any) => s + (h.submissionCount ?? 0), 0);
+                const totalSlots  = teacherHomework.reduce((s: number, h: any) => s + (h.totalStudents ?? 0), 0);
+                const subRate     = totalSlots > 0 ? Math.round((totalSubs / totalSlots) * 100) : 0;
+                const scoredHws   = teacherHomework.filter((h: any) => h.avgScore != null);
+                const avgMarks    = scoredHws.length > 0
+                  ? Math.round(scoredHws.reduce((s: number, h: any) => s + h.avgScore, 0) / scoredHws.length)
+                  : null;
+
+                const stats = [
+                  {
+                    icon: "🟢",
+                    label: "Active Homeworks",
+                    value: activeHw.length,
+                    sub: "open for submission",
+                    accent: "#166534",
+                    bg: "#f0fdf4",
+                    border: "#bbf7d0",
+                  },
+                  {
+                    icon: "🔒",
+                    label: "Completed",
+                    value: completedHw.length,
+                    sub: "deadline passed",
+                    accent: "#92400e",
+                    bg: "#fffbeb",
+                    border: "#fde68a",
+                  },
+                  {
+                    icon: "📬",
+                    label: "Submission Rate",
+                    value: `${subRate}%`,
+                    sub: `${totalSubs} of ${totalSlots} submitted`,
+                    accent: subRate >= 75 ? "#1d4ed8" : subRate >= 40 ? "#92400e" : "#991b1b",
+                    bg: subRate >= 75 ? "#eff6ff" : subRate >= 40 ? "#fffbeb" : "#fef2f2",
+                    border: subRate >= 75 ? "#bfdbfe" : subRate >= 40 ? "#fde68a" : "#fecaca",
+                  },
+                  {
+                    icon: "📊",
+                    label: "Average Score",
+                    value: avgMarks != null ? `${avgMarks}%` : "—",
+                    sub: avgMarks != null ? "across evaluated work" : "no evaluations yet",
+                    accent: avgMarks == null ? "var(--mid)" : avgMarks >= 75 ? "#166534" : avgMarks >= 50 ? "#92400e" : "#991b1b",
+                    bg: avgMarks == null ? "var(--cream)" : avgMarks >= 75 ? "#f0fdf4" : avgMarks >= 50 ? "#fffbeb" : "#fef2f2",
+                    border: avgMarks == null ? "var(--border)" : avgMarks >= 75 ? "#bbf7d0" : avgMarks >= 50 ? "#fde68a" : "#fecaca",
+                  },
+                ];
+
+                return (
+                  <div style={{
+                    display: "grid", gridTemplateColumns: "repeat(4, 1fr)",
+                    gap: 12, marginBottom: 16,
+                  }}>
+                    {stats.map(s => (
+                      <div key={s.label} style={{
+                        borderRadius: 14, padding: "14px 16px",
+                        background: s.bg, border: `1.5px solid ${s.border}`,
+                        display: "flex", flexDirection: "column", gap: 6,
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                          <span style={{ fontSize: 16 }}>{s.icon}</span>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: s.accent, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                            {s.label}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 28, fontWeight: 800, color: s.accent, lineHeight: 1, fontFamily: "'Fraunces', serif" }}>
+                          {s.value}
+                        </div>
+                        <div style={{ fontSize: 11, color: s.accent, opacity: 0.7, fontWeight: 500 }}>
+                          {s.sub}
+                        </div>
                       </div>
-                      <span className="sf-exam-status sf-es-done" style={{ flexShrink: 0 }}>{hw.submissionCount ?? 0} submitted</span>
-                    </div>
+                    ))}
                   </div>
-                ))
-              )}
-            </div>
+                );
+              })()}
 
-            {/* Create Homework Dialog */}
-            <Dialog open={isHwDialogOpen} onOpenChange={setIsHwDialogOpen}>
-              <DialogContent style={{ maxWidth: 520 }}>
-                <DialogHeader>
-                  <DialogTitle>Assign Homework</DialogTitle>
-                </DialogHeader>
-                <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 8 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <div>
-                      <label className="sf-fld-lbl">Subject *</label>
-                      <select className="sf-fsel" style={{ width: "100%" }} value={hwSubject} onChange={e => setHwSubject(e.target.value)} data-testid="select-hw-subject">
-                        <option value="">Select subject…</option>
-                        {(teacherOptions?.subjects || ["Mathematics", "Science", "English", "Social Studies", "Hindi"]).map(s => <option key={s} value={s}>{s}</option>)}
-                        <option value="_custom">Other…</option>
-                      </select>
-                      {hwSubject === "_custom" && <Input placeholder="Enter subject" className="rounded-xl mt-1" onChange={e => setHwSubject(e.target.value)} data-testid="input-hw-subject-custom" />}
-                    </div>
-                    <div>
-                      <label className="sf-fld-lbl">Class *</label>
-                      <select className="sf-fsel" style={{ width: "100%" }} value={hwClass} onChange={e => setHwClass(e.target.value)} data-testid="select-hw-class">
-                        <option value="">Select class…</option>
-                        {(teacherOptions?.classes || ["8", "9", "10", "11", "12"]).map(c => <option key={c} value={c}>Class {c}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="sf-fld-lbl">Section</label>
-                      <select className="sf-fsel" style={{ width: "100%" }} value={hwSection} onChange={e => setHwSection(e.target.value)} data-testid="select-hw-section">
-                        <option value="">All sections</option>
-                        {(teacherOptions?.sections || ["A", "B", "C", "D"]).map(s => <option key={s} value={s}>Section {s}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="sf-fld-lbl">Due Date *</label>
-                      <Input type="date" value={hwDueDate} onChange={e => setHwDueDate(e.target.value)} data-testid="input-hw-due" />
-                    </div>
-                  </div>
+              {/* ── HEADER ── */}
+              <div className="sf-panel" style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                   <div>
-                    <label className="sf-fld-lbl">Description / Task *</label>
-                    <Textarea placeholder="Describe what students need to do…" value={hwDescription} onChange={e => setHwDescription(e.target.value)} data-testid="input-hw-description" rows={3} />
-                  </div>
-                  <div>
-                    <label className="sf-fld-lbl">Model Solution (for AI grading)</label>
-                    <Textarea placeholder="Provide the expected answer for AI to compare student submissions against…" value={hwModelSolution} onChange={e => setHwModelSolution(e.target.value)} data-testid="input-hw-solution" rows={4} />
+                    <div className="sf-panel-title">Homework Assignments</div>
+                    <div className="sf-panel-sub">
+                      Assign and manage homework — students submit for AI evaluation
+                    </div>
                   </div>
                   <Button
-                    disabled={isCreatingHw || !hwSubject || !hwClass || !hwDescription || !hwDueDate}
-                    onClick={() => { setIsCreatingHw(true); createHomework.mutate(); }}
-                    data-testid="button-create-homework"
+                    size="sm"
+                    className="rounded-xl gap-1"
+                    onClick={() => { resetHwForm(); setIsHwDialogOpen(true); }}
+                    data-testid="button-assign-homework"
+                    style={{ display: "flex", alignItems: "center", gap: 5 }}
                   >
-                    {isCreatingHw ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Creating…</> : "Assign Homework"}
+                    <Plus className="h-3 w-3" /> Assign Homework
                   </Button>
                 </div>
-              </DialogContent>
-            </Dialog>
-          </div>
-        )}
+
+                {!teacherHomework ? (
+                  <div style={{ padding: "28px 0", textAlign: "center" }}><Spinner /></div>
+                ) : teacherHomework.length === 0 ? (
+                  <div className="sf-empty" style={{ padding: "32px 0" }}>
+                    <div className="sf-empty-icon">📋</div>
+                    <div style={{ fontWeight: 600, color: "var(--ink2)", marginBottom: 4 }}>No homework assigned yet</div>
+                    <div style={{ fontSize: 12, color: "var(--mid)" }}>Click "Assign Homework" to get started</div>
+                  </div>
+                ) : (() => {
+                  // ── Group by className + section ──────────────────────────
+                  const grouped = new Map<string, any[]>();
+                  for (const hw of teacherHomework) {
+                    const key = `Class ${hw.className}${hw.section ? ` · Sec ${hw.section}` : ""}`;
+                    if (!grouped.has(key)) grouped.set(key, []);
+                    grouped.get(key)!.push(hw);
+                  }
+                  // Sort groups: numerically by class, then section
+                  const sortedKeys = [...grouped.keys()].sort((a, b) => {
+                    const numA = parseInt(a.replace(/\D/g, "")) || 0;
+                    const numB = parseInt(b.replace(/\D/g, "")) || 0;
+                    return numA !== numB ? numA - numB : a.localeCompare(b);
+                  });
+
+                  return sortedKeys.map(groupKey => {
+                    const items = grouped.get(groupKey)!;
+                    // Sort within group: active (ascending due date) first, then past-due (ascending)
+                    const active = items.filter(h => h.dueDate >= today).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+                    const pastDue = items.filter(h => h.dueDate < today).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+                    const sorted = [...active, ...pastDue];
+                    return (
+                      <HwClassGroup
+                        key={groupKey}
+                        label={groupKey}
+                        count={sorted.length}
+                        activeCount={active.length}
+                      >
+                        {sorted.map((hw: any) => (
+                          <HwListItem
+                            key={hw.id}
+                            hw={hw}
+                            today={today}
+                            onEval={() => { setHwEvalId(hw.id); setIsHwEvalOpen(true); }}
+                            onEdit={() => { setEditingHw(hw); setIsHwEditDialogOpen(true); }}
+                            onDelete={() => {
+                              if (confirm("Delete this homework? All student submissions will also be removed.")) {
+                                deleteHomework.mutate(hw.id);
+                              }
+                            }}
+                            onChat={() => setHwChatHw(hw)}
+                          />
+                        ))}
+                      </HwClassGroup>
+                    );
+                  });
+                })()}
+              </div>
+
+              {/* ── CREATE HOMEWORK DIALOG ── */}
+              <Dialog open={isHwDialogOpen} onOpenChange={v => { setIsHwDialogOpen(v); if (!v) resetHwForm(); }}>
+                <DialogContent style={{ maxWidth: 640, maxHeight: "92vh", overflowY: "auto" }}>
+                  <DialogHeader>
+                    <DialogTitle style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 20 }}>📝</span> Assign Homework
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 8 }}>
+
+                    {/* ── Step 1: Class / Section / Subject / Date ── */}
+                    <div style={{ background: "#fafaf8", borderRadius: 12, padding: "14px 16px", border: "1px solid var(--border)" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mid)", marginBottom: 10 }}>
+                        Step 1 — Class details
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                        <div>
+                          <label className="sf-fld-lbl">Class *</label>
+                          <select className="sf-fsel" style={{ width: "100%", marginTop: 4 }} value={hwClass}
+                            onChange={e => { setHwClass(e.target.value); setHwSection(""); setHwSubject(""); }}
+                            data-testid="select-hw-class">
+                            <option value="">Select class…</option>
+                            {assignedClasses.map((c: string) => <option key={c} value={c}>Class {c}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="sf-fld-lbl">Section *</label>
+                          <select className="sf-fsel" style={{ width: "100%", marginTop: 4 }} value={hwSection}
+                            onChange={e => { setHwSection(e.target.value); setHwSubject(""); }}
+                            disabled={!hwClass}
+                            data-testid="select-hw-section">
+                            <option value="">Select section…</option>
+                            {hwClass && sectionsForClass(hwClass).map((s: string) => <option key={s} value={s}>Section {s}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="sf-fld-lbl">Subject *</label>
+                          <select className="sf-fsel" style={{ width: "100%", marginTop: 4 }} value={hwSubject}
+                            onChange={e => setHwSubject(e.target.value)}
+                            disabled={!hwClass || !hwSection}
+                            data-testid="select-hw-subject">
+                            <option value="">Select subject…</option>
+                            {(hwClass && hwSection ? subjectsForClassSection(hwClass, hwSection) : []).map((s: string) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                          {hwClass && hwSection && subjectsForClassSection(hwClass, hwSection).length === 0 && (
+                            <div style={{ fontSize: 11, color: "#d08a2b", marginTop: 4 }}>No subjects assigned for this class/section.</div>
+                          )}
+                        </div>
+                        <div>
+                          <label className="sf-fld-lbl">Due Date *</label>
+                          <Input
+                            type="date"
+                            value={hwDueDate}
+                            min={today}
+                            onChange={e => {
+                              if (e.target.value < today) return;
+                              setHwDueDate(e.target.value);
+                            }}
+                            data-testid="input-hw-due"
+                            style={{ marginTop: 4 }}
+                          />
+                          <div style={{ fontSize: 10, color: "var(--mid)", marginTop: 3 }}>Today or future dates only</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ── Step 2: Content tabs ── */}
+                    {(() => {
+                      const descMissing  = !hwDescription || hwDescription === "<br>" || hwDescription === "<p><br></p>";
+                      const questMissing = !hwQuestionsText || hwQuestionsText === "<br>" || hwQuestionsText === "<p><br></p>";
+                      const tabHasError  = (tab: string) =>
+                        (tab === "description" && descMissing) ||
+                        (tab === "questions"   && questMissing);
+
+                      return (
+                        <div style={{ background: "#fafaf8", borderRadius: 12, padding: "14px 16px", border: `1px solid ${(descMissing || questMissing) && isCreatingHw ? "#f87171" : "var(--border)"}` }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mid)" }}>
+                              Step 2 — Content &amp; questions
+                            </div>
+                            <div style={{ display: "flex", gap: 5 }}>
+                              {["description", "questions"].map(t => (
+                                tabHasError(t) ? (
+                                  <span key={t} style={{ fontSize: 10, padding: "1px 7px", borderRadius: 4, background: "#fee2e2", color: "#dc2626", fontWeight: 700, border: "1px solid #fca5a5" }}>
+                                    {t === "description" ? "Description required" : "Questions required"}
+                                  </span>
+                                ) : (
+                                  <span key={t} style={{ fontSize: 10, padding: "1px 7px", borderRadius: 4, background: "#dcfce7", color: "#166534", fontWeight: 700, border: "1px solid #86efac" }}>
+                                    ✓ {t === "description" ? "Description" : "Questions"}
+                                  </span>
+                                )
+                              ))}
+                            </div>
+                          </div>
+                          <HwFormBody
+                            activeTab={hwActiveTab} onTabChange={setHwActiveTab}
+                            description={hwDescription} onDescription={setHwDescription}
+                            questionsText={hwQuestionsText} onQuestionsText={setHwQuestionsText}
+                            questionImages={hwQuestionImages} onQuestionImages={setHwQuestionImages}
+                            modelSolution={hwModelSolution} onModelSolution={setHwModelSolution}
+                            modelAnswerImages={hwModelAnswerImages} onModelAnswerImages={setHwModelAnswerImages}
+                            useNcert={hwUseNcert} onUseNcert={setHwUseNcert}
+                            hwClass={hwClass} hwSubject={hwSubject}
+                            readFileAsDataUrl={readFileAsDataUrl}
+                            requiredTabs={["description", "questions"]}
+                          />
+                        </div>
+                      );
+                    })()}
+
+                    {/* Validation summary — only shown after first submit attempt */}
+                    {isCreatingHw === false && hwSubject && hwClass && hwSection && hwDueDate && (!hwDescription || !hwQuestionsText) && (
+                      <div style={{
+                        padding: "10px 14px", borderRadius: 10, background: "#fef2f2",
+                        border: "1.5px solid #fca5a5", fontSize: 12, color: "#dc2626",
+                        display: "flex", alignItems: "flex-start", gap: 8
+                      }}>
+                        <span style={{ fontSize: 15, flexShrink: 0 }}>⚠️</span>
+                        <div>
+                          <div style={{ fontWeight: 700, marginBottom: 2 }}>Required fields missing:</div>
+                          {!hwDescription && <div>• Description (in the Description tab)</div>}
+                          {!hwQuestionsText && <div>• Questions (in the Questions tab)</div>}
+                        </div>
+                      </div>
+                    )}
+
+                    <Button
+                      disabled={isCreatingHw || !hwSubject || !hwClass || !hwSection || !hwDescription || !hwQuestionsText || !hwDueDate}
+                      onClick={() => { setIsCreatingHw(true); createHomework.mutate(); }}
+                      data-testid="button-create-homework"
+                      style={{ width: "100%" }}
+                    >
+                      {isCreatingHw
+                        ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Assigning…</>
+                        : "✓ Assign Homework"}
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* ── EDIT HOMEWORK DIALOG ── */}
+              {editingHw && (
+                <Dialog open={isHwEditDialogOpen} onOpenChange={v => { setIsHwEditDialogOpen(v); if (!v) setEditingHw(null); }}>
+                  <DialogContent style={{ maxWidth: 640, maxHeight: "92vh", overflowY: "auto" }}>
+                    <DialogHeader>
+                      <DialogTitle style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 20 }}>✏️</span> Edit Homework
+                      </DialogTitle>
+                    </DialogHeader>
+                    <EditHwForm
+                      hw={editingHw}
+                      teacherOptions={teacherOptions}
+                      onSave={(data: any) => updateHomework.mutate(data)}
+                      isSaving={updateHomework.isPending}
+                      sectionsForClass={sectionsForClass}
+                      subjectsForClassSection={subjectsForClassSection}
+                      readFileAsDataUrl={readFileAsDataUrl}
+                    />
+                  </DialogContent>
+                </Dialog>
+              )}
+
+              {/* ── EVALUATIONS MODAL ── */}
+              {isHwEvalOpen && hwEvalId && (
+                <HwEvaluationsModal
+                  hwId={hwEvalId}
+                  onClose={() => { setIsHwEvalOpen(false); setHwEvalId(null); }}
+                />
+              )}
+
+              {/* ── HOMEWORK AI CHAT ── */}
+              {hwChatHw && (
+                <HwAiChat
+                  hw={hwChatHw}
+                  onClose={() => setHwChatHw(null)}
+                />
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── EARLY WARNING TAB ── */}
         {activeSection === "early-warning" && (() => {

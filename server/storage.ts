@@ -79,6 +79,10 @@ export interface IStorage {
   updateHomeworkSubmission(id: number, data: Partial<HomeworkSubmission>): Promise<HomeworkSubmission>;
   getHomeworkSubmissionsByStudent(studentId: number): Promise<any[]>;
   getHomeworkSubmissionsByTeacher(teacherId: number): Promise<any[]>;
+  getHomeworkById(id: number): Promise<Homework | undefined>;
+  updateHomework(id: number, data: Partial<Homework>): Promise<Homework>;
+  deleteHomework(id: number): Promise<void>;
+  getHomeworkEvaluations(homeworkId: number): Promise<any[]>;
 
   // Admin
   getAdmin(id: number): Promise<Admin | undefined>;
@@ -417,8 +421,46 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
-  async getHomeworkByTeacher(teacherId: number): Promise<Homework[]> {
-    return await db.select().from(homework).where(eq(homework.teacherId, teacherId)).orderBy(desc(homework.id));
+  async getHomeworkByTeacher(teacherId: number): Promise<any[]> {
+    const hws = await db.select().from(homework).where(eq(homework.teacherId, teacherId)).orderBy(desc(homework.id));
+
+    // Enrich with submission counts and total student counts per class/section
+    const enriched = await Promise.all(hws.map(async (hw) => {
+      // Count submissions for this homework
+      const [subCount] = await db
+        .select({ count: drizzleSql<number>`cast(count(*) as int)` })
+        .from(homeworkSubmissions)
+        .where(eq(homeworkSubmissions.homeworkId, hw.id));
+
+      // Count total students in that class+section
+      const [totalCount] = await db
+        .select({ count: drizzleSql<number>`cast(count(*) as int)` })
+        .from(students)
+        .where(and(eq(students.studentClass, hw.className), eq(students.section, hw.section)));
+
+      // Average correctness score across evaluated submissions
+      const scoredSubs = await db
+        .select({ score: homeworkSubmissions.correctnessScore })
+        .from(homeworkSubmissions)
+        .where(
+          and(
+            eq(homeworkSubmissions.homeworkId, hw.id),
+            drizzleSql`${homeworkSubmissions.correctnessScore} is not null`
+          )
+        );
+      const avgScore = scoredSubs.length > 0
+        ? Math.round(scoredSubs.reduce((s, r) => s + (r.score ?? 0), 0) / scoredSubs.length)
+        : null;
+
+      return {
+        ...hw,
+        submissionCount: Number(subCount?.count ?? 0),
+        totalStudents: Number(totalCount?.count ?? 0),
+        avgScore,
+      };
+    }));
+
+    return enriched;
   }
 
   async getHomeworkForStudent(className: string, section: string): Promise<Homework[]> {
@@ -483,6 +525,40 @@ export class DatabaseStorage implements IStorage {
     .from(homeworkSubmissions)
     .innerJoin(homework, eq(homeworkSubmissions.homeworkId, homework.id))
     .where(eq(homework.teacherId, teacherId))
+    .orderBy(desc(homeworkSubmissions.submittedAt));
+  }
+
+  async getHomeworkById(id: number): Promise<any | undefined> {
+    const [hw] = await db.select().from(homework).where(eq(homework.id, id));
+    return hw;
+  }
+
+  async updateHomework(id: number, data: Partial<any>): Promise<any> {
+    const [updated] = await db.update(homework).set(data as any).where(eq(homework.id, id)).returning();
+    return updated;
+  }
+
+  async deleteHomework(id: number): Promise<void> {
+    await db.delete(homeworkSubmissions).where(eq(homeworkSubmissions.homeworkId, id));
+    await db.delete(homework).where(eq(homework.id, id));
+  }
+
+  async getHomeworkEvaluations(homeworkId: number): Promise<any[]> {
+    return await db.select({
+      submissionId: homeworkSubmissions.id,
+      admissionNumber: homeworkSubmissions.admissionNumber,
+      status: homeworkSubmissions.status,
+      correctnessScore: homeworkSubmissions.correctnessScore,
+      aiFeedback: homeworkSubmissions.aiFeedback,
+      submittedAt: homeworkSubmissions.submittedAt,
+      isOnTime: homeworkSubmissions.isOnTime,
+      ocrText: homeworkSubmissions.ocrText,
+      fileBase64: homeworkSubmissions.fileBase64,
+      studentName: students.name,
+    })
+    .from(homeworkSubmissions)
+    .innerJoin(students, eq(homeworkSubmissions.studentId, students.id))
+    .where(eq(homeworkSubmissions.homeworkId, homeworkId))
     .orderBy(desc(homeworkSubmissions.submittedAt));
   }
 

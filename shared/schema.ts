@@ -153,7 +153,11 @@ export const homework = pgTable("homework", {
   className: text("class_name").notNull(),
   section: text("section").notNull(),
   description: text("description").notNull(),
+  questionsText: text("questions_text"),
+  questionImages: text("question_images"), // JSON array of base64 strings
   modelSolutionText: text("model_solution_text"),
+  modelAnswerImages: text("model_answer_images"), // JSON array of base64 strings
+  useNcertReference: integer("use_ncert_reference").notNull().default(0),
   dueDate: text("due_date").notNull(),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
