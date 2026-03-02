@@ -3479,6 +3479,119 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
   });
 
   // School level insights
+
+  // ─── PRINCIPAL EDUCATION QUALITY (aggregated across all teachers) ────────────
+  app.get("/api/principal/education-quality", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "principal" && req.user?.role !== "admin") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const teachers = await storage.getAllTeachers();
+      const results: any[] = [];
+
+      for (const teacher of teachers) {
+        const exams = await storage.getExamsByTeacher(teacher.id);
+        for (const exam of exams) {
+          if (!exam.questionText) continue;
+
+          const ncertChaps = await storage.getNcertChaptersByClassAndSubject(exam.className, exam.subject);
+          const ncertContext = ncertChaps.length > 0
+            ? ncertChaps.map((c: any) => `Chapter: ${c.chapterName}\nContent: ${c.chapterContent}`).join("\n\n")
+            : `Standard NCERT Class ${exam.className} ${exam.subject} curriculum`;
+
+          const categoryLabel: Record<string, string> = {
+            unit_test: "Unit Test", class_test: "Class Test", homework: "Homework",
+            half_yearly: "Half Yearly Exam", annual: "Annual Exam", quiz: "Quiz", assignment: "Assignment",
+          };
+
+          try {
+            const prompt = `You are an expert educational quality assessor for Indian CBSE/NCERT curriculum.
+
+Exam details:
+- Name: ${exam.examName}
+- Type: ${categoryLabel[exam.category] || exam.category}
+- Subject: ${exam.subject}
+- Class: ${exam.className}
+- Total Marks: ${exam.totalMarks}
+- Teacher: ${teacher.name}
+
+Questions asked in this exam:
+${exam.questionText}
+
+NCERT curriculum reference for Class ${exam.className} ${exam.subject}:
+${ncertContext}
+
+Analyse the question paper against the NCERT curriculum depth and return ONLY valid JSON (no markdown, no explanation):
+{
+  "examId": ${exam.id},
+  "examName": "${exam.examName.replace(/"/g, "'")}",
+  "category": "${categoryLabel[exam.category] || exam.category}",
+  "subject": "${exam.subject}",
+  "className": "${exam.className}",
+  "teacherName": "${teacher.name}",
+  "totalMarks": ${exam.totalMarks},
+  "overallDepthRating": "Below NCERT Level" | "At NCERT Level" | "Above NCERT Level" | "Mixed",
+  "depthScore": <0-100 integer>,
+  "summary": "<2-3 sentence overall assessment>",
+  "questionAnalysis": [
+    {
+      "questionSnippet": "<first 60 chars>",
+      "ncertChapter": "<matching chapter>",
+      "depthLevel": "Below" | "At Level" | "Above" | "Beyond Syllabus",
+      "bloomsLevel": "Remember" | "Understand" | "Apply" | "Analyse" | "Evaluate" | "Create",
+      "concern": "<specific concern if any, else empty string>"
+    }
+  ],
+  "strengths": ["strength 1"],
+  "concerns": ["concern 1"],
+  "recommendations": ["recommendation 1"]
+}`;
+
+            const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": process.env.ANTHROPIC_API_KEY || "",
+                "anthropic-version": "2023-06-01",
+              },
+              body: JSON.stringify({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 2000,
+                messages: [{ role: "user", content: prompt }],
+              }),
+            });
+
+            const aiData: any = await aiRes.json();
+            const raw = aiData.content?.[0]?.text || "{}";
+            const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+            const parsed = JSON.parse(cleaned);
+            results.push(parsed);
+          } catch {
+            results.push({
+              examId: exam.id,
+              examName: exam.examName,
+              category: categoryLabel[exam.category] || exam.category,
+              subject: exam.subject,
+              className: exam.className,
+              teacherName: teacher.name,
+              totalMarks: exam.totalMarks,
+              overallDepthRating: "At NCERT Level",
+              depthScore: 50,
+              summary: "AI analysis unavailable.",
+              questionAnalysis: [],
+              strengths: [],
+              concerns: ["AI classification temporarily unavailable"],
+              recommendations: [],
+            });
+          }
+        }
+      }
+
+      res.json(results);
+    } catch (err) {
+      console.error("[principal/education-quality]", err);
+      res.status(500).json({ message: "Failed to compute education quality" });
+    }
+  });
+
   app.get("/api/principal/school-insights", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "principal" && req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {

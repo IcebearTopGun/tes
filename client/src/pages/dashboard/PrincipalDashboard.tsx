@@ -40,7 +40,7 @@ const PRINCIPAL_QUESTIONS = [
 
 export default function PrincipalDashboard() {
   const { user, logout } = useAuth();
-  const [activeSection, setActiveSection] = useState("class-performance");
+  const [activeSection, setActiveSection] = useState("school-insights");
   const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
@@ -87,6 +87,13 @@ export default function PrincipalDashboard() {
     queryKey: ["/api/principal/school-insights"],
     queryFn: () => fetchWithAuth("/api/principal/school-insights").then(r => r.json()),
     enabled: activeSection === "school-insights",
+  });
+
+  const [eduQualityOpen, setEduQualityOpen] = useState<number | null>(null);
+  const { data: eduQuality, isLoading: isLoadingEduQuality } = useQuery<any[]>({
+    queryKey: ["/api/principal/education-quality"],
+    queryFn: () => fetchWithAuth("/api/principal/education-quality").then(r => r.json()),
+    enabled: activeSection === "education-quality",
   });
 
   const { data: messages, refetch: refetchMessages } = useQuery<any[]>({
@@ -155,11 +162,11 @@ export default function PrincipalDashboard() {
         </div>
 
         <div className="sf-nav-tabs">
-          <button className={`sf-nav-tab${activeSection === "class-performance" ? " on" : ""}`} onClick={() => setActiveSection("class-performance")}>
+          <button className={`sf-nav-tab${activeSection === "school-insights" ? " on" : ""}`} onClick={() => setActiveSection("school-insights")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
             </svg>
-            Class Performance
+            School Insights
           </button>
           <button className={`sf-nav-tab${activeSection === "teacher-insights" ? " on" : ""}`} onClick={() => setActiveSection("teacher-insights")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -167,11 +174,17 @@ export default function PrincipalDashboard() {
             </svg>
             Teacher Insights
           </button>
-          <button className={`sf-nav-tab${activeSection === "school-insights" ? " on" : ""}`} onClick={() => setActiveSection("school-insights")}>
+          <button className={`sf-nav-tab${activeSection === "class-performance" ? " on" : ""}`} onClick={() => setActiveSection("class-performance")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+              <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
             </svg>
-            School Insights
+            Class Insights
+          </button>
+          <button className={`sf-nav-tab${activeSection === "education-quality" ? " on" : ""}`} onClick={() => setActiveSection("education-quality")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+            Quality of Education
           </button>
           <button className={`sf-nav-tab${activeSection === "custom-insights" ? " on" : ""}`} onClick={() => setActiveSection("custom-insights")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -657,6 +670,224 @@ export default function PrincipalDashboard() {
               </div>
             )}
           </>
+        )}
+
+        {/* ── QUALITY OF EDUCATION TAB ── */}
+        {activeSection === "education-quality" && (
+          <div className="sf-panel">
+            <div className="sf-analytics-head">
+              <div>
+                <div className="sf-panel-title">Quality of Education</div>
+                <div className="sf-panel-sub">AI-powered analysis: are your questions at the right NCERT depth for the class?</div>
+              </div>
+              <span style={{ fontSize: 11, padding: "4px 12px", borderRadius: 20, background: "var(--lav-bg)", color: "var(--lavender)", fontWeight: 700, border: "1.5px solid var(--lav-card)" }}>✦ AI Analysis</span>
+            </div>
+
+            {isLoadingEduQuality && (
+              <div style={{ textAlign: "center", padding: 48 }}>
+                <div className="sf-spinner" />
+                <div style={{ marginTop: 12, fontSize: 13, color: "var(--mid)" }}>Analysing question papers against NCERT curriculum…</div>
+              </div>
+            )}
+
+            {!isLoadingEduQuality && (!eduQuality || eduQuality.length === 0) && (
+              <div className="sf-empty">
+                <div className="sf-empty-icon">📚</div>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>No exam papers to analyse yet</div>
+                <div style={{ fontSize: 12 }}>Create exams with question text to unlock AI curriculum depth analysis</div>
+              </div>
+            )}
+
+            {!isLoadingEduQuality && eduQuality && eduQuality.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+                {/* Summary bar — overall depth distribution across all exams */}
+                {(() => {
+                  const counts = { below: 0, at: 0, above: 0, mixed: 0 };
+                  eduQuality.forEach((eq: any) => {
+                    const r = eq.overallDepthRating || "";
+                    if (r.includes("Below")) counts.below++;
+                    else if (r.includes("Above")) counts.above++;
+                    else if (r.includes("Mixed")) counts.mixed++;
+                    else counts.at++;
+                  });
+                  const total = eduQuality.length;
+                  return (
+                    <div className="sf-chart-card" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                      {[
+                        { label: "Below NCERT Level", count: counts.below, color: "#d08a2b", bg: "var(--amber-bg)", icon: "⬇" },
+                        { label: "At NCERT Level", count: counts.at, color: "var(--green)", bg: "var(--green-bg)", icon: "✓" },
+                        { label: "Above NCERT Level", count: counts.above, color: "#2563c0", bg: "var(--blue-bg)", icon: "⬆" },
+                        { label: "Mixed Level", count: counts.mixed, color: "var(--lavender)", bg: "var(--lav-bg)", icon: "~" },
+                      ].map(item => (
+                        <div key={item.label} style={{ background: item.bg, borderRadius: 12, padding: "14px 16px", textAlign: "center" }}>
+                          <div style={{ fontSize: 24, fontWeight: 800, color: item.color }}>{item.count}</div>
+                          <div style={{ fontSize: 10, color: "var(--mid)", marginTop: 3, fontWeight: 600 }}>{item.label}</div>
+                          <div style={{ fontSize: 9, color: "var(--dim)", marginTop: 2 }}>of {total} exams</div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+                {/* Per-exam cards */}
+                {eduQuality.map((eq: any, idx: number) => {
+                  const isOpen = eduQualityOpen === idx;
+                  const depthColor = eq.overallDepthRating?.includes("Below") ? "#d08a2b"
+                    : eq.overallDepthRating?.includes("Above") ? "#2563c0"
+                    : eq.overallDepthRating?.includes("Mixed") ? "var(--lavender)"
+                    : "var(--green)";
+                  const depthBg = eq.overallDepthRating?.includes("Below") ? "var(--amber-bg)"
+                    : eq.overallDepthRating?.includes("Above") ? "var(--blue-bg)"
+                    : eq.overallDepthRating?.includes("Mixed") ? "var(--lav-bg)"
+                    : "var(--green-bg)";
+
+                  // Category labels
+                  const catColors: Record<string, { bg: string; color: string }> = {
+                    "Unit Test":     { bg: "var(--lav-bg)",   color: "var(--lavender)" },
+                    "Class Test":    { bg: "var(--blue-bg)",  color: "#2563c0" },
+                    "Homework":      { bg: "var(--green-bg)", color: "var(--green)" },
+                    "Half Yearly":   { bg: "var(--amber-bg)", color: "var(--amber)" },
+                    "Annual Exam":   { bg: "#fff0f0",         color: "var(--red)" },
+                    "Quiz":          { bg: "#f0f8ff",         color: "#3a8ab0" },
+                    "Assignment":    { bg: "#f5f0ff",         color: "#7c5cbf" },
+                  };
+                  const catStyle = catColors[eq.category] || { bg: "var(--lav-bg)", color: "var(--lavender)" };
+
+                  // Bloom's level color
+                  const bloomColors: Record<string, string> = {
+                    "Remember": "#9e9e9e", "Understand": "#5c85d6", "Apply": "#2a9d6e",
+                    "Analyse": "#d08a2b", "Evaluate": "#9c4dcc", "Create": "#d94f4f",
+                  };
+
+                  // Depth gauge
+                  const gaugeVal = Math.min(100, Math.max(0, eq.depthScore ?? 50));
+                  const gaugeColor = gaugeVal < 40 ? "#d08a2b" : gaugeVal > 65 ? "#2563c0" : "var(--green)";
+
+                  return (
+                    <div key={eq.examId} className="sf-chart-card" style={{ padding: 0, overflow: "hidden" }}>
+                      {/* Exam header row */}
+                      <div
+                        style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", cursor: "pointer", background: isOpen ? "var(--pane)" : "transparent" }}
+                        onClick={() => setEduQualityOpen(isOpen ? null : idx)}
+                      >
+                        {/* Category pill */}
+                        <span style={{ fontSize: 10, padding: "3px 9px", borderRadius: 20, background: catStyle.bg, color: catStyle.color, fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap" }}>
+                          {eq.category}
+                        </span>
+
+                        {/* Title */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {eq.examName}
+                          </div>
+                          <div style={{ fontSize: 11, color: "var(--mid)" }}>Class {eq.className} · {eq.subject} · {eq.totalMarks} marks</div>
+                        </div>
+
+                        {/* Depth gauge bar */}
+                        <div style={{ flexShrink: 0, width: 120 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "var(--mid)", marginBottom: 3 }}>
+                            <span>Below</span><span>NCERT</span><span>Above</span>
+                          </div>
+                          <div style={{ height: 6, background: "var(--rule)", borderRadius: 3, position: "relative" }}>
+                            <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", height: 10, width: 2, background: "var(--mid)", borderRadius: 1 }} />
+                            <div style={{ height: "100%", width: `${gaugeVal}%`, background: gaugeColor, borderRadius: 3, transition: "width 0.6s" }} />
+                          </div>
+                        </div>
+
+                        {/* Overall rating badge */}
+                        <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 8, background: depthBg, color: depthColor, fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap" }}>
+                          {eq.overallDepthRating}
+                        </span>
+
+                        {/* Expand toggle */}
+                        <svg style={{ width: 16, height: 16, color: "var(--mid)", flexShrink: 0, transition: "transform 0.2s", transform: isOpen ? "rotate(180deg)" : "rotate(0)" }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                      </div>
+
+                      {/* Expanded content */}
+                      {isOpen && (
+                        <div style={{ borderTop: "1px solid var(--rule)", padding: "18px 18px 20px" }}>
+
+                          {/* Summary */}
+                          <div style={{ fontSize: 13, color: "var(--ink)", lineHeight: 1.65, marginBottom: 16, padding: "10px 14px", background: "var(--pane)", borderRadius: 10, borderLeft: `3px solid ${depthColor}` }}>
+                            {eq.summary}
+                          </div>
+
+                          {/* Two-column: Strengths + Concerns */}
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                            <div style={{ background: "var(--green-bg)", border: "1px solid rgba(42,157,110,0.2)", borderRadius: 10, padding: "12px 14px" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--green)", marginBottom: 8 }}>✅ STRENGTHS</div>
+                              {(eq.strengths || []).length === 0
+                                ? <div style={{ fontSize: 12, color: "var(--mid)" }}>None identified</div>
+                                : (eq.strengths || []).map((s: string, i: number) => (
+                                  <div key={i} style={{ fontSize: 12, color: "var(--ink)", marginBottom: 5, display: "flex", gap: 6 }}>
+                                    <span style={{ color: "var(--green)", flexShrink: 0 }}>→</span>{s}
+                                  </div>
+                                ))}
+                            </div>
+                            <div style={{ background: "#fff8ed", border: "1px solid rgba(208,138,43,0.2)", borderRadius: 10, padding: "12px 14px" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--amber)", marginBottom: 8 }}>⚠ CONCERNS</div>
+                              {(eq.concerns || []).length === 0
+                                ? <div style={{ fontSize: 12, color: "var(--mid)" }}>None identified</div>
+                                : (eq.concerns || []).map((c: string, i: number) => (
+                                  <div key={i} style={{ fontSize: 12, color: "var(--ink)", marginBottom: 5, display: "flex", gap: 6 }}>
+                                    <span style={{ color: "var(--amber)", flexShrink: 0 }}>→</span>{c}
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+
+                          {/* Question-level analysis table */}
+                          {(eq.questionAnalysis || []).length > 0 && (
+                            <div style={{ marginBottom: 16 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", letterSpacing: "0.08em", marginBottom: 10 }}>QUESTION-BY-QUESTION DEPTH ANALYSIS</div>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                                {eq.questionAnalysis.map((qa: any, qi: number) => {
+                                  const dlColor = qa.depthLevel === "Below" ? "#d08a2b" : qa.depthLevel === "Above" ? "#2563c0" : qa.depthLevel === "Beyond Syllabus" ? "#d94f4f" : "var(--green)";
+                                  const dlBg = qa.depthLevel === "Below" ? "var(--amber-bg)" : qa.depthLevel === "Above" ? "var(--blue-bg)" : qa.depthLevel === "Beyond Syllabus" ? "#fff0f0" : "var(--green-bg)";
+                                  const bloomColor = bloomColors[qa.bloomsLevel] || "var(--mid)";
+                                  return (
+                                    <div key={qi} style={{ border: "1.5px solid var(--rule)", borderRadius: 10, padding: "10px 14px", background: "var(--card)" }}>
+                                      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                        <div style={{ width: 26, height: 26, borderRadius: 7, background: "var(--lav-bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "var(--lavender)", flexShrink: 0 }}>Q{qi + 1}</div>
+                                        <div style={{ flex: 1 }}>
+                                          <div style={{ fontSize: 12, color: "var(--ink)", marginBottom: 6 }}>{qa.questionSnippet}</div>
+                                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: dlBg, color: dlColor, fontWeight: 700 }}>{qa.depthLevel}</span>
+                                            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: `${bloomColor}18`, color: bloomColor, fontWeight: 700 }}>Bloom's: {qa.bloomsLevel}</span>
+                                            {qa.ncertChapter && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: "var(--pane)", color: "var(--mid)", border: "1px solid var(--rule)" }}>📖 {qa.ncertChapter}</span>}
+                                          </div>
+                                          {qa.concern && <div style={{ fontSize: 11, color: "#d08a2b", marginTop: 6, display: "flex", gap: 5 }}><span>⚠</span>{qa.concern}</div>}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Recommendations */}
+                          {(eq.recommendations || []).length > 0 && (
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", letterSpacing: "0.08em", marginBottom: 8 }}>RECOMMENDATIONS</div>
+                              {eq.recommendations.map((r: string, i: number) => (
+                                <div key={i} style={{ fontSize: 12, color: "var(--ink)", marginBottom: 6, display: "flex", gap: 8, padding: "8px 12px", background: "var(--blue-bg)", borderRadius: 8 }}>
+                                  <span style={{ color: "#2563c0", flexShrink: 0 }}>💡</span>{r}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {/* ── CUSTOM INSIGHTS TAB ── */}
