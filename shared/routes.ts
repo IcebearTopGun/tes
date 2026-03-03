@@ -20,11 +20,19 @@ export const errorSchemas = {
 // Exclude password from responses
 export const teacherResponseSchema = z.custom<Omit<typeof teachers.$inferSelect, "password">>();
 export const studentResponseSchema = z.custom<Omit<typeof students.$inferSelect, "password">>();
+const adminUserResponseSchema = z.object({
+  id: z.number(),
+  employeeId: z.string(),
+  name: z.string(),
+  email: z.string(),
+  phoneNumber: z.string().nullable().optional(),
+  role: z.string().optional(),
+});
 
 export const authResponseSchema = z.object({
   token: z.string(),
-  role: z.enum(["teacher", "student", "admin"]),
-  user: z.union([teacherResponseSchema, studentResponseSchema])
+  role: z.enum(["teacher", "student", "admin", "principal"]),
+  user: z.union([teacherResponseSchema, studentResponseSchema, adminUserResponseSchema])
 });
 
 export const otpSendResponseSchema = z.object({

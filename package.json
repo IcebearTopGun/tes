@@ -9,7 +9,7 @@
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "test": "vitest run",
-    "test:integration": "vitest run tests/integration/*.test.ts",
+    "test:integration": "vitest run --maxWorkers=1 tests/integration/*.test.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

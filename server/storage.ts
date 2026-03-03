@@ -88,6 +88,12 @@ export interface IStorage {
   getAdmin(id: number): Promise<Admin | undefined>;
   getAdminByEmployeeId(employeeId: string): Promise<Admin | undefined>;
   createAdmin(admin: InsertAdmin): Promise<Admin>;
+  updateAdminPassword(id: number, passwordHash: string): Promise<void>;
+  getAdminUserByEmployeeId(employeeId: string): Promise<AdminUser | undefined>;
+  getAdminUserById(id: number): Promise<AdminUser | undefined>;
+  createAdminUser(data: InsertAdminUser): Promise<AdminUser>;
+  getAllAdminUsers(): Promise<AdminUser[]>;
+  updateAdminUserPassword(id: number, passwordHash: string): Promise<void>;
   getAllStudents(): Promise<Student[]>;
   getAllTeachers(): Promise<Teacher[]>;
   getAllExams(): Promise<Exam[]>;
@@ -125,7 +131,7 @@ export interface IStorage {
       engagementAlerts: { className: string; completionPct: number; alert: string }[];
     };
   }>;
-  updateProfile(role: "student" | "teacher" | "admin", id: number, data: { name?: string; phone?: string; profilePhotoUrl?: string }): Promise<void>;
+  updateProfile(role: "student" | "teacher" | "admin" | "principal", id: number, data: { name?: string; phone?: string; profilePhotoUrl?: string }): Promise<void>;
 
   // Admin CRUD for teachers/students
   updateTeacher(id: number, data: Partial<InsertTeacher>): Promise<Teacher>;
@@ -799,6 +805,10 @@ export class DatabaseStorage implements IStorage {
     return created;
   }
 
+  async updateAdminPassword(id: number, passwordHash: string): Promise<void> {
+    await db.update(admins).set({ password: passwordHash }).where(eq(admins.id, id));
+  }
+
   async getAllStudents(): Promise<Student[]> {
     return db.select().from(students).orderBy(students.studentClass, students.section, students.name);
   }
@@ -1152,13 +1162,28 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  async updateProfile(role: "student" | "teacher" | "admin", id: number, data: { name?: string; phone?: string; profilePhotoUrl?: string }): Promise<void> {
+  async updateProfile(role: "student" | "teacher" | "admin" | "principal", id: number, data: { name?: string; phone?: string; profilePhotoUrl?: string }): Promise<void> {
     if (role === "student") {
       await db.update(students).set(data).where(eq(students.id, id));
     } else if (role === "teacher") {
       await db.update(teachers).set(data).where(eq(teachers.id, id));
+    } else if (role === "principal") {
+      const mapped: any = {};
+      if (data.name !== undefined) mapped.name = data.name;
+      if (data.phone !== undefined) mapped.phoneNumber = data.phone;
+      if (data.profilePhotoUrl !== undefined) mapped.profilePhotoUrl = data.profilePhotoUrl;
+      await db.update(adminUsers).set({ ...mapped, updatedAt: new Date().toISOString() }).where(eq(adminUsers.id, id));
     } else {
-      await db.update(admins).set(data).where(eq(admins.id, id));
+      const mapped: any = {};
+      if (data.name !== undefined) mapped.name = data.name;
+      if (data.phone !== undefined) mapped.phoneNumber = data.phone;
+      if (data.profilePhotoUrl !== undefined) mapped.profilePhotoUrl = data.profilePhotoUrl;
+      const existingAdminUser = await this.getAdminUserById(id);
+      if (existingAdminUser) {
+        await db.update(adminUsers).set({ ...mapped, updatedAt: new Date().toISOString() }).where(eq(adminUsers.id, id));
+      } else {
+        await db.update(admins).set(data).where(eq(admins.id, id));
+      }
     }
   }
 
@@ -1255,6 +1280,10 @@ export class DatabaseStorage implements IStorage {
 
   async getAllAdminUsers(): Promise<AdminUser[]> {
     return db.select().from(adminUsers).orderBy(adminUsers.name);
+  }
+
+  async updateAdminUserPassword(id: number, passwordHash: string): Promise<void> {
+    await db.update(adminUsers).set({ passwordHash, updatedAt: new Date().toISOString() }).where(eq(adminUsers.id, id));
   }
 
   // ─── ClassSections ──────────────────────────────────────────────────────────

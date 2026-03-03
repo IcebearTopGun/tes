@@ -40,6 +40,7 @@ import { fetchWithAuth } from "@/lib/fetcher";
 import ProfileDrawer from "@/components/ProfileDrawer";
 import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
+import { getInitials } from "@/shared/utils/identity";
 
 interface StructuredSubject {
   name: string;
@@ -441,10 +442,6 @@ function getGreeting() {
   if (h < 12) return "Good morning";
   if (h < 17) return "Good afternoon";
   return "Good evening";
-}
-
-function getInitials(name: string) {
-  return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
 }
 
 // ─── Rich Text Mini-Editor ────────────────────────────────────────────────────
@@ -3499,7 +3496,17 @@ export default function TeacherDashboard() {
                           const subjectIcon = exam.subject?.toLowerCase().includes("math") ? "📐" : exam.subject?.toLowerCase().includes("sci") ? "🔬" : exam.subject?.toLowerCase().includes("eng") ? "📖" : exam.subject?.toLowerCase().includes("phys") ? "⚛️" : exam.subject?.toLowerCase().includes("chem") ? "⚗️" : exam.subject?.toLowerCase().includes("bio") ? "🧬" : "📝";
                           const evaluated = (exam.sheetsEvaluated || 0) > 0;
                           const catLabel: Record<string, string> = { unit_test: "Unit Test", class_test: "Class Test", homework: "Homework", half_yearly: "Half Yearly", annual: "Annual Exam", quiz: "Quiz", assignment: "Assignment", mid_term: "Mid Term", end_sem: "End Sem" };
-                          const catColor: Record<string, string> = { unit_test: "#6c47d8", class_test: "#2563c0", mid_term: "#92400e", end_sem: "#b91c1c", class_test: "#2563c0" };
+                          const catColor: Record<string, string> = {
+                            unit_test: "#6c47d8",
+                            class_test: "#2563c0",
+                            homework: "#15803d",
+                            half_yearly: "#92400e",
+                            annual: "#b91c1c",
+                            quiz: "#0f766e",
+                            assignment: "#6b7280",
+                            mid_term: "#92400e",
+                            end_sem: "#b91c1c",
+                          };
 
                           return (
                             <ExamListItem

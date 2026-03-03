@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 
 export default function ProfilePanel({ hideTitle }: { hideTitle?: boolean } = {}) {
-  const { user } = useAuth();
+  const { user, role: authRole } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -18,6 +18,9 @@ export default function ProfilePanel({ hideTitle }: { hideTitle?: boolean } = {}
   const [editPhone, setEditPhone] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const { data: profile, isLoading } = useQuery<any>({
     queryKey: ["/api/profile"],
@@ -35,6 +38,22 @@ export default function ProfilePanel({ hideTitle }: { hideTitle?: boolean } = {}
       setIsEditing(false);
     },
     onError: () => toast({ title: "Update failed", variant: "destructive" }),
+  });
+
+  const changePassword = useMutation({
+    mutationFn: (data: { currentPassword: string; newPassword: string; confirmPassword: string }) =>
+      fetchWithAuth("/api/profile/change-password", { method: "POST", body: JSON.stringify(data) }).then(async (r) => {
+        const json = await r.json();
+        if (!r.ok) throw new Error(json.message || "Failed to change password");
+        return json;
+      }),
+    onSuccess: () => {
+      toast({ title: "Password updated successfully" });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    },
+    onError: (err: any) => toast({ title: "Password update failed", description: err?.message || "Failed", variant: "destructive" }),
   });
 
   const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -80,7 +99,7 @@ export default function ProfilePanel({ hideTitle }: { hideTitle?: boolean } = {}
     return <div style={{ padding: "40px", textAlign: "center" }}><Spinner /></div>;
   }
 
-  const role = profile?.role || user?.role || "student";
+  const role = profile?.role || authRole || "student";
   const name = profile?.name || (user as any)?.name || "";
   const initials = name.split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
 
@@ -134,8 +153,8 @@ export default function ProfilePanel({ hideTitle }: { hideTitle?: boolean } = {}
             <span style={{
               display: "inline-block", fontSize: 11, fontWeight: 700, textTransform: "uppercase",
               letterSpacing: "0.08em", padding: "3px 10px", borderRadius: 6,
-              background: role === "admin" ? "var(--ink)" : role === "teacher" ? "var(--lav-bg)" : "var(--green-bg)",
-              color: role === "admin" ? "var(--white)" : "var(--ink)",
+              background: role === "admin" || role === "principal" ? "var(--ink)" : role === "teacher" ? "var(--lav-bg)" : "var(--green-bg)",
+              color: role === "admin" || role === "principal" ? "var(--white)" : "var(--ink)",
             }}>
               {role}
             </span>
@@ -225,10 +244,52 @@ export default function ProfilePanel({ hideTitle }: { hideTitle?: boolean } = {}
           </>
         )}
 
-        {role === "admin" && (
+        {(role === "admin" || role === "principal") && (
           <div className="sf-fld">
             <label className="sf-fld-lbl">Designation</label>
-            <div style={{ padding: "9px 14px", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, fontSize: 14, color: "var(--mid)" }}>School Administrator</div>
+            <div style={{ padding: "9px 14px", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, fontSize: 14, color: "var(--mid)" }}>
+              {role === "principal" ? "School Principal" : "School Administrator"}
+            </div>
+          </div>
+        )}
+
+        {(role === "admin" || role === "principal") && (
+          <div className="sf-fld" style={{ borderTop: "1px solid var(--rule)", paddingTop: 14 }}>
+            <label className="sf-fld-lbl">Change Password</label>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+              <Input
+                type="password"
+                placeholder="Current password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                className="rounded-xl"
+              />
+              <Input
+                type="password"
+                placeholder="New password (min 8 chars)"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="rounded-xl"
+              />
+              <Input
+                type="password"
+                placeholder="Confirm new password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="rounded-xl"
+              />
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <Button
+                size="sm"
+                className="rounded-xl"
+                disabled={changePassword.isPending || !currentPassword || !newPassword || !confirmPassword}
+                onClick={() => changePassword.mutate({ currentPassword, newPassword, confirmPassword })}
+              >
+                {changePassword.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Update Password
+              </Button>
+            </div>
           </div>
         )}
 

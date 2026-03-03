@@ -27,6 +27,18 @@ describe("Integration: Exam evaluation end-to-end", () => {
 
   it("teacher uploads model Q/A, evaluates 40 scripts, and results appear on teacher and student sides", async () => {
     const adminToken = await adminLogin(baseUrl);
+
+    const ensureClassSection = await apiJson(
+      baseUrl,
+      "/api/admin/class-sections",
+      {
+        method: "POST",
+        body: JSON.stringify({ className: 10, section: "A", subjects: ["Science", "Mathematics", "English"] }),
+      },
+      adminToken,
+    );
+    expect([201, 409]).toContain(ensureClassSection.status);
+
     const teacherEmployeeId = `TINT-${Date.now()}`;
     const teacherPhone = "9000012345";
     const teacherEmail = `integration.teacher.${Date.now()}@example.com`;
@@ -51,6 +63,7 @@ describe("Integration: Exam evaluation end-to-end", () => {
     const students = Array.from({ length: 40 }).map((_, i) => ({
       admissionNumber: `INT10A-${String(i + 1).padStart(3, "0")}`,
       studentName: `Student ${i + 1}`,
+      email: `int10a.student.${i + 1}.${Date.now()}@example.com`,
       phone: `91000${String(i + 1).padStart(5, "0")}`,
       class: "10",
       section: "A",
@@ -65,6 +78,7 @@ describe("Integration: Exam evaluation end-to-end", () => {
           body: JSON.stringify({
             studentName: s.studentName,
             admissionNumber: s.admissionNumber,
+            email: s.email,
             phoneNumber: s.phone,
             class: s.class,
             section: s.section,

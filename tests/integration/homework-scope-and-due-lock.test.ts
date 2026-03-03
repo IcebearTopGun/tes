@@ -31,6 +31,29 @@ describe("Integration: Homework class scoping and due-date edit lock", () => {
 
   it("homework is visible only for assigned class-section, and edits are blocked after due date", async () => {
     const adminToken = await adminLogin(baseUrl);
+
+    const ensure10A = await apiJson(
+      baseUrl,
+      "/api/admin/class-sections",
+      {
+        method: "POST",
+        body: JSON.stringify({ className: 10, section: "A", subjects: ["Mathematics", "Science", "English"] }),
+      },
+      adminToken,
+    );
+    expect([201, 409]).toContain(ensure10A.status);
+
+    const ensure10B = await apiJson(
+      baseUrl,
+      "/api/admin/class-sections",
+      {
+        method: "POST",
+        body: JSON.stringify({ className: 10, section: "B", subjects: ["Mathematics", "Science", "English"] }),
+      },
+      adminToken,
+    );
+    expect([201, 409]).toContain(ensure10B.status);
+
     const teacherEmployeeId = `THW-${Date.now()}`;
     const teacherPhone = "9000099999";
     const teacherEmail = `hw.teacher.${Date.now()}@example.com`;
@@ -52,8 +75,8 @@ describe("Integration: Homework class scoping and due-date edit lock", () => {
     );
     expect(createTeacher.status).toBe(201);
 
-    const studentA = { admissionNumber: `HW-A-${Date.now()}`, studentName: "Student A", phone: "9222200001", class: "10", section: "A" };
-    const studentB = { admissionNumber: `HW-B-${Date.now()}`, studentName: "Student B", phone: "9222200002", class: "10", section: "B" };
+    const studentA = { admissionNumber: `HW-A-${Date.now()}`, studentName: "Student A", email: `hwa.${Date.now()}@example.com`, phone: "9222200001", class: "10", section: "A" };
+    const studentB = { admissionNumber: `HW-B-${Date.now()}`, studentName: "Student B", email: `hwb.${Date.now()}@example.com`, phone: "9222200002", class: "10", section: "B" };
 
     const createA = await apiJson(
       baseUrl,

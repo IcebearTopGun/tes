@@ -13,6 +13,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, X, Plus, Send, TrendingUp, MessageSquare, BookOpen } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
+import { fetchJsonWithAuth } from "@/lib/fetcher";
+import { getInitials } from "@/shared/utils/identity";
 
 const STUDENT_EXAMPLE_QUESTIONS = [
   "How did I perform overall?",
@@ -20,16 +22,6 @@ const STUDENT_EXAMPLE_QUESTIONS = [
   "What should I focus on for my next exam?",
   "What feedback did my teachers give me?",
 ];
-
-async function fetchWithAuth(url: string, options?: RequestInit) {
-  const token = localStorage.getItem("token");
-  const res = await fetch(url, {
-    ...options,
-    headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "", ...(options?.headers || {}) },
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
 
 interface PerformanceProfile {
   strengths: string[];
@@ -55,10 +47,6 @@ function getGreeting() {
   return "Good evening";
 }
 
-function getInitials(name: string) {
-  return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
-}
-
 function scoreColor(pct: number) {
   if (pct >= 75) return "var(--green)";
   if (pct >= 50) return "var(--amber)";
@@ -82,39 +70,50 @@ export default function StudentDashboard() {
 
   const { data: conversations } = useQuery<any[]>({
     queryKey: ["/api/student/chat/conversations"],
-    queryFn: () => fetchWithAuth("/api/student/chat/conversations"),
+    queryFn: () => fetchJsonWithAuth("/api/student/chat/conversations"),
     enabled: isChatOpen,
   });
 
   const { data: messages, refetch: refetchMessages } = useQuery<any[]>({
     queryKey: ["/api/student/chat/messages", activeConversationId],
-    queryFn: () => fetchWithAuth(`/api/student/chat/conversations/${activeConversationId}/messages`),
+    queryFn: () => fetchJsonWithAuth(`/api/student/chat/conversations/${activeConversationId}/messages`),
     enabled: !!activeConversationId,
   });
 
   const { data: performanceProfile, isLoading: isProfileLoading, refetch: refetchProfile } = useQuery<PerformanceProfile>({
     queryKey: ["/api/student/performance-profile"],
-    queryFn: () => fetchWithAuth("/api/student/performance-profile"),
+    queryFn: () => fetchJsonWithAuth("/api/student/performance-profile"),
     staleTime: 10 * 60 * 1000,
     retry: false,
   });
 
   const { data: revisionData, isLoading: isRevisionLoading } = useQuery<RevisionData>({
     queryKey: ["/api/student/revision", revisionChapter?.chapter, revisionChapter?.subject],
-    queryFn: () => fetchWithAuth(`/api/student/revision?chapter=${encodeURIComponent(revisionChapter!.chapter)}&subject=${encodeURIComponent(revisionChapter!.subject)}`),
+    queryFn: () =>
+      fetchJsonWithAuth(
+        `/api/student/revision?chapter=${encodeURIComponent(revisionChapter!.chapter)}&subject=${encodeURIComponent(revisionChapter!.subject)}`,
+      ),
     enabled: !!revisionChapter,
     staleTime: 5 * 60 * 1000,
   });
 
 
   const startConversation = useMutation({
-    mutationFn: () => fetchWithAuth("/api/student/chat/conversations", { method: "POST", body: JSON.stringify({ title: "Academic Chat" }) }),
+    mutationFn: () =>
+      fetchJsonWithAuth("/api/student/chat/conversations", {
+        method: "POST",
+        body: JSON.stringify({ title: "Academic Chat" }),
+      }),
     onSuccess: (d) => { setActiveConversationId(d.id); queryClient.invalidateQueries({ queryKey: ["/api/student/chat/conversations"] }); },
     onError: () => toast({ title: "Error", description: "Could not start conversation.", variant: "destructive" }),
   });
 
   const sendMessage = useMutation({
-    mutationFn: (content: string) => fetchWithAuth(`/api/student/chat/conversations/${activeConversationId}/messages`, { method: "POST", body: JSON.stringify({ content }) }),
+    mutationFn: (content: string) =>
+      fetchJsonWithAuth(`/api/student/chat/conversations/${activeConversationId}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      }),
     onSuccess: () => { setChatMessage(""); refetchMessages(); },
     onError: () => toast({ title: "Error", description: "Failed to send message.", variant: "destructive" }),
   });

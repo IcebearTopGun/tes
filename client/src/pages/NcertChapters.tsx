@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useState } from "react";
+import { fetchJsonWithAuth } from "@/lib/fetcher";
 import {
   Dialog,
   DialogContent,
@@ -31,23 +32,6 @@ import {
   Loader2,
   BookOpen,
 } from "lucide-react";
-
-async function fetchWithAuth(url: string, options?: RequestInit) {
-  const token = localStorage.getItem("token");
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: token ? `Bearer ${token}` : "",
-      ...(options?.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err);
-  }
-  return res.json();
-}
 
 interface NcertChapter {
   id: number;
@@ -76,12 +60,12 @@ export default function NcertChapters() {
 
   const { data: chapters, isLoading } = useQuery<NcertChapter[]>({
     queryKey: ["/api/ncert-chapters"],
-    queryFn: () => fetchWithAuth("/api/ncert-chapters"),
+    queryFn: () => fetchJsonWithAuth("/api/ncert-chapters"),
   });
 
   const createMutation = useMutation({
     mutationFn: (data: ChapterForm) =>
-      fetchWithAuth("/api/ncert-chapters", { method: "POST", body: JSON.stringify(data) }),
+      fetchJsonWithAuth("/api/ncert-chapters", { method: "POST", body: JSON.stringify(data) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/ncert-chapters"] });
       toast({ title: "Chapter added", description: "NCERT chapter saved successfully." });
@@ -93,7 +77,7 @@ export default function NcertChapters() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<ChapterForm> }) =>
-      fetchWithAuth(`/api/ncert-chapters/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+      fetchJsonWithAuth(`/api/ncert-chapters/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/ncert-chapters"] });
       toast({ title: "Chapter updated", description: "Changes saved." });
@@ -105,7 +89,7 @@ export default function NcertChapters() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) =>
-      fetchWithAuth(`/api/ncert-chapters/${id}`, { method: "DELETE" }),
+      fetchJsonWithAuth(`/api/ncert-chapters/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/ncert-chapters"] });
       toast({ title: "Deleted", description: "Chapter removed." });

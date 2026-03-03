@@ -1,4 +1,6 @@
 import * as cdk from "aws-cdk-lib";
+import { DEPLOYMENT_DEFAULTS } from "./deployment-defaults";
+import { ContextResolver } from "../core/context-resolver";
 
 export interface DeploymentConfig {
   envName: string;
@@ -16,60 +18,32 @@ export interface DeploymentConfig {
   healthCheckPath: string;
 }
 
-function getContextString(app: cdk.App, key: string): string | undefined {
-  const val = app.node.tryGetContext(key);
-  return typeof val === "string" && val.trim().length > 0 ? val.trim() : undefined;
-}
+export class DeploymentConfigFactory {
+  constructor(private readonly app: cdk.App) {}
 
-function getRequired(app: cdk.App, key: string, fallback?: string): string {
-  const value = getContextString(app, key) ?? fallback;
-  if (!value) {
-    throw new Error(`Missing required context value: ${key}`);
+  build(): DeploymentConfig {
+    const context = new ContextResolver(this.app);
+    const account = context.getRequiredString("account", process.env.CDK_DEFAULT_ACCOUNT);
+    const region = context.getRequiredString("region", process.env.CDK_DEFAULT_REGION ?? DEPLOYMENT_DEFAULTS.region);
+
+    return {
+      envName: context.getOptionalString("envName") ?? DEPLOYMENT_DEFAULTS.envName,
+      account,
+      region,
+      availabilityZones: context.getStringList("availabilityZones", [`${region}a`, `${region}b`]),
+      ecrRepoName: context.getOptionalString("ecrRepoName") ?? DEPLOYMENT_DEFAULTS.ecrRepoName,
+      imageTag: context.getOptionalString("imageTag") ?? DEPLOYMENT_DEFAULTS.imageTag,
+      appSecretArn: context.getRequiredString("appSecretArn"),
+      containerPort: context.getNumber("containerPort", DEPLOYMENT_DEFAULTS.containerPort),
+      desiredCount: context.getNumber("desiredCount", DEPLOYMENT_DEFAULTS.desiredCount),
+      cpu: context.getNumber("cpu", DEPLOYMENT_DEFAULTS.cpu),
+      memoryMiB: context.getNumber("memoryMiB", DEPLOYMENT_DEFAULTS.memoryMiB),
+      maxAzs: context.getNumber("maxAzs", DEPLOYMENT_DEFAULTS.maxAzs),
+      healthCheckPath: context.getOptionalString("healthCheckPath") ?? DEPLOYMENT_DEFAULTS.healthCheckPath,
+    };
   }
-  return value;
-}
-
-function getNumber(app: cdk.App, key: string, fallback: number): number {
-  const raw = app.node.tryGetContext(key);
-  if (raw === undefined || raw === null || raw === "") {
-    return fallback;
-  }
-
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    throw new Error(`Context value ${key} must be numeric.`);
-  }
-  return parsed;
-}
-
-function getStringList(app: cdk.App, key: string, fallback: string[]): string[] {
-  const raw = getContextString(app, key);
-  if (!raw) return fallback;
-  const values = raw
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
-
-  return values.length > 0 ? values : fallback;
 }
 
 export function loadDeploymentConfig(app: cdk.App): DeploymentConfig {
-  const account = getRequired(app, "account", process.env.CDK_DEFAULT_ACCOUNT);
-  const region = getRequired(app, "region", process.env.CDK_DEFAULT_REGION ?? "us-east-1");
-
-  return {
-    envName: getContextString(app, "envName") ?? "prod",
-    account,
-    region,
-    availabilityZones: getStringList(app, "availabilityZones", [`${region}a`, `${region}b`]),
-    ecrRepoName: getContextString(app, "ecrRepoName") ?? "tes-app",
-    imageTag: getContextString(app, "imageTag") ?? "latest",
-    appSecretArn: getRequired(app, "appSecretArn"),
-    containerPort: getNumber(app, "containerPort", 5000),
-    desiredCount: getNumber(app, "desiredCount", 1),
-    cpu: getNumber(app, "cpu", 512),
-    memoryMiB: getNumber(app, "memoryMiB", 1024),
-    maxAzs: getNumber(app, "maxAzs", 2),
-    healthCheckPath: getContextString(app, "healthCheckPath") ?? "/api/admin/stats",
-  };
+  return new DeploymentConfigFactory(app).build();
 }

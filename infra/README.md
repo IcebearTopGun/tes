@@ -2,6 +2,10 @@
 
 This directory deploys the app to AWS ECS Fargate behind an Application Load Balancer.
 
+Design references:
+- `docs/architecture/HLD.md`
+- `docs/architecture/LLD.md`
+
 ## What gets created
 
 - VPC (public subnets only, NAT-free for minimal cost)

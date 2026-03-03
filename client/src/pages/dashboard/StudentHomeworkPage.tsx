@@ -1,28 +1,18 @@
 import "@/dashboard.css";
 import { useRef, useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import ProfileDrawer from "@/components/ProfileDrawer";
 import StudentTopNav from "@/components/student/StudentTopNav";
-
-async function fetchWithAuth(url: string, options?: RequestInit) {
-  const token = localStorage.getItem("token");
-  const res = await fetch(url, {
-    ...options,
-    headers: { "Content-Type": "application/json", Authorization: token ? `Bearer ${token}` : "", ...(options?.headers || {}) },
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
-function getInitials(name: string) {
-  return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
-}
+import { getInitials } from "@/shared/utils/identity";
+import { StudentWorkspaceService } from "@/features/student/services/student-workspace.service";
+import { useStudentHomeworkWorkspace } from "@/features/student/homework/hooks/useStudentHomeworkWorkspace";
+import { HomeworkStats } from "@/features/student/homework/components/HomeworkStats";
+import { PrivateEvaluationQA } from "@/features/student/shared/components/PrivateEvaluationQA";
 
 export default function StudentHomeworkPage() {
   const { user } = useAuth();
@@ -33,50 +23,67 @@ export default function StudentHomeworkPage() {
   const [chatByHw, setChatByHw] = useState<Record<number, { q: string; a: string; loading: boolean }>>({});
   const hwFileRef = useRef<HTMLInputElement>(null);
 
-  const { data: homeworkList, isLoading: isHomeworkLoading, refetch: refetchHomework } = useQuery<any[]>({
-    queryKey: ["/api/student/homework"],
-    queryFn: () => fetchWithAuth("/api/student/homework"),
-    staleTime: 30000,
-  });
-
-  const { data: hwAnalytics, refetch: refetchHwAnalytics } = useQuery<any>({
-    queryKey: ["/api/student/homework/analytics"],
-    queryFn: () => fetchWithAuth("/api/student/homework/analytics"),
-    staleTime: 30000,
-  });
+  const { homeworkQuery, analyticsQuery, groupedHomework } = useStudentHomeworkWorkspace();
+  const homeworkList = homeworkQuery.data;
+  const isHomeworkLoading = homeworkQuery.isLoading;
 
   const submitHomework = useMutation({
     mutationFn: ({ hwId, filesBase64 }: { hwId: number; filesBase64: string[] }) =>
-      fetchWithAuth(`/api/student/homework/${hwId}/submit`, { method: "POST", body: JSON.stringify({ filesBase64 }) }),
+      StudentWorkspaceService.submitHomework(hwId, filesBase64),
     onSuccess: () => {
       toast({ title: "Homework submitted", description: "Your answer sheets were uploaded and evaluated." });
-      refetchHomework();
-      refetchHwAnalytics();
+      homeworkQuery.refetch();
+      analyticsQuery.refetch();
     },
-    onError: (err: any) => toast({ title: "Submission failed", description: err?.message || "Could not submit homework.", variant: "destructive" }),
-    onSettled: () => { setUploadingHwId(null); setPendingHwId(null); },
+    onError: (error: Error) =>
+      toast({
+        title: "Submission failed",
+        description: error?.message || "Could not submit homework.",
+        variant: "destructive",
+      }),
+    onSettled: () => {
+      setUploadingHwId(null);
+      setPendingHwId(null);
+    },
   });
 
   const chatMutation = useMutation({
     mutationFn: ({ hwId, question }: { hwId: number; question: string }) =>
-      fetchWithAuth(`/api/student/homework/${hwId}/chat`, { method: "POST", body: JSON.stringify({ question }) }),
-    onSuccess: (resp, vars) => {
-      setChatByHw(prev => ({ ...prev, [vars.hwId]: { ...(prev[vars.hwId] || { q: "" }), a: resp.answer || "", loading: false } }));
+      StudentWorkspaceService.askHomeworkQuestion(hwId, question),
+    onSuccess: (response, variables) => {
+      setChatByHw((previous) => ({
+        ...previous,
+        [variables.hwId]: {
+          ...(previous[variables.hwId] || { q: "" }),
+          a: response.answer || "",
+          loading: false,
+        },
+      }));
     },
-    onError: (_e, vars) => {
-      setChatByHw(prev => ({ ...prev, [vars.hwId]: { ...(prev[vars.hwId] || { q: "" }), a: "Could not get response right now.", loading: false } }));
+    onError: (_error, variables) => {
+      setChatByHw((previous) => ({
+        ...previous,
+        [variables.hwId]: {
+          ...(previous[variables.hwId] || { q: "" }),
+          a: "Could not get response right now.",
+          loading: false,
+        },
+      }));
     },
   });
 
-  const handleBulkFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+  const handleBulkFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
     if (files.length === 0 || pendingHwId === null) return;
-    const toBase64 = (file: File) => new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsDataURL(file);
-    });
+
+    const toBase64 =
+      (file: File) =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Failed to read file"));
+        reader.readAsDataURL(file);
+      });
 
     try {
       setUploadingHwId(pendingHwId);
@@ -87,26 +94,12 @@ export default function StudentHomeworkPage() {
       setUploadingHwId(null);
       setPendingHwId(null);
     } finally {
-      e.target.value = "";
+      event.target.value = "";
     }
   };
 
   const userName = (user as any)?.name || "Student";
   const initials = getInitials(userName);
-
-  const sortedHomework = [...(homeworkList || [])].sort((a: any, b: any) => {
-    if ((a.subject || "") !== (b.subject || "")) return String(a.subject || "").localeCompare(String(b.subject || ""));
-    return new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime();
-  });
-
-  const grouped = sortedHomework.reduce((acc: Record<string, Record<string, any[]>>, hw: any) => {
-    const subject = hw.subject || "General";
-    const month = new Date(hw.dueDate).toLocaleString("en-US", { month: "long", year: "numeric" });
-    if (!acc[subject]) acc[subject] = {};
-    if (!acc[subject][month]) acc[subject][month] = [];
-    acc[subject][month].push(hw);
-    return acc;
-  }, {});
 
   return (
     <div className="sf-root">
@@ -120,120 +113,167 @@ export default function StudentHomeworkPage() {
           </div>
         </div>
 
-        <input ref={hwFileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={handleBulkFileChange} />
+        <input
+          ref={hwFileRef}
+          type="file"
+          multiple
+          accept="image/*,application/pdf"
+          className="hidden"
+          onChange={handleBulkFileChange}
+        />
 
-        {hwAnalytics && (
-          <div className="sf-funnel sf-funnel-5">
-            <div className="sf-f-col">
-              <div className="sf-f-cat">Assigned</div>
-              <div className="sf-f-num">{hwAnalytics.totalAssigned}</div>
-              <div className="sf-f-desc">Total homework assigned</div>
-            </div>
-            <div className="sf-f-col">
-              <div className="sf-f-cat">Submitted</div>
-              <div className="sf-f-num">{hwAnalytics.totalSubmitted}</div>
-              <div className="sf-f-desc">Total submitted</div>
-            </div>
-            <div className="sf-f-col">
-              <div className="sf-f-cat">Late</div>
-              <div className="sf-f-num">{hwAnalytics.lateSubmissions ?? 0}</div>
-              <div className="sf-f-desc">Submitted after due date</div>
-            </div>
-            <div className="sf-f-col">
-              <div className="sf-f-cat">On-time</div>
-              <div className="sf-f-num">{hwAnalytics.onTimePct}%</div>
-              <div className="sf-f-desc">On-time submission rate</div>
-            </div>
-            <div className="sf-f-col">
-              <div className="sf-f-cat">Avg Score</div>
-              <div className="sf-f-num">{hwAnalytics.avgCorrectness}%</div>
-              <div className="sf-f-desc">Average correctness</div>
-            </div>
-          </div>
-        )}
+        {analyticsQuery.data && <HomeworkStats analytics={analyticsQuery.data} />}
 
         <div className="sf-panel">
           <div className="sf-panel-title">My Homework</div>
           <div className="sf-panel-sub">Grouped by subject and month, sorted by due date (latest first)</div>
 
           {isHomeworkLoading ? (
-            <div style={{ padding: "24px 0", textAlign: "center" }}><Spinner size="sm" /></div>
+            <div style={{ padding: "24px 0", textAlign: "center" }}>
+              <Spinner size="sm" />
+            </div>
           ) : !homeworkList || homeworkList.length === 0 ? (
-            <div className="sf-empty"><div className="sf-empty-icon">📚</div>No homework assigned yet for your class and section.</div>
+            <div className="sf-empty">
+              <div className="sf-empty-icon">📚</div>
+              No homework assigned yet for your class and section.
+            </div>
           ) : (
-            Object.entries(grouped).map(([subject, months]) => (
+            Object.entries(groupedHomework).map(([subject, months]) => (
               <div key={subject} style={{ marginBottom: 18 }}>
                 <div style={{ fontFamily: "Fraunces, serif", fontWeight: 700, fontSize: 18, marginBottom: 8 }}>{subject}</div>
                 {Object.entries(months).map(([month, items]) => (
                   <div key={month} style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--dim)", letterSpacing: "1px", textTransform: "uppercase", marginBottom: 8 }}>{month}</div>
-                    {(items as any[]).map((hw: any) => {
-                      const sub = hw.submission;
-                      const dueDate = new Date(hw.dueDate);
+                    <div
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--dim)",
+                        letterSpacing: "1px",
+                        textTransform: "uppercase",
+                        marginBottom: 8,
+                      }}
+                    >
+                      {month}
+                    </div>
+
+                    {items.map((homework) => {
+                      const submission = homework.submission;
+                      const dueDate = new Date(homework.dueDate);
                       const isDuePassed = new Date() > dueDate;
                       const isEditable = !isDuePassed;
-                      const isUploading = uploadingHwId === hw.id;
-                      const statusLabel = sub ? (sub.status === "needs_improvement" ? "Needs Improvement" : "Submitted") : isDuePassed ? "Pending (Overdue)" : "Pending";
-                      const statusCls = sub ? (sub.status === "needs_improvement" ? "sf-es-draft" : "sf-es-done") : isDuePassed ? "sf-es-draft" : "";
-                      const chatState = chatByHw[hw.id] || { q: "", a: "", loading: false };
+                      const isUploading = uploadingHwId === homework.id;
+                      const statusLabel = submission
+                        ? submission.status === "needs_improvement"
+                          ? "Needs Improvement"
+                          : "Submitted"
+                        : isDuePassed
+                          ? "Pending (Overdue)"
+                          : "Pending";
+                      const statusClass = submission
+                        ? submission.status === "needs_improvement"
+                          ? "sf-es-draft"
+                          : "sf-es-done"
+                        : isDuePassed
+                          ? "sf-es-draft"
+                          : "";
+
+                      const chatState = chatByHw[homework.id] || { q: "", a: "", loading: false };
 
                       return (
-                        <div key={hw.id} className="sf-exam-item" style={{ cursor: "default", alignItems: "flex-start", flexDirection: "column", gap: 8 }}>
+                        <div
+                          key={homework.id}
+                          className="sf-exam-item"
+                          style={{ cursor: "default", alignItems: "flex-start", flexDirection: "column", gap: 8 }}
+                        >
                           <div style={{ display: "flex", alignItems: "center", width: "100%", gap: 12 }}>
-                            <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", flexShrink: 0 }}>📝</div>
-                            <div className="sf-exam-info" style={{ flex: 1 }}>
-                              <div className="sf-exam-name">{hw.description}</div>
-                              <div className="sf-exam-meta">Due: {dueDate.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
+                            <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", flexShrink: 0 }}>
+                              📝
                             </div>
-                            <span className={`sf-exam-status ${statusCls}`} style={{ flexShrink: 0 }}>{statusLabel}</span>
-                            {(!sub || isEditable) && (
+                            <div className="sf-exam-info" style={{ flex: 1 }}>
+                              <div className="sf-exam-name">{homework.description}</div>
+                              <div className="sf-exam-meta">
+                                Due: {dueDate.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                              </div>
+                            </div>
+                            <span className={`sf-exam-status ${statusClass}`} style={{ flexShrink: 0 }}>
+                              {statusLabel}
+                            </span>
+                            {(!submission || isEditable) && (
                               <Button
                                 size="sm"
                                 className="rounded-xl gap-1"
                                 disabled={isUploading}
-                                onClick={() => { setPendingHwId(hw.id); hwFileRef.current?.click(); }}
-                                data-testid={`button-submit-hw-${hw.id}`}
+                                onClick={() => {
+                                  setPendingHwId(homework.id);
+                                  hwFileRef.current?.click();
+                                }}
+                                data-testid={`button-submit-hw-${homework.id}`}
                               >
-                                {isUploading ? <><Loader2 className="h-3 w-3 animate-spin" /> Uploading…</> : <><Upload className="h-3 w-3" /> {sub ? "Edit Submission" : "Upload Answer Sheets"}</>}
+                                {isUploading ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin" /> Uploading…
+                                  </>
+                                ) : (
+                                  <>
+                                    <Upload className="h-3 w-3" /> {submission ? "Edit Submission" : "Upload Answer Sheets"}
+                                  </>
+                                )}
                               </Button>
                             )}
                           </div>
 
-                          {!isEditable && sub && (
-                            <div style={{ fontSize: 12, color: "var(--mid)" }}>Submission is locked because the due date has passed.</div>
-                          )}
-
-                          {sub?.aiFeedback && (
-                            <div style={{ width: "100%", padding: "10px 14px", background: "var(--lav-bg)", borderRadius: 10, fontSize: 12.5, color: "var(--ink2)", lineHeight: 1.6 }}>
-                              <b>Analysis:</b> {sub.aiFeedback}
-                              {sub.correctnessScore != null && <span style={{ marginLeft: 8, fontWeight: 700, color: sub.correctnessScore >= 70 ? "var(--green)" : "var(--amber)" }}>{sub.correctnessScore}%</span>}
+                          {!isEditable && submission && (
+                            <div style={{ fontSize: 12, color: "var(--mid)" }}>
+                              Submission is locked because the due date has passed.
                             </div>
                           )}
 
-                          {sub && (
-                            <div style={{ width: "100%", display: "flex", gap: 8, alignItems: "center" }}>
-                              <Input
-                                placeholder="Ask a question about this evaluation…"
-                                value={chatState.q}
-                                onChange={e => setChatByHw(prev => ({ ...prev, [hw.id]: { ...chatState, q: e.target.value } }))}
-                              />
-                              <Button
-                                size="sm"
-                                disabled={!chatState.q.trim() || chatState.loading}
-                                onClick={() => {
-                                  setChatByHw(prev => ({ ...prev, [hw.id]: { ...chatState, loading: true } }));
-                                  chatMutation.mutate({ hwId: hw.id, question: chatState.q });
-                                }}
-                              >
-                                Ask
-                              </Button>
+                          {submission?.aiFeedback && (
+                            <div
+                              style={{
+                                width: "100%",
+                                padding: "10px 14px",
+                                background: "var(--lav-bg)",
+                                borderRadius: 10,
+                                fontSize: 12.5,
+                                color: "var(--ink2)",
+                                lineHeight: 1.6,
+                              }}
+                            >
+                              <b>Analysis:</b> {submission.aiFeedback}
+                              {submission.correctnessScore != null && (
+                                <span
+                                  style={{
+                                    marginLeft: 8,
+                                    fontWeight: 700,
+                                    color: submission.correctnessScore >= 70 ? "var(--green)" : "var(--amber)",
+                                  }}
+                                >
+                                  {submission.correctnessScore}%
+                                </span>
+                              )}
                             </div>
                           )}
 
-                          {chatState.a && (
-                            <div style={{ width: "100%", padding: "10px 14px", background: "var(--cream)", borderRadius: 10, fontSize: 12.5, color: "var(--ink2)", lineHeight: 1.6 }}>
-                              <b>AI Tutotr:</b> {chatState.a}
-                            </div>
+                          {submission && (
+                            <PrivateEvaluationQA
+                              question={chatState.q}
+                              answer={chatState.a}
+                              loading={chatState.loading}
+                              onQuestionChange={(value) => {
+                                setChatByHw((previous) => ({
+                                  ...previous,
+                                  [homework.id]: { ...chatState, q: value },
+                                }));
+                              }}
+                              onAsk={() => {
+                                setChatByHw((previous) => ({
+                                  ...previous,
+                                  [homework.id]: { ...chatState, loading: true },
+                                }));
+                                chatMutation.mutate({ hwId: homework.id, question: chatState.q });
+                              }}
+                            />
                           )}
                         </div>
                       );

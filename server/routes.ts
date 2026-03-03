@@ -188,11 +188,15 @@ async function initAdminUsers() {
         email TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         phone_number TEXT,
+        profile_photo_url TEXT,
         role TEXT NOT NULL DEFAULT 'ADMIN',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
       )
     `);
+    try {
+      await db.execute(drizzleSql`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS profile_photo_url TEXT`);
+    } catch {}
 
     // Also create other new tables if they don't exist
     await db.execute(drizzleSql`
@@ -205,37 +209,12 @@ async function initAdminUsers() {
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
       )
     `);
-    await db.execute(drizzleSql`
-      CREATE TABLE IF NOT EXISTS managed_students (
-        id SERIAL PRIMARY KEY,
-        student_name TEXT NOT NULL,
-        phone_number TEXT,
-        email TEXT,
-        admission_number TEXT NOT NULL UNIQUE,
-        class TEXT NOT NULL,
-        section TEXT NOT NULL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-      )
-    `);
-    // Backward-compatibility cleanup: remove legacy session_year column if it exists.
     try {
-      await db.execute(drizzleSql`ALTER TABLE managed_students DROP COLUMN IF EXISTS session_year`);
+      await db.execute(drizzleSql`ALTER TABLE students ADD COLUMN IF NOT EXISTS email TEXT`);
     } catch {}
-    await db.execute(drizzleSql`
-      CREATE TABLE IF NOT EXISTS managed_teachers (
-        id SERIAL PRIMARY KEY,
-        teacher_name TEXT NOT NULL,
-        employee_id TEXT NOT NULL UNIQUE,
-        email TEXT,
-        phone_number TEXT,
-        assignments TEXT NOT NULL DEFAULT '[]',
-        is_class_teacher INTEGER NOT NULL DEFAULT 0,
-        class_teacher_of TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-        updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-      )
-    `);
+    try {
+      await db.execute(drizzleSql`ALTER TABLE teachers ADD COLUMN IF NOT EXISTS assignments TEXT NOT NULL DEFAULT '[]'`);
+    } catch {}
 
     // Seed admin + principal if not present
     const hp = await bcrypt.hash("123", 10);
@@ -287,88 +266,6 @@ async function seedDatabase() {
 
   const hp = await bcrypt.hash("123", 10);
 
-  // ── 5 TEACHERS ──────────────────────────────────────────────────────────────
-  const teacherDefs = [
-    { employeeId: "T001", name: "Ramesh Sharma",   email: "ramesh@school.edu",   subjects: ["Mathematics"],    classes: ["9", "10"], isClass: 1, classOf: "10-A" },
-    { employeeId: "T002", name: "Sunita Patel",    email: "sunita@school.edu",   subjects: ["Science"],        classes: ["9", "10"], isClass: 0, classOf: "" },
-    { employeeId: "T003", name: "Vikram Iyer",     email: "vikram@school.edu",   subjects: ["English"],        classes: ["9", "10"], isClass: 0, classOf: "" },
-    { employeeId: "T004", name: "Meena Krishnan",  email: "meena@school.edu",    subjects: ["Social Studies"], classes: ["9", "10"], isClass: 1, classOf: "9-A" },
-    { employeeId: "T005", name: "Rajan Singh",     email: "rajan@school.edu",    subjects: ["Hindi"],          classes: ["9", "10"], isClass: 0, classOf: "" },
-  ];
-  const createdTeachers: any[] = [];
-  for (const td of teacherDefs) {
-    const t = await storage.createTeacher({
-      employeeId: td.employeeId, name: td.name, email: td.email, password: hp,
-      subjectsAssigned: JSON.stringify(td.subjects),
-      classesAssigned: JSON.stringify(td.classes),
-      isClassTeacher: td.isClass,
-      classTeacherOf: td.classOf,
-    });
-    createdTeachers.push({ ...td, id: t.id });
-  }
-
-  // ── 50 STUDENTS ─────────────────────────────────────────────────────────────
-  const studentDefs = [
-    // Class 9A — S001–S012 (12 students)
-    { id: "S001", name: "Aarav Sharma",     class: "9", sec: "A" },
-    { id: "S002", name: "Priya Nair",       class: "9", sec: "A" },
-    { id: "S003", name: "Rahul Gupta",      class: "9", sec: "A" },
-    { id: "S004", name: "Ananya Singh",     class: "9", sec: "A" },
-    { id: "S005", name: "Karan Mehta",      class: "9", sec: "A" },
-    { id: "S006", name: "Diya Patel",       class: "9", sec: "A" },
-    { id: "S007", name: "Arjun Reddy",      class: "9", sec: "A" },
-    { id: "S008", name: "Sneha Kumar",      class: "9", sec: "A" },
-    { id: "S009", name: "Rohit Joshi",      class: "9", sec: "A" },
-    { id: "S010", name: "Kavya Iyer",       class: "9", sec: "A" },
-    { id: "S011", name: "Siddharth Rao",    class: "9", sec: "A" },
-    { id: "S012", name: "Pooja Bhat",       class: "9", sec: "A" },
-    // Class 9B — S013–S025 (13 students)
-    { id: "S013", name: "Akash Verma",      class: "9", sec: "B" },
-    { id: "S014", name: "Riya Krishnan",    class: "9", sec: "B" },
-    { id: "S015", name: "Arnav Das",        class: "9", sec: "B" },
-    { id: "S016", name: "Nikita Tiwari",    class: "9", sec: "B" },
-    { id: "S017", name: "Vivek Pillai",     class: "9", sec: "B" },
-    { id: "S018", name: "Meera Jain",       class: "9", sec: "B" },
-    { id: "S019", name: "Harsh Agarwal",    class: "9", sec: "B" },
-    { id: "S020", name: "Shruti Mishra",    class: "9", sec: "B" },
-    { id: "S021", name: "Yash Saxena",      class: "9", sec: "B" },
-    { id: "S022", name: "Tanvi Chanda",     class: "9", sec: "B" },
-    { id: "S023", name: "Kunal Shah",       class: "9", sec: "B" },
-    { id: "S024", name: "Ritika Bansal",    class: "9", sec: "B" },
-    { id: "S025", name: "Madhav Malhotra",  class: "9", sec: "B" },
-    // Class 10A — S026–S038 (13 students)
-    { id: "S026", name: "Ishaan Chopra",    class: "10", sec: "A" },
-    { id: "S027", name: "Neha Srivastava",  class: "10", sec: "A" },
-    { id: "S028", name: "Varun Dubey",      class: "10", sec: "A" },
-    { id: "S029", name: "Anjali Kapoor",    class: "10", sec: "A" },
-    { id: "S030", name: "Nikhil Pandey",    class: "10", sec: "A" },
-    { id: "S031", name: "Aditi Chauhan",    class: "10", sec: "A" },
-    { id: "S032", name: "Kartik Nanda",     class: "10", sec: "A" },
-    { id: "S033", name: "Sanya Ahuja",      class: "10", sec: "A" },
-    { id: "S034", name: "Dev Bajaj",        class: "10", sec: "A" },
-    { id: "S035", name: "Riya Thakur",      class: "10", sec: "A" },
-    { id: "S036", name: "Amit Ranawat",     class: "10", sec: "A" },
-    { id: "S037", name: "Preethi Suresh",   class: "10", sec: "A" },
-    { id: "S038", name: "Krish Goel",       class: "10", sec: "A" },
-    // Class 10B — S039–S050 (12 students)
-    { id: "S039", name: "Ajay Mohan",       class: "10", sec: "B" },
-    { id: "S040", name: "Deepika Rao",      class: "10", sec: "B" },
-    { id: "S041", name: "Sumit Yadav",      class: "10", sec: "B" },
-    { id: "S042", name: "Shreya Choudhary", class: "10", sec: "B" },
-    { id: "S043", name: "Rajesh Bhatt",     class: "10", sec: "B" },
-    { id: "S044", name: "Swathi Nambiar",   class: "10", sec: "B" },
-    { id: "S045", name: "Pranav Sethi",     class: "10", sec: "B" },
-    { id: "S046", name: "Jyoti Soni",       class: "10", sec: "B" },
-    { id: "S047", name: "Manish Tripathi",  class: "10", sec: "B" },
-    { id: "S048", name: "Ritu Deshpande",   class: "10", sec: "B" },
-    { id: "S049", name: "Sanket Parekh",    class: "10", sec: "B" },
-    { id: "S050", name: "Divya Raghavan",   class: "10", sec: "B" },
-  ];
-  const createdStudents: any[] = [];
-  for (const sd of studentDefs) {
-    const s = await storage.createStudent({ admissionNumber: sd.id, name: sd.name, studentClass: sd.class, section: sd.sec, password: hp });
-    createdStudents.push({ ...sd, dbId: s.id });
-  }
 
   // ── 1 ADMIN ─────────────────────────────────────────────────────────────────
   await storage.createAdmin({ employeeId: "A001", name: "Principal Admin", email: "admin@school.edu", password: hp });
@@ -424,81 +321,11 @@ async function seedDatabase() {
       q: "Q1 (15m): कबीर के दोहों की व्याख्या।\nQ2 (15m): व्याकरण: वाक्य-भेद।\nQ3 (20m): निबंध: आधुनिक जीवन में मोबाइल।",
       ans: "Q1: दोहों का अर्थ और संदर्भ।\nQ2: सरल, मिश्र, संयुक्त वाक्य के उदाहरण।\nQ3: मोबाइल के लाभ-हानि पर संतुलित निबंध।" },
   ];
-
-  // Create exams
-  const createdExams: any[] = [];
-  for (const ed of examDefs) {
-    const teacher = createdTeachers[ed.tIdx];
-    const exam = await storage.createExam({
-      teacherId: teacher.id, subject: ed.subject, className: ed.class_,
-      examName: ed.name, category: ed.cat, totalMarks: ed.marks,
-      questionText: ed.q, modelAnswerText: ed.ans,
-    });
-    createdExams.push({ ...ed, dbId: exam.id, exam });
-  }
-
-  // ── EVALUATIONS ──────────────────────────────────────────────────────────────
-  // For each exam, find all students in that class and create evaluations
-  for (let ei = 0; ei < createdExams.length; ei++) {
-    const ed = createdExams[ei];
-    const classStudents = createdStudents.filter(s => s.class === ed.class_);
-    for (let si = 0; si < classStudents.length; si++) {
-      const st = classStudents[si];
-      // Deterministic but varied marks: ability based on position in class + subject difficulty
-      const ability = 1 - (si / classStudents.length) * 0.5; // top student = 1.0, bottom = 0.5
-      const variance = drand(si * 17 + ei * 31) * 0.15 - 0.075; // ±7.5%
-      const pct = Math.min(0.98, Math.max(0.35, (1 - ed.difficulty) * 0.3 + ability * 0.55 + 0.15 + variance));
-      const marks = Math.round(ed.marks * pct);
-      const q1m = Math.round(marks * 0.4), q2m = Math.round(marks * 0.35), q3m = marks - q1m - q2m;
-      const q1max = Math.round(ed.marks * 0.4), q2max = Math.round(ed.marks * 0.35), q3max = ed.marks - q1max - q2max;
-
-      const sheet = await storage.createAnswerSheet({
-        examId: ed.dbId, studentId: st.dbId, admissionNumber: st.id,
-        studentName: st.name,
-        ocrOutput: JSON.stringify({ admission_number: st.id, student_name: st.name, answers: [] }),
-        status: "evaluated",
-      });
-      await storage.createEvaluation({
-        answerSheetId: sheet.id, studentName: st.name, admissionNumber: st.id,
-        totalMarks: marks,
-        questions: JSON.stringify([
-          { question_number: 1, chapter: ed.subject, marks_awarded: q1m, max_marks: q1max, deviation_reason: pct > 0.75 ? "Excellent response" : pct > 0.55 ? "Satisfactory" : "Needs improvement", improvement_suggestion: "Review core concepts" },
-          { question_number: 2, chapter: ed.subject, marks_awarded: q2m, max_marks: q2max, deviation_reason: pct > 0.7 ? "Good understanding" : "Partially correct", improvement_suggestion: "Practice more examples" },
-          { question_number: 3, chapter: ed.subject, marks_awarded: q3m, max_marks: q3max, deviation_reason: "Attempted", improvement_suggestion: "Work on depth" },
-        ]),
-        overallFeedback: `${st.name} scored ${marks}/${ed.marks} (${Math.round(pct * 100)}%). ${pct >= 0.8 ? "Excellent performance!" : pct >= 0.6 ? "Good effort — keep practising." : "Needs more revision. Focus on key concepts."}`,
-      });
-    }
-  }
-
-  // ── HOMEWORK ─────────────────────────────────────────────────────────────────
-  const hwDefs = [
-    { tIdx: 0, sub: "Mathematics", cls: "9",  sec: "A", desc: "Solve Chapter 3 exercises 1–15: Number Systems. Show all steps.", sol: "Factor trees and division method for each problem.", due: daysFromNow(5) },
-    { tIdx: 0, sub: "Mathematics", cls: "9",  sec: "B", desc: "Practice polynomial factorisation — worksheet Q1–Q20.", sol: "Factorisation by grouping and common factors.", due: daysFromNow(4) },
-    { tIdx: 0, sub: "Mathematics", cls: "10", sec: "A", desc: "Solve quadratic equations from Chapter 4, Ex 4.3, Q1–Q10.", sol: "Using factorisation, completing the square, and quadratic formula.", due: daysFromNow(7) },
-    { tIdx: 0, sub: "Mathematics", cls: "10", sec: "B", desc: "Trigonometric identities practice: prove 10 identities from list.", sol: "Standard proofs using sin²θ+cos²θ=1 and reciprocal identities.", due: daysFromNow(3) },
-    { tIdx: 1, sub: "Science",     cls: "9",  sec: "A", desc: "Draw and label the human cell. Write functions of each organelle.", sol: "Cell membrane, nucleus, mitochondria, ER, Golgi, lysosome with functions.", due: daysFromNow(6) },
-    { tIdx: 1, sub: "Science",     cls: "9",  sec: "B", desc: "Write a report on Newton's three laws with real-life examples.", sol: "Law 1: seatbelts; Law 2: F=ma in sports; Law 3: rocket propulsion.", due: daysFromNow(5) },
-    { tIdx: 1, sub: "Science",     cls: "10", sec: "A", desc: "Prepare a diagram of the human digestive system with organ functions.", sol: "Mouth→Oesophagus→Stomach→Small intestine→Large intestine with enzyme details.", due: daysFromNow(4) },
-    { tIdx: 1, sub: "Science",     cls: "10", sec: "B", desc: "Explain refraction with ray diagrams for concave and convex lenses.", sol: "Snell's law, focal length concept, and lens formula 1/v−1/u=1/f.", due: daysFromNow(8) },
-    { tIdx: 2, sub: "English",     cls: "9",  sec: "A", desc: "Write a 200-word essay on 'The Role of Youth in Nation Building'.", sol: "Introduction, body covering education/innovation/civic duty, conclusion.", due: daysFromNow(6) },
-    { tIdx: 2, sub: "English",     cls: "10", sec: "A", desc: "Read Chapter 5 of the textbook and answer comprehension questions.", sol: "Answers based on the given passage focusing on inference and vocabulary.", due: daysFromNow(5) },
-    { tIdx: 3, sub: "Social Studies", cls: "9",  sec: "A", desc: "Timeline of French Revolution events (1789–1799). Draw and label.", sol: "1789 Estates General, Bastille storming, 1793 execution of Louis XVI, 1799 Napoleon.", due: daysFromNow(7) },
-    { tIdx: 3, sub: "Social Studies", cls: "10", sec: "A", desc: "Draw India's political map and mark 5 major river systems.", sol: "Ganga, Yamuna, Brahmaputra, Godavari, Krishna with tributaries.", due: daysFromNow(6) },
-    { tIdx: 4, sub: "Hindi",      cls: "9",  sec: "A", desc: "कबीर के किन्हीं 5 दोहों की व्याख्या कीजिए।", sol: "प्रत्येक दोहे का शाब्दिक अर्थ और भावार्थ।", due: daysFromNow(4) },
-    { tIdx: 4, sub: "Hindi",      cls: "10", sec: "A", desc: "पर्यावरण प्रदूषण पर 250 शब्दों का निबंध लिखिए।", sol: "कारण, प्रभाव और उपाय तीनों भागों में निबंध।", due: daysFromNow(5) },
-  ];
-  for (const hd of hwDefs) {
-    const teacher = createdTeachers[hd.tIdx];
-    await storage.createHomework({ teacherId: teacher.id, subject: hd.sub, className: hd.cls, section: hd.sec, description: hd.desc, modelSolutionText: hd.sol, dueDate: hd.due });
-  }
-
-  console.log(`[seed] Done: 5 teachers, 50 students, 1 admin, ${createdExams.length} exams, ${createdStudents.length * createdExams.length / 2} evaluations (approx), ${hwDefs.length} homework assignments.`);
 }
 
 // Middleware to extract token from Header
 interface AuthRequest extends Request {
-  user?: { id: number; role: "teacher" | "student" | "admin" };
+  user?: { id: number; role: "teacher" | "student" | "admin" | "principal" };
 }
 
 function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
@@ -509,7 +336,7 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
 
   const token = authHeader.split(" ")[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role: "teacher" | "student" | "admin" };
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role: "teacher" | "student" | "admin" | "principal" };
     req.user = decoded;
     next();
   } catch (err) {
@@ -517,12 +344,124 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
   }
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^[0-9]{10,15}$/;
+const ADMISSION_RE = /^[A-Za-z0-9._/-]{2,32}$/;
+const EMPLOYEE_RE = /^[A-Za-z0-9._/-]{2,32}$/;
+const CLASS_RE = /^[0-9]{1,2}$/;
+const SECTION_RE = /^[A-Z]$/;
+
+function normalizeClass(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function normalizeSection(value: unknown): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function validateStudentPayload(payload: any, opts: { partial?: boolean } = {}) {
+  const partial = !!opts.partial;
+  const errs: string[] = [];
+  const name = String(payload?.name ?? payload?.studentName ?? "").trim();
+  const admissionNumber = String(payload?.admissionNumber ?? "").trim();
+  const phone = String(payload?.phone ?? payload?.phoneNumber ?? "").trim();
+  const email = String(payload?.email ?? "").trim();
+  const studentClass = normalizeClass(payload?.studentClass ?? payload?.class);
+  const section = normalizeSection(payload?.section);
+
+  if (!partial || "name" in payload || "studentName" in payload) {
+    if (!name || name.length < 2) errs.push("Valid student name is required");
+  }
+  if (!partial || "admissionNumber" in payload) {
+    if (!ADMISSION_RE.test(admissionNumber)) errs.push("Admission number must be 2-32 characters and alphanumeric");
+  }
+  if (!partial || "phone" in payload || "phoneNumber" in payload) {
+    if (!PHONE_RE.test(phone)) errs.push("Phone number must be 10-15 digits");
+  }
+  if (!partial || "email" in payload) {
+    if (!email) errs.push("Email is required");
+    else if (!EMAIL_RE.test(email)) errs.push("Email format is invalid");
+  }
+  if (!partial || "studentClass" in payload || "class" in payload) {
+    if (!CLASS_RE.test(studentClass)) errs.push("Class must be numeric");
+  }
+  if (!partial || "section" in payload) {
+    if (!SECTION_RE.test(section)) errs.push("Section must be a single capital letter");
+  }
+
+  return { errs, normalized: { name, admissionNumber, phone, email, studentClass, section } };
+}
+
+function normalizeAssignments(input: any): Array<{ class: string; section: string; subjects: string[] }> {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((a: any) => ({
+      class: normalizeClass(a?.class),
+      section: normalizeSection(a?.section),
+      subjects: Array.from(new Set((Array.isArray(a?.subjects) ? a.subjects : [])
+        .map((s: any) => String(s).trim())
+        .filter(Boolean))),
+    }))
+    .filter((a) => CLASS_RE.test(a.class) && SECTION_RE.test(a.section) && a.subjects.length > 0);
+}
+
+function validateTeacherPayload(payload: any, opts: { partial?: boolean } = {}) {
+  const partial = !!opts.partial;
+  const errs: string[] = [];
+  const teacherName = String(payload?.teacherName ?? payload?.name ?? "").trim();
+  const employeeId = String(payload?.employeeId ?? "").trim();
+  const phone = String(payload?.phone ?? payload?.phoneNumber ?? "").trim();
+  const email = String(payload?.email ?? "").trim();
+  const assignments = normalizeAssignments(payload?.assignments ?? []);
+  const isClassTeacher = payload?.isClassTeacher === true || payload?.isClassTeacher === 1 || payload?.isClassTeacher === "true";
+  const classTeacherOf = payload?.classTeacherOf ? String(payload.classTeacherOf).trim() : "";
+
+  if (!partial || "teacherName" in payload || "name" in payload) {
+    if (!teacherName || teacherName.length < 2) errs.push("Valid teacher name is required");
+  }
+  if (!partial || "employeeId" in payload) {
+    if (!EMPLOYEE_RE.test(employeeId)) errs.push("Employee ID must be 2-32 characters and alphanumeric");
+  }
+  if (!partial || "phoneNumber" in payload || "phone" in payload) {
+    if (!PHONE_RE.test(phone)) errs.push("Phone number must be 10-15 digits");
+  }
+  if (!partial || "email" in payload) {
+    if (!EMAIL_RE.test(email)) errs.push("Valid email is required");
+  }
+  if (!partial || "assignments" in payload) {
+    if (!assignments.length) errs.push("At least one class-section-subject assignment is required");
+  }
+  if (isClassTeacher) {
+    if (!/^[0-9]{1,2}-[A-Z]$/.test(classTeacherOf)) errs.push("Class teacher assignment must be in format like 10-A");
+  }
+
+  return { errs, normalized: { teacherName, employeeId, phone, email, assignments, isClassTeacher, classTeacherOf } };
+}
+
+function deriveTeacherLists(assignments: Array<{ class: string; section: string; subjects: string[] }>) {
+  const classesAssigned = Array.from(new Set(assignments.map((a) => a.class)));
+  const subjectsAssigned = Array.from(new Set(assignments.flatMap((a) => a.subjects)));
+  return { classesAssigned, subjectsAssigned };
+}
+
+async function validateTeacherAssignments(assignments: Array<{ class: string; section: string; subjects: string[] }>): Promise<string | null> {
+  for (const assignment of assignments) {
+    const classSection = await storage.getClassSectionByClassAndSection(parseInt(assignment.class, 10), assignment.section);
+    if (!classSection) return `Class ${assignment.class}-${assignment.section} does not exist`;
+    let allowedSubjects: string[] = [];
+    try { allowedSubjects = JSON.parse(classSection.subjects || "[]"); } catch {}
+    const invalidSubject = assignment.subjects.find((s) => !allowedSubjects.includes(s));
+    if (invalidSubject) return `Subject "${invalidSubject}" is not available in class ${assignment.class}-${assignment.section}`;
+  }
+  return null;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  await seedDatabase();
   await initAdminUsers(); // ensures admin_users table exists + seeds ADMIN001 and PRIN001
+  await seedDatabase();
 
   // TEACHER LOGIN
   app.post(api.auth.teacherLogin.path, async (req, res) => {
@@ -536,12 +475,12 @@ export async function registerRoutes(
 
   // TEACHER SIGNUP
   app.post(api.auth.teacherSignup.path, async (req, res) => {
-    return res.status(403).json({ message: "Teacher signup is disabled. Admin must create managed teacher records." });
+    return res.status(403).json({ message: "Teacher signup is disabled. Admin must create teacher records." });
   });
 
   // STUDENT SIGNUP
   app.post(api.auth.studentSignup.path, async (req, res) => {
-    return res.status(403).json({ message: "Student signup is disabled. Admin must create managed student records." });
+    return res.status(403).json({ message: "Student signup is disabled. Admin must create student records." });
   });
 
   // ─── ADMIN LOGIN ──────────────────────────────────────────────────────────
@@ -564,9 +503,22 @@ export async function registerRoutes(
 
   // ─── Helper: verify admin password for delete operations ───────────────────
   async function verifyAdminPassword(adminId: number, password: string): Promise<boolean> {
-    const admin = await storage.getAdminByEmployeeId("A001"); // fallback to seed admin
-    if (!admin) return false;
-    return bcrypt.compare(password, admin.password);
+    const adminUser = await storage.getAdminUserById(adminId);
+    if (adminUser) return bcrypt.compare(password, adminUser.passwordHash);
+    const admin = await storage.getAdmin(adminId);
+    if (admin) return bcrypt.compare(password, admin.password);
+    const fallbackAdmin = await storage.getAdminByEmployeeId("A001");
+    if (!fallbackAdmin) return false;
+    return bcrypt.compare(password, fallbackAdmin.password);
+  }
+
+  async function ensureUniqueClassTeacher(classTeacherOf: string, excludeTeacherId?: number): Promise<boolean> {
+    const allTeachers = await storage.getAllTeachers();
+    return !allTeachers.some((t) =>
+      t.isClassTeacher === 1 &&
+      t.classTeacherOf === classTeacherOf &&
+      (excludeTeacherId ? t.id !== excludeTeacherId : true)
+    );
   }
 
 
@@ -623,17 +575,26 @@ export async function registerRoutes(
         if (!teacher) return res.status(401).json({ message: "User not found" });
         const { password, ...user } = teacher;
         return res.json({ role, user });
-      } else if (role === "admin") {
-        const admin = await storage.getAdmin(id);
-        if (!admin) return res.status(401).json({ message: "User not found" });
-        const { password, ...user } = admin;
-        return res.json({ role, user });
-      } else {
+      }
+      if (role === "student") {
         const student = await storage.getStudent(id);
         if (!student) return res.status(401).json({ message: "User not found" });
         const { password, ...user } = student;
         return res.json({ role, user });
       }
+      const adminUser = await storage.getAdminUserById(id);
+      if (adminUser) {
+        const { passwordHash: _, ...user } = adminUser;
+        const authRole = adminUser.role === "PRINCIPAL" ? "principal" : "admin";
+        return res.json({ role: authRole, user });
+      }
+      if (role === "admin") {
+        const admin = await storage.getAdmin(id);
+        if (!admin) return res.status(401).json({ message: "User not found" });
+        const { password, ...user } = admin;
+        return res.json({ role, user });
+      }
+      return res.status(401).json({ message: "User not found" });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -2534,17 +2495,25 @@ ${hwContext}`;
         if (!t) return res.status(404).json({ message: "Not found" });
         const { password, ...u } = t;
         return res.json({ role, ...u });
-      } else if (role === "admin") {
-        const a = await storage.getAdmin(id);
-        if (!a) return res.status(404).json({ message: "Not found" });
-        const { password, ...u } = a;
-        return res.json({ role, ...u });
-      } else {
+      }
+      if (role === "student") {
         const s = await storage.getStudent(id);
         if (!s) return res.status(404).json({ message: "Not found" });
         const { password, ...u } = s;
         return res.json({ role, ...u });
       }
+      const adminUser = await storage.getAdminUserById(id);
+      if (adminUser) {
+        const { passwordHash: _, role: adminRole, ...u } = adminUser;
+        return res.json({ ...u, role: adminRole === "PRINCIPAL" ? "principal" : "admin", phone: adminUser.phoneNumber });
+      }
+      if (role === "admin") {
+        const a = await storage.getAdmin(id);
+        if (!a) return res.status(404).json({ message: "Not found" });
+        const { password, ...u } = a;
+        return res.json({ role, ...u });
+      }
+      return res.status(404).json({ message: "Not found" });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -2562,6 +2531,50 @@ ${hwContext}`;
       res.json({ message: "Profile updated" });
     } catch (err) {
       res.status(500).json({ message: "Failed to update profile" });
+    }
+  });
+
+  app.post("/api/profile/change-password", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { id, role } = req.user!;
+      if (role !== "admin" && role !== "principal") {
+        return res.status(403).json({ message: "Only admin/principal can change password here" });
+      }
+
+      const { currentPassword, newPassword, confirmPassword } = req.body || {};
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: "Current password and new password are required" });
+      }
+      if (String(newPassword).length < 8) {
+        return res.status(400).json({ message: "New password must be at least 8 characters" });
+      }
+      if (confirmPassword !== undefined && newPassword !== confirmPassword) {
+        return res.status(400).json({ message: "New password and confirm password do not match" });
+      }
+
+      const adminUser = await storage.getAdminUserById(id);
+      if (adminUser) {
+        const valid = await bcrypt.compare(currentPassword, adminUser.passwordHash);
+        if (!valid) return res.status(400).json({ message: "Current password is incorrect" });
+        const hash = await bcrypt.hash(newPassword, 10);
+        await storage.updateAdminUserPassword(id, hash);
+        return res.json({ message: "Password changed successfully" });
+      }
+
+      if (role === "admin") {
+        const legacy = await storage.getAdmin(id);
+        if (!legacy) return res.status(404).json({ message: "Admin not found" });
+        const valid = await bcrypt.compare(currentPassword, legacy.password);
+        if (!valid) return res.status(400).json({ message: "Current password is incorrect" });
+        const hash = await bcrypt.hash(newPassword, 10);
+        await storage.updateAdminPassword(id, hash);
+        return res.json({ message: "Password changed successfully" });
+      }
+
+      return res.status(404).json({ message: "Account not found" });
+    } catch (err) {
+      console.error("[profile-change-password]", err);
+      res.status(500).json({ message: "Failed to change password" });
     }
   });
 
@@ -2957,20 +2970,31 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
   app.post("/api/admin/teachers", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
-      const { employeeId, name, phone } = req.body;
-      if (!employeeId || !name || !phone) return res.status(400).json({ message: "Employee ID, name and phone are required" });
-      const existing = await storage.getTeacherByEmployeeId(employeeId);
+      const { errs, normalized } = validateTeacherPayload(req.body, { partial: false });
+      if (errs.length) return res.status(400).json({ message: errs[0] });
+      const existing = await storage.getTeacherByEmployeeId(normalized.employeeId);
       if (existing) return res.status(400).json({ message: "Employee ID already exists" });
-      // Create teacher with a default password (they will use OTP to login)
+      const allTeachers = await storage.getAllTeachers();
+      if (allTeachers.some((t) => t.email?.toLowerCase() === normalized.email.toLowerCase())) {
+        return res.status(400).json({ message: "Email already exists" });
+      }
+      if (normalized.isClassTeacher && normalized.classTeacherOf) {
+        const isUnique = await ensureUniqueClassTeacher(normalized.classTeacherOf);
+        if (!isUnique) return res.status(409).json({ message: `Class teacher already assigned for ${normalized.classTeacherOf}` });
+      }
+      const { classesAssigned, subjectsAssigned } = deriveTeacherLists(normalized.assignments);
       const defaultPwd = await bcrypt.hash("changeme123", 10);
       const teacher = await storage.createTeacher({
-        employeeId, name, phone,
-        email: `${employeeId.toLowerCase()}@school.edu`,
+        employeeId: normalized.employeeId,
+        name: normalized.teacherName,
+        phone: normalized.phone,
+        email: normalized.email,
         password: defaultPwd,
-        subjectsAssigned: "[]",
-        classesAssigned: "[]",
-        isClassTeacher: 0,
-        classTeacherOf: "",
+        assignments: JSON.stringify(normalized.assignments),
+        subjectsAssigned: JSON.stringify(subjectsAssigned),
+        classesAssigned: JSON.stringify(classesAssigned),
+        isClassTeacher: normalized.isClassTeacher ? 1 : 0,
+        classTeacherOf: normalized.isClassTeacher ? normalized.classTeacherOf : "",
       });
       const { password: _, ...t } = teacher;
       res.status(201).json(t);
@@ -2984,16 +3008,41 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
       const id = parseInt(req.params.id, 10);
-      const { name, phone, employeeId, email, subjectsAssigned, classesAssigned, isClassTeacher, classTeacherOf } = req.body;
+      const existingTeacher = await storage.getTeacherById(id);
+      if (!existingTeacher) return res.status(404).json({ message: "Teacher not found" });
+      const { errs, normalized } = validateTeacherPayload(req.body, { partial: true });
+      if (errs.length) return res.status(400).json({ message: errs[0] });
+      const { name, phone, employeeId, email, subjectsAssigned, classesAssigned, assignments, isClassTeacher, classTeacherOf } = req.body;
       const updateData: any = {};
-      if (name !== undefined) updateData.name = name;
-      if (phone !== undefined) updateData.phone = phone;
-      if (employeeId !== undefined) updateData.employeeId = employeeId;
-      if (email !== undefined) updateData.email = email;
+      if (name !== undefined || req.body.teacherName !== undefined) updateData.name = normalized.teacherName;
+      if (phone !== undefined || req.body.phoneNumber !== undefined) updateData.phone = normalized.phone;
+      if (employeeId !== undefined) updateData.employeeId = normalized.employeeId;
+      if (email !== undefined) updateData.email = normalized.email;
       if (subjectsAssigned !== undefined) updateData.subjectsAssigned = subjectsAssigned;
       if (classesAssigned !== undefined) updateData.classesAssigned = classesAssigned;
-      if (isClassTeacher !== undefined) updateData.isClassTeacher = isClassTeacher;
-      if (classTeacherOf !== undefined) updateData.classTeacherOf = classTeacherOf;
+      if (assignments !== undefined) {
+        const nextAssignments = normalized.assignments;
+        const { classesAssigned: cls, subjectsAssigned: sub } = deriveTeacherLists(nextAssignments);
+        updateData.assignments = JSON.stringify(nextAssignments);
+        updateData.classesAssigned = JSON.stringify(cls);
+        updateData.subjectsAssigned = JSON.stringify(sub);
+      }
+      if (isClassTeacher !== undefined) updateData.isClassTeacher = normalized.isClassTeacher ? 1 : 0;
+      if (classTeacherOf !== undefined) updateData.classTeacherOf = normalized.classTeacherOf;
+
+      const allTeachers = await storage.getAllTeachers();
+      if (updateData.employeeId && allTeachers.some((t) => t.employeeId === updateData.employeeId && t.id !== id)) {
+        return res.status(409).json({ message: "Employee ID already exists" });
+      }
+      if (updateData.email && allTeachers.some((t) => t.email?.toLowerCase() === String(updateData.email).toLowerCase() && t.id !== id)) {
+        return res.status(409).json({ message: "Email already exists" });
+      }
+      const nextIsClassTeacher = updateData.isClassTeacher !== undefined ? updateData.isClassTeacher === 1 : existingTeacher.isClassTeacher === 1;
+      const nextClassTeacherOf = updateData.classTeacherOf !== undefined ? updateData.classTeacherOf : (existingTeacher.classTeacherOf || "");
+      if (nextIsClassTeacher && nextClassTeacherOf) {
+        const isUnique = await ensureUniqueClassTeacher(nextClassTeacherOf, id);
+        if (!isUnique) return res.status(409).json({ message: `Class teacher already assigned for ${nextClassTeacherOf}` });
+      }
       const teacher = await storage.updateTeacher(id, updateData);
       const { password: _, ...t } = teacher;
       res.json(t);
@@ -3027,15 +3076,26 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
   app.post("/api/admin/students", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
-      const { admissionNumber, name, phone, studentClass, section } = req.body;
-      if (!admissionNumber || !name || !phone) return res.status(400).json({ message: "Admission number, name and phone are required" });
-      const existing = await storage.getStudentByAdmissionNumber(admissionNumber);
+      const { errs, normalized } = validateStudentPayload(req.body, { partial: false });
+      if (errs.length) return res.status(400).json({ message: errs[0] });
+      const existingClassSection = await storage.getClassSectionByClassAndSection(parseInt(normalized.studentClass, 10), normalized.section);
+      if (!existingClassSection) return res.status(400).json({ message: `Class ${normalized.studentClass}-${normalized.section} does not exist` });
+      const existing = await storage.getStudentByAdmissionNumber(normalized.admissionNumber);
       if (existing) return res.status(400).json({ message: "Admission number already exists" });
+      if (normalized.email) {
+        const allStudents = await storage.getAllStudents();
+        if (allStudents.some((s) => (s as any).email?.toLowerCase() === normalized.email.toLowerCase())) {
+          return res.status(409).json({ message: "Email already exists" });
+        }
+      }
       const defaultPwd = await bcrypt.hash("changeme123", 10);
       const student = await storage.createStudent({
-        admissionNumber, name, phone,
-        studentClass: studentClass || "9",
-        section: section || "A",
+        admissionNumber: normalized.admissionNumber,
+        name: normalized.name,
+        phone: normalized.phone,
+        email: normalized.email || null,
+        studentClass: normalized.studentClass,
+        section: normalized.section,
         password: defaultPwd,
       });
       const { password: _, ...s } = student;
@@ -3050,13 +3110,32 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
       const id = parseInt(req.params.id, 10);
-      const { name, phone, admissionNumber, studentClass, section } = req.body;
+      const existingStudent = await storage.getStudent(id);
+      if (!existingStudent) return res.status(404).json({ message: "Student not found" });
+      const { errs, normalized } = validateStudentPayload(req.body, { partial: true });
+      if (errs.length) return res.status(400).json({ message: errs[0] });
+      const { name, phone, admissionNumber, studentClass, section, email } = req.body;
       const updateData: any = {};
-      if (name !== undefined) updateData.name = name;
-      if (phone !== undefined) updateData.phone = phone;
-      if (admissionNumber !== undefined) updateData.admissionNumber = admissionNumber;
-      if (studentClass !== undefined) updateData.studentClass = studentClass;
-      if (section !== undefined) updateData.section = section;
+      if (name !== undefined || req.body.studentName !== undefined) updateData.name = normalized.name;
+      if (phone !== undefined || req.body.phoneNumber !== undefined) updateData.phone = normalized.phone;
+      if (admissionNumber !== undefined) updateData.admissionNumber = normalized.admissionNumber;
+      if (email !== undefined) updateData.email = normalized.email || null;
+      if (studentClass !== undefined || req.body.class !== undefined) updateData.studentClass = normalized.studentClass;
+      if (section !== undefined) updateData.section = normalized.section;
+
+      const allStudents = await storage.getAllStudents();
+      if (updateData.admissionNumber && allStudents.some((s) => s.admissionNumber === updateData.admissionNumber && s.id !== id)) {
+        return res.status(409).json({ message: "Admission number already exists" });
+      }
+      if (updateData.email && allStudents.some((s: any) => s.email?.toLowerCase() === String(updateData.email).toLowerCase() && s.id !== id)) {
+        return res.status(409).json({ message: "Email already exists" });
+      }
+      const nextClass = updateData.studentClass || existingStudent.studentClass;
+      const nextSection = updateData.section || existingStudent.section;
+      const existingClassSection = await storage.getClassSectionByClassAndSection(parseInt(String(nextClass), 10), String(nextSection).toUpperCase());
+      if (!existingClassSection) {
+        return res.status(400).json({ message: `Class ${nextClass}-${String(nextSection).toUpperCase()} does not exist` });
+      }
       const student = await storage.updateStudent(id, updateData);
       const { password: _, ...s } = student;
       res.json(s);
@@ -3110,6 +3189,10 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const existingClasses = await storage.getAllClasses();
       const dupClass = existingClasses.find(c => c.name === name && c.section === section);
       if (dupClass) return res.status(400).json({ message: `Class ${name}-${section} already exists` });
+      if (classTeacherId) {
+        const isUnique = await ensureUniqueClassTeacher(`${name}-${section}`);
+        if (!isUnique) return res.status(409).json({ message: `Class teacher already assigned for ${name}-${section}` });
+      }
       const cls = await storage.createClass({ name, section, description: description || null, classTeacherId: classTeacherId || null });
       // Update teacher's isClassTeacher and classTeacherOf
       if (classTeacherId) {
@@ -3131,6 +3214,14 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     try {
       const id = parseInt(req.params.id, 10);
       const { name, section, description, classTeacherId } = req.body;
+      const existingClass = (await storage.getAllClasses()).find((c) => c.id === id);
+      if (!existingClass) return res.status(404).json({ message: "Class not found" });
+      const nextName = name || existingClass.name;
+      const nextSection = section || existingClass.section;
+      if (classTeacherId) {
+        const isUnique = await ensureUniqueClassTeacher(`${nextName}-${nextSection}`, classTeacherId);
+        if (!isUnique) return res.status(409).json({ message: `Class teacher already assigned for ${nextName}-${nextSection}` });
+      }
       const updateData: any = {};
       if (name !== undefined) updateData.name = name;
       if (section !== undefined) updateData.section = section;
@@ -3139,9 +3230,7 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const cls = await storage.updateClass(id, updateData);
       // Update teacher record
       if (classTeacherId) {
-        const n = name || cls.name;
-        const s = section || cls.section;
-        await storage.updateTeacher(classTeacherId, { isClassTeacher: 1, classTeacherOf: `${n}-${s}` });
+        await storage.updateTeacher(classTeacherId, { isClassTeacher: 1, classTeacherOf: `${nextName}-${nextSection}` });
       }
       const teacherInfo = (updateData.classTeacherId || cls.classTeacherId) ? await storage.getTeacherById(updateData.classTeacherId || cls.classTeacherId) : null;
       res.json({ ...cls, classTeacherName: teacherInfo?.name || null });
@@ -3276,13 +3365,13 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
 
       // Verify the user exists and phone matches
       if (role === "teacher") {
-        const managedTeacher = await storage.getManagedTeacherByEmployeeId(identifier);
-        if (!managedTeacher) return res.status(404).json({ message: "Teacher not found with this Employee ID" });
-        if (!managedTeacher.phoneNumber || managedTeacher.phoneNumber !== phone) return res.status(400).json({ message: "Phone number does not match records" });
+        const teacher = await storage.getTeacherByEmployeeId(String(identifier).trim());
+        if (!teacher) return res.status(404).json({ message: "Teacher not found with this Employee ID" });
+        if (!teacher.phone || teacher.phone !== String(phone).trim()) return res.status(400).json({ message: "Phone number does not match records" });
       } else if (role === "student") {
-        const managed = await storage.getManagedStudentByAdmission(identifier);
-        if (!managed) return res.status(404).json({ message: "Student not found with this Admission Number" });
-        if (!managed.phoneNumber || managed.phoneNumber !== phone) return res.status(400).json({ message: "Phone number does not match records" });
+        const student = await storage.getStudentByAdmissionNumber(String(identifier).trim());
+        if (!student) return res.status(404).json({ message: "Student not found with this Admission Number" });
+        if (!student.phone || student.phone !== String(phone).trim()) return res.status(400).json({ message: "Phone number does not match records" });
       } else {
         return res.status(400).json({ message: "Invalid role" });
       }
@@ -3329,71 +3418,16 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
 
       // Login the user
       if (role === "teacher") {
-        const managedTeacher = await storage.getManagedTeacherByEmployeeId(identifier);
-        if (!managedTeacher) return res.status(404).json({ message: "Teacher not found" });
-
-        // Provision/sync runtime teacher record from managed_teacher.
-        let teacher = await storage.getTeacherByEmployeeId(managedTeacher.employeeId);
-        const assignments = (() => {
-          try { return JSON.parse(managedTeacher.assignments || "[]"); } catch { return []; }
-        })() as Array<{ class?: string; section?: string; subjects?: string[] }>;
-        const subjects = Array.from(new Set(assignments.flatMap((a) => a.subjects || []).filter(Boolean)));
-        const classes = Array.from(new Set(assignments.map((a) => a.class).filter(Boolean)));
-
-        if (!teacher) {
-          const tempPasswordHash = await bcrypt.hash(`otp-${managedTeacher.employeeId}-${Date.now()}`, 10);
-          teacher = await storage.createTeacher({
-            employeeId: managedTeacher.employeeId,
-            name: managedTeacher.teacherName,
-            email: managedTeacher.email || `${managedTeacher.employeeId.toLowerCase()}@teacher.local`,
-            password: tempPasswordHash,
-            phone: managedTeacher.phoneNumber || null,
-            subjectsAssigned: JSON.stringify(subjects),
-            classesAssigned: JSON.stringify(classes),
-            isClassTeacher: managedTeacher.isClassTeacher || 0,
-            classTeacherOf: managedTeacher.classTeacherOf || "",
-          });
-        } else {
-          await storage.updateTeacher(teacher.id, {
-            name: managedTeacher.teacherName,
-            phone: managedTeacher.phoneNumber || null,
-            email: managedTeacher.email || teacher.email,
-            subjectsAssigned: JSON.stringify(subjects),
-            classesAssigned: JSON.stringify(classes),
-            isClassTeacher: managedTeacher.isClassTeacher || 0,
-            classTeacherOf: managedTeacher.classTeacherOf || "",
-          } as any);
-          teacher = (await storage.getTeacherByEmployeeId(managedTeacher.employeeId)) || teacher;
-        }
-
+        const teacher = await storage.getTeacherByEmployeeId(String(identifier).trim());
+        if (!teacher) return res.status(404).json({ message: "Teacher not found" });
+        if (!teacher.phone || teacher.phone !== String(phone).trim()) return res.status(400).json({ message: "Phone number does not match records" });
         const token = jwt.sign({ id: teacher.id, role: "teacher" }, JWT_SECRET, { expiresIn: "1d" });
         const { password, ...teacherWithoutPassword } = teacher;
         res.json({ token, role: "teacher", user: teacherWithoutPassword });
       } else if (role === "student") {
-        const managed = await storage.getManagedStudentByAdmission(identifier);
-        if (!managed) return res.status(404).json({ message: "Student not found" });
-        let student = await storage.getStudentByAdmissionNumber(identifier);
-
-        if (!student) {
-          const tempPasswordHash = await bcrypt.hash(`otp-${managed.admissionNumber}-${Date.now()}`, 10);
-          student = await storage.createStudent({
-            admissionNumber: managed.admissionNumber,
-            name: managed.studentName,
-            studentClass: managed.class,
-            section: managed.section,
-            phone: managed.phoneNumber || null,
-            password: tempPasswordHash,
-          });
-        } else {
-          await storage.updateStudent(student.id, {
-            name: managed.studentName,
-            studentClass: managed.class,
-            section: managed.section,
-            phone: managed.phoneNumber || null,
-          } as any);
-          student = (await storage.getStudentByAdmissionNumber(identifier)) || student;
-        }
-
+        const student = await storage.getStudentByAdmissionNumber(String(identifier).trim());
+        if (!student) return res.status(404).json({ message: "Student not found" });
+        if (!student.phone || student.phone !== String(phone).trim()) return res.status(400).json({ message: "Phone number does not match records" });
         const token = jwt.sign({ id: student.id, role: "student" }, JWT_SECRET, { expiresIn: "1d" });
         const { password, ...studentWithoutPassword } = student;
         res.json({ token, role: "student", user: studentWithoutPassword });
@@ -3498,19 +3532,13 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
       const id = parseInt(req.params.id, 10);
-      const { className, section, subjects } = req.body;
+      const { subjects } = req.body;
       const updateData: any = {};
-      if (className !== undefined) {
-        const classNum = parseInt(className, 10);
-        if (isNaN(classNum)) return res.status(400).json({ message: "Class must be an integer" });
-        updateData.className = classNum;
-      }
-      if (section !== undefined) {
-        if (!/^[A-Z]$/.test(section)) return res.status(400).json({ message: "Section must be a single capital letter" });
-        updateData.section = section;
-      }
       if (subjects !== undefined) {
         updateData.subjects = JSON.stringify(Array.isArray(subjects) ? subjects : subjects.split(",").map((s: string) => s.trim()));
+      }
+      if (subjects === undefined) {
+        return res.status(400).json({ message: "Only subjects can be edited for class sections" });
       }
       const updated = await storage.updateClassSection(id, updateData);
       res.json(updated);
@@ -3561,22 +3589,56 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
   app.get("/api/admin/managed-students", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "admin" && req.user?.role !== "principal") return res.status(403).json({ message: "Forbidden" });
     try {
-      const list = await storage.getAllManagedStudents();
-      res.json(list);
+      const list = await storage.getAllStudents();
+      res.json(list.map((s: any) => ({
+        id: s.id,
+        studentName: s.name,
+        phoneNumber: s.phone || "",
+        email: s.email || "",
+        admissionNumber: s.admissionNumber,
+        class: s.studentClass,
+        section: s.section,
+      })));
     } catch (err) { res.status(500).json({ message: "Failed to fetch" }); }
   });
 
   app.post("/api/admin/managed-students", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
-      const { studentName, phoneNumber, email, admissionNumber, class: cls, section } = req.body;
-      if (!studentName || !admissionNumber || !cls || !section) {
-        return res.status(400).json({ message: "studentName, admissionNumber, class, section required" });
-      }
-      const existing = await storage.getManagedStudentByAdmission(admissionNumber);
+      const { errs, normalized } = validateStudentPayload(req.body, { partial: false });
+      if (errs.length) return res.status(400).json({ message: errs[0] });
+
+      const existingClassSection = await storage.getClassSectionByClassAndSection(parseInt(normalized.studentClass, 10), normalized.section);
+      if (!existingClassSection) return res.status(400).json({ message: `Class ${normalized.studentClass}-${normalized.section} does not exist` });
+
+      const existing = await storage.getStudentByAdmissionNumber(normalized.admissionNumber);
       if (existing) return res.status(409).json({ message: "Admission number already exists", duplicate: true });
-      const created = await storage.createManagedStudent({ studentName, phoneNumber, email, admissionNumber, class: cls, section });
-      res.status(201).json(created);
+
+      const allStudents = await storage.getAllStudents();
+      if (normalized.email && allStudents.some((s: any) => s.email?.toLowerCase() === normalized.email.toLowerCase())) {
+        return res.status(409).json({ message: "Email already exists", duplicate: true });
+      }
+
+      const password = await bcrypt.hash("changeme123", 10);
+      const created = await storage.createStudent({
+        admissionNumber: normalized.admissionNumber,
+        name: normalized.name,
+        phone: normalized.phone,
+        email: normalized.email || null,
+        studentClass: normalized.studentClass,
+        section: normalized.section,
+        password,
+      } as any);
+      const { password: _, ...studentWithoutPassword } = created;
+      res.status(201).json({
+        id: studentWithoutPassword.id,
+        studentName: studentWithoutPassword.name,
+        phoneNumber: studentWithoutPassword.phone || "",
+        email: (studentWithoutPassword as any).email || "",
+        admissionNumber: studentWithoutPassword.admissionNumber,
+        class: studentWithoutPassword.studentClass,
+        section: studentWithoutPassword.section,
+      });
     } catch (err) { res.status(500).json({ message: "Failed to create" }); }
   });
 
@@ -3584,16 +3646,44 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
       const id = parseInt(req.params.id, 10);
+      const existingStudent = await storage.getStudent(id);
+      if (!existingStudent) return res.status(404).json({ message: "Student not found" });
+      const { errs, normalized } = validateStudentPayload(req.body, { partial: true });
+      if (errs.length) return res.status(400).json({ message: errs[0] });
+
       const { studentName, phoneNumber, email, admissionNumber, class: cls, section } = req.body;
       const updateData: any = {};
-      if (studentName !== undefined) updateData.studentName = studentName;
-      if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
-      if (email !== undefined) updateData.email = email;
-      if (admissionNumber !== undefined) updateData.admissionNumber = admissionNumber;
-      if (cls !== undefined) updateData.class = cls;
-      if (section !== undefined) updateData.section = section;
-      const updated = await storage.updateManagedStudent(id, updateData);
-      res.json(updated);
+      if (studentName !== undefined || req.body.name !== undefined) updateData.name = normalized.name;
+      if (phoneNumber !== undefined || req.body.phone !== undefined) updateData.phone = normalized.phone;
+      if (email !== undefined) updateData.email = normalized.email || null;
+      if (admissionNumber !== undefined) updateData.admissionNumber = normalized.admissionNumber;
+      if (cls !== undefined || req.body.studentClass !== undefined) updateData.studentClass = normalized.studentClass;
+      if (section !== undefined) updateData.section = normalized.section;
+
+      const allStudents = await storage.getAllStudents();
+      if (updateData.admissionNumber && allStudents.some((s) => s.admissionNumber === updateData.admissionNumber && s.id !== id)) {
+        return res.status(409).json({ message: "Admission number already exists", duplicate: true });
+      }
+      if (updateData.email && allStudents.some((s: any) => s.email?.toLowerCase() === String(updateData.email).toLowerCase() && s.id !== id)) {
+        return res.status(409).json({ message: "Email already exists", duplicate: true });
+      }
+
+      const nextClass = updateData.studentClass || existingStudent.studentClass;
+      const nextSection = updateData.section || existingStudent.section;
+      const existingClassSection = await storage.getClassSectionByClassAndSection(parseInt(String(nextClass), 10), String(nextSection).toUpperCase());
+      if (!existingClassSection) return res.status(400).json({ message: `Class ${nextClass}-${String(nextSection).toUpperCase()} does not exist` });
+
+      const updated = await storage.updateStudent(id, updateData);
+      const { password: _, ...studentWithoutPassword } = updated as any;
+      res.json({
+        id: studentWithoutPassword.id,
+        studentName: studentWithoutPassword.name,
+        phoneNumber: studentWithoutPassword.phone || "",
+        email: studentWithoutPassword.email || "",
+        admissionNumber: studentWithoutPassword.admissionNumber,
+        class: studentWithoutPassword.studentClass,
+        section: studentWithoutPassword.section,
+      });
     } catch (err) { res.status(500).json({ message: "Failed to update" }); }
   });
 
@@ -3605,7 +3695,7 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const validPwd = await verifyAdminPassword(req.user.id, password);
       if (!validPwd) return res.status(403).json({ message: "Incorrect admin password" });
       const id = parseInt(req.params.id, 10);
-      await storage.deleteManagedStudent(id);
+      await storage.deleteStudent(id);
       res.json({ message: "Deleted" });
     } catch (err) { res.status(500).json({ message: "Failed to delete" }); }
   });
@@ -3615,16 +3705,42 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     try {
       const { records } = req.body;
       if (!Array.isArray(records)) return res.status(400).json({ message: "Records array required" });
-      const parsed = records.map((r: any) => ({
-        studentName: r.studentName || r.name || "",
-        phoneNumber: r.phoneNumber || r.phone || "",
-        email: r.email || "",
-        admissionNumber: String(r.admissionNumber || ""),
-        class: String(r.class || r.studentClass || ""),
-        section: String(r.section || ""),
-      }));
-      const result = await storage.bulkCreateManagedStudents(parsed);
-      res.json(result);
+      const allStudents = await storage.getAllStudents();
+      const byAdmission = new Set(allStudents.map((s) => s.admissionNumber));
+      const byEmail = new Set(allStudents.map((s: any) => (s.email || "").toLowerCase()).filter(Boolean));
+      let created = 0;
+      const duplicates: string[] = [];
+      for (const r of records) {
+        const candidate = {
+          studentName: r.studentName || r.name || "",
+          phoneNumber: r.phoneNumber || r.phone || "",
+          email: r.email || "",
+          admissionNumber: String(r.admissionNumber || "").trim(),
+          class: String(r.class || r.studentClass || "").trim(),
+          section: String(r.section || "").trim().toUpperCase(),
+        };
+        const { errs, normalized } = validateStudentPayload(candidate, { partial: false });
+        if (errs.length) { duplicates.push(normalized.admissionNumber || candidate.admissionNumber || "invalid-row"); continue; }
+        const cls = await storage.getClassSectionByClassAndSection(parseInt(normalized.studentClass, 10), normalized.section);
+        if (!cls || byAdmission.has(normalized.admissionNumber) || (normalized.email && byEmail.has(normalized.email.toLowerCase()))) {
+          duplicates.push(normalized.admissionNumber);
+          continue;
+        }
+        const password = await bcrypt.hash("changeme123", 10);
+        await storage.createStudent({
+          admissionNumber: normalized.admissionNumber,
+          name: normalized.name,
+          phone: normalized.phone,
+          email: normalized.email || null,
+          studentClass: normalized.studentClass,
+          section: normalized.section,
+          password,
+        } as any);
+        byAdmission.add(normalized.admissionNumber);
+        if (normalized.email) byEmail.add(normalized.email.toLowerCase());
+        created++;
+      }
+      res.json({ created, duplicates });
     } catch (err) { res.status(500).json({ message: "Bulk upload failed" }); }
   });
 
@@ -3635,25 +3751,62 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
   app.get("/api/admin/managed-teachers", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "admin" && req.user?.role !== "principal") return res.status(403).json({ message: "Forbidden" });
     try {
-      const list = await storage.getAllManagedTeachers();
-      res.json(list);
+      const list = await storage.getAllTeachers();
+      res.json(list.map((t: any) => ({
+        id: t.id,
+        teacherName: t.name,
+        employeeId: t.employeeId,
+        email: t.email || "",
+        phoneNumber: t.phone || "",
+        assignments: t.assignments || "[]",
+        isClassTeacher: t.isClassTeacher || 0,
+        classTeacherOf: t.classTeacherOf || null,
+      })));
     } catch (err) { res.status(500).json({ message: "Failed to fetch" }); }
   });
 
   app.post("/api/admin/managed-teachers", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
-      const { teacherName, employeeId, email, phoneNumber, assignments, isClassTeacher, classTeacherOf } = req.body;
-      if (!teacherName || !employeeId) return res.status(400).json({ message: "teacherName and employeeId required" });
-      const existing = await storage.getManagedTeacherByEmployeeId(employeeId);
+      const { errs, normalized } = validateTeacherPayload(req.body, { partial: false });
+      if (errs.length) return res.status(400).json({ message: errs[0] });
+      const assignmentError = await validateTeacherAssignments(normalized.assignments);
+      if (assignmentError) return res.status(400).json({ message: assignmentError });
+      const existing = await storage.getTeacherByEmployeeId(normalized.employeeId);
       if (existing) return res.status(409).json({ message: "Employee ID already exists", duplicate: true });
-      const created = await storage.createManagedTeacher({
-        teacherName, employeeId, email, phoneNumber,
-        assignments: assignments ? JSON.stringify(assignments) : "[]",
-        isClassTeacher: isClassTeacher ? 1 : 0,
-        classTeacherOf: classTeacherOf || null,
+      const allTeachers = await storage.getAllTeachers();
+      if (allTeachers.some((t) => t.email?.toLowerCase() === normalized.email.toLowerCase())) {
+        return res.status(409).json({ message: "Email already exists", duplicate: true });
+      }
+      if (normalized.isClassTeacher && normalized.classTeacherOf) {
+        const isUnique = await ensureUniqueClassTeacher(normalized.classTeacherOf);
+        if (!isUnique) return res.status(409).json({ message: `Class teacher already assigned for ${normalized.classTeacherOf}`, duplicate: true });
+      }
+      const { classesAssigned, subjectsAssigned } = deriveTeacherLists(normalized.assignments);
+      const password = await bcrypt.hash("changeme123", 10);
+      const created = await storage.createTeacher({
+        employeeId: normalized.employeeId,
+        name: normalized.teacherName,
+        email: normalized.email,
+        phone: normalized.phone,
+        password,
+        assignments: JSON.stringify(normalized.assignments),
+        classesAssigned: JSON.stringify(classesAssigned),
+        subjectsAssigned: JSON.stringify(subjectsAssigned),
+        isClassTeacher: normalized.isClassTeacher ? 1 : 0,
+        classTeacherOf: normalized.isClassTeacher ? normalized.classTeacherOf : "",
+      } as any);
+      const { password: _, ...teacherWithoutPassword } = created as any;
+      res.status(201).json({
+        id: teacherWithoutPassword.id,
+        teacherName: teacherWithoutPassword.name,
+        employeeId: teacherWithoutPassword.employeeId,
+        email: teacherWithoutPassword.email || "",
+        phoneNumber: teacherWithoutPassword.phone || "",
+        assignments: teacherWithoutPassword.assignments || "[]",
+        isClassTeacher: teacherWithoutPassword.isClassTeacher || 0,
+        classTeacherOf: teacherWithoutPassword.classTeacherOf || null,
       });
-      res.status(201).json(created);
     } catch (err) { res.status(500).json({ message: "Failed to create" }); }
   });
 
@@ -3661,17 +3814,54 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
       const id = parseInt(req.params.id, 10);
+      const existingTeacher = await storage.getTeacherById(id);
+      if (!existingTeacher) return res.status(404).json({ message: "Teacher not found" });
+      const { errs, normalized } = validateTeacherPayload(req.body, { partial: true });
+      if (errs.length) return res.status(400).json({ message: errs[0] });
       const { teacherName, employeeId, email, phoneNumber, assignments, isClassTeacher, classTeacherOf } = req.body;
       const updateData: any = {};
-      if (teacherName !== undefined) updateData.teacherName = teacherName;
-      if (employeeId !== undefined) updateData.employeeId = employeeId;
-      if (email !== undefined) updateData.email = email;
-      if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
-      if (assignments !== undefined) updateData.assignments = JSON.stringify(assignments);
-      if (isClassTeacher !== undefined) updateData.isClassTeacher = isClassTeacher ? 1 : 0;
-      if (classTeacherOf !== undefined) updateData.classTeacherOf = classTeacherOf;
-      const updated = await storage.updateManagedTeacher(id, updateData);
-      res.json(updated);
+      if (teacherName !== undefined || req.body.name !== undefined) updateData.name = normalized.teacherName;
+      if (employeeId !== undefined) updateData.employeeId = normalized.employeeId;
+      if (email !== undefined) updateData.email = normalized.email;
+      if (phoneNumber !== undefined || req.body.phone !== undefined) updateData.phone = normalized.phone;
+      if (assignments !== undefined) {
+        const assignmentError = await validateTeacherAssignments(normalized.assignments);
+        if (assignmentError) return res.status(400).json({ message: assignmentError });
+        const { classesAssigned, subjectsAssigned } = deriveTeacherLists(normalized.assignments);
+        updateData.assignments = JSON.stringify(normalized.assignments);
+        updateData.classesAssigned = JSON.stringify(classesAssigned);
+        updateData.subjectsAssigned = JSON.stringify(subjectsAssigned);
+      }
+      if (isClassTeacher !== undefined) updateData.isClassTeacher = normalized.isClassTeacher ? 1 : 0;
+      if (classTeacherOf !== undefined) updateData.classTeacherOf = normalized.classTeacherOf;
+
+      const allTeachers = await storage.getAllTeachers();
+      if (updateData.employeeId && allTeachers.some((t) => t.employeeId === updateData.employeeId && t.id !== id)) {
+        return res.status(409).json({ message: "Employee ID already exists", duplicate: true });
+      }
+      if (updateData.email && allTeachers.some((t) => t.email?.toLowerCase() === String(updateData.email).toLowerCase() && t.id !== id)) {
+        return res.status(409).json({ message: "Email already exists", duplicate: true });
+      }
+
+      const nextIsClassTeacher = updateData.isClassTeacher !== undefined ? updateData.isClassTeacher === 1 : existingTeacher.isClassTeacher === 1;
+      const nextClassTeacherOf = updateData.classTeacherOf !== undefined ? updateData.classTeacherOf : (existingTeacher.classTeacherOf || "");
+      if (nextIsClassTeacher && nextClassTeacherOf) {
+        const isUnique = await ensureUniqueClassTeacher(nextClassTeacherOf, id);
+        if (!isUnique) return res.status(409).json({ message: `Class teacher already assigned for ${nextClassTeacherOf}`, duplicate: true });
+      }
+
+      const updated = await storage.updateTeacher(id, updateData);
+      const { password: _, ...teacherWithoutPassword } = updated as any;
+      res.json({
+        id: teacherWithoutPassword.id,
+        teacherName: teacherWithoutPassword.name,
+        employeeId: teacherWithoutPassword.employeeId,
+        email: teacherWithoutPassword.email || "",
+        phoneNumber: teacherWithoutPassword.phone || "",
+        assignments: teacherWithoutPassword.assignments || "[]",
+        isClassTeacher: teacherWithoutPassword.isClassTeacher || 0,
+        classTeacherOf: teacherWithoutPassword.classTeacherOf || null,
+      });
     } catch (err) { res.status(500).json({ message: "Failed to update" }); }
   });
 
@@ -3684,19 +3874,24 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       if (!validPwd) return res.status(403).json({ message: "Incorrect admin password" });
       const id = parseInt(req.params.id, 10);
       if (deleteSubjectOnly && className && section && subject) {
-        const t = await storage.getManagedTeacherById(id);
+        const t = await storage.getTeacherById(id) as any;
         if (!t) return res.status(404).json({ message: "Not found" });
-        const assignments: any[] = JSON.parse(t.assignments || "[]");
+        const assignments: any[] = JSON.parse((t.assignments as string) || "[]");
         const updated = assignments.map((a: any) => {
           if (a.class === className && a.section === section) {
             return { ...a, subjects: (a.subjects || []).filter((s: string) => s !== subject) };
           }
           return a;
         }).filter((a: any) => a.subjects && a.subjects.length > 0);
-        await storage.updateManagedTeacher(id, { assignments: JSON.stringify(updated) });
+        const { classesAssigned, subjectsAssigned } = deriveTeacherLists(updated);
+        await storage.updateTeacher(id, {
+          assignments: JSON.stringify(updated),
+          classesAssigned: JSON.stringify(classesAssigned),
+          subjectsAssigned: JSON.stringify(subjectsAssigned),
+        } as any);
         return res.json({ message: "Subject assignment removed" });
       }
-      await storage.deleteManagedTeacher(id);
+      await storage.deleteTeacher(id);
       res.json({ message: "Deleted" });
     } catch (err) { res.status(500).json({ message: "Failed to delete" }); }
   });
@@ -3706,23 +3901,61 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     try {
       const { records } = req.body;
       if (!Array.isArray(records)) return res.status(400).json({ message: "Records array required" });
-      const parsed = records.map((r: any) => {
+      const allTeachers = await storage.getAllTeachers();
+      const byEmployeeId = new Set(allTeachers.map((t) => t.employeeId));
+      const byEmail = new Set(allTeachers.map((t) => (t.email || "").toLowerCase()).filter(Boolean));
+      let created = 0;
+      const duplicates: string[] = [];
+
+      for (const r of records) {
         const assignments = [];
         if (r.class && r.section && r.subjects) {
-          assignments.push({ class: r.class, section: r.section, subjects: String(r.subjects).split(",").map((s: string) => s.trim()) });
+          assignments.push({
+            class: String(r.class).trim(),
+            section: String(r.section).trim().toUpperCase(),
+            subjects: String(r.subjects).split(",").map((s: string) => s.trim()).filter(Boolean),
+          });
         }
-        return {
+        const candidate = {
           teacherName: r.teacherName || r.name || "",
           employeeId: String(r.employeeId || ""),
           email: r.email || "",
           phoneNumber: r.phoneNumber || r.phone || "",
-          assignments: JSON.stringify(assignments),
-          isClassTeacher: r.isClassTeacher === "true" || r.isClassTeacher === true ? 1 : 0,
+          assignments,
+          isClassTeacher: r.isClassTeacher === "true" || r.isClassTeacher === true,
           classTeacherOf: r.classTeacherOf || null,
         };
-      });
-      const result = await storage.bulkCreateManagedTeachers(parsed);
-      res.json(result);
+        const { errs, normalized } = validateTeacherPayload(candidate, { partial: false });
+        if (errs.length || byEmployeeId.has(normalized.employeeId) || byEmail.has(normalized.email.toLowerCase())) {
+          duplicates.push(normalized.employeeId || String(r.employeeId || "invalid-row"));
+          continue;
+        }
+        const assignmentError = await validateTeacherAssignments(normalized.assignments);
+        if (assignmentError) { duplicates.push(normalized.employeeId); continue; }
+        if (normalized.isClassTeacher && normalized.classTeacherOf) {
+          const isUnique = await ensureUniqueClassTeacher(normalized.classTeacherOf);
+          if (!isUnique) { duplicates.push(normalized.employeeId); continue; }
+        }
+        const { classesAssigned, subjectsAssigned } = deriveTeacherLists(normalized.assignments);
+        const password = await bcrypt.hash("changeme123", 10);
+        await storage.createTeacher({
+          employeeId: normalized.employeeId,
+          name: normalized.teacherName,
+          email: normalized.email,
+          phone: normalized.phone,
+          password,
+          assignments: JSON.stringify(normalized.assignments),
+          classesAssigned: JSON.stringify(classesAssigned),
+          subjectsAssigned: JSON.stringify(subjectsAssigned),
+          isClassTeacher: normalized.isClassTeacher ? 1 : 0,
+          classTeacherOf: normalized.isClassTeacher ? normalized.classTeacherOf : "",
+        } as any);
+        byEmployeeId.add(normalized.employeeId);
+        byEmail.add(normalized.email.toLowerCase());
+        created++;
+      }
+
+      res.json({ created, duplicates });
     } catch (err) { res.status(500).json({ message: "Bulk upload failed" }); }
   });
 
@@ -3734,49 +3967,8 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
   app.get("/api/principal/stats", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "principal" && req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
-      const allEvals = await storage.getAllEvaluations?.() || [];
-      const allStudents = await storage.getAllStudents();
-      const allExams = await storage.getAllExams?.() || [];
-
-      // Academic Health Index: avg score percentage across all evaluations
-      let totalPct = 0, evalCount = 0;
-      for (const ev of allEvals) {
-        const qs = JSON.parse(ev.questions || "[]");
-        const awarded = qs.reduce((s: number, q: any) => s + (q.marks_awarded || 0), 0);
-        const max = qs.reduce((s: number, q: any) => s + (q.max_marks || 0), 0);
-        if (max > 0) { totalPct += (awarded / max) * 100; evalCount++; }
-      }
-      const academicHealthIndex = evalCount > 0 ? Math.round(totalPct / evalCount) : 0;
-
-      // Participation rate: students evaluated / total students
-      const uniqueStudentsEvaluated = new Set(allEvals.map((e: any) => e.admissionNumber)).size;
-      const participationRate = allStudents.length > 0 ? Math.round((uniqueStudentsEvaluated / allStudents.length) * 100) : 0;
-
-      // Average performance score (0-100)
-      const avgPerformance = academicHealthIndex;
-
-      // Academic improvement rate (compare first half vs second half of evals)
-      let improvementRate = 0;
-      if (allEvals.length >= 4) {
-        const half = Math.floor(allEvals.length / 2);
-        const firstHalf = allEvals.slice(0, half);
-        const secondHalf = allEvals.slice(half);
-        const avg = (evsArr: any[]) => {
-          let s = 0, c = 0;
-          for (const ev of evsArr) {
-            const qs = JSON.parse(ev.questions || "[]");
-            const awarded = qs.reduce((a: number, q: any) => a + (q.marks_awarded || 0), 0);
-            const max = qs.reduce((a: number, q: any) => a + (q.max_marks || 0), 0);
-            if (max > 0) { s += (awarded / max) * 100; c++; }
-          }
-          return c > 0 ? s / c : 0;
-        };
-        const first = avg(firstHalf);
-        const second = avg(secondHalf);
-        improvementRate = first > 0 ? Math.round(((second - first) / first) * 100) : 0;
-      }
-
-      res.json({ academicHealthIndex, improvementRate, participationRate, avgPerformance });
+      const stats = await storage.getSchoolStats();
+      res.json(stats);
     } catch (err) {
       console.error("[principal/stats]", err);
       res.status(500).json({ message: "Failed" });

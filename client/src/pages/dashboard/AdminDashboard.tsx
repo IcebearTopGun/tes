@@ -10,6 +10,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { fetchWithAuth } from "@/lib/fetcher";
 import ProfileDrawer from "@/components/ProfileDrawer";
 import CustomInsights from "@/components/CustomInsights";
+import { getInitials } from "@/shared/utils/identity";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -18,10 +19,6 @@ function getGreeting() {
   if (h < 12) return "Good Morning";
   if (h < 17) return "Good Afternoon";
   return "Good Evening";
-}
-
-function getInitials(name: string) {
-  return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
 }
 
 function kpiColor(score: number) {
@@ -338,8 +335,6 @@ export default function AdminDashboard() {
   const { data: teacherList } = useQuery<TeacherRecord[]>({ queryKey: ["/api/admin/teachers"], queryFn: () => fetchWithAuth("/api/admin/teachers").then(r => r.json()), staleTime: 60000 });
   const { data: adminEW, isLoading: adminEWLoading } = useQuery<any[]>({ queryKey: ["/api/admin/early-warning"], queryFn: () => fetchWithAuth("/api/admin/early-warning").then(r => r.json()), enabled: activeSection === "early-warning", staleTime: 60000 });
   const { data: adminQQ } = useQuery<any[]>({ queryKey: ["/api/admin/question-quality"], queryFn: () => fetchWithAuth("/api/admin/question-quality").then(r => r.json()), enabled: activeSection === "question-quality", staleTime: 60000 });
-  const { data: classList } = useQuery<ClassRecord[]>({ queryKey: ["/api/admin/classes"], queryFn: () => fetchWithAuth("/api/admin/classes").then(r => r.json()), staleTime: 60000 });
-  const { data: subjectList } = useQuery<SubjectRecord[]>({ queryKey: ["/api/admin/subjects"], queryFn: () => fetchWithAuth("/api/admin/subjects").then(r => r.json()), staleTime: 60000 });
   const { data: classSectionList, isLoading: classSectionsLoading } = useQuery<any[]>({ queryKey: ["/api/admin/class-sections"], queryFn: () => fetchWithAuth("/api/admin/class-sections").then(r => r.json()) });
   const { data: mgdStudentList, isLoading: mgdStudentsLoading } = useQuery<any[]>({ queryKey: ["/api/admin/managed-students"], queryFn: () => fetchWithAuth("/api/admin/managed-students").then(r => r.json()) });
   const { data: mgdTeacherList, isLoading: mgdTeachersLoading } = useQuery<any[]>({ queryKey: ["/api/admin/managed-teachers"], queryFn: () => fetchWithAuth("/api/admin/managed-teachers").then(r => r.json()) });
@@ -380,6 +375,31 @@ export default function AdminDashboard() {
     if (type === "classSection") deleteClassSectionMut.mutate({ id, password: deletePassword, deleteSubject: extra?.deleteSubject });
     else if (type === "mgdStudent") deleteMgdStudentMut.mutate({ id, password: deletePassword });
     else if (type === "mgdTeacher") deleteMgdTeacherMut.mutate({ id, password: deletePassword, ...(extra || {}) });
+  };
+
+  const availableStudentClasses = [...new Set((classSectionList || []).map((c: any) => String(c.className)))].sort((a, b) => Number(a) - Number(b));
+  const availableSectionsForStudentClass = (cls: string) =>
+    [...new Set((classSectionList || []).filter((c: any) => String(c.className) === String(cls)).map((c: any) => c.section))].sort();
+
+  const validateMgdStudentForm = (editingId?: number) => {
+    const errs: Record<string, string> = {};
+    if (!mgdStudentForm.studentName.trim()) errs.studentName = "Name required";
+    if (!/^[0-9]{10,15}$/.test(mgdStudentForm.phoneNumber.trim())) errs.phoneNumber = "Phone must be 10-15 digits";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mgdStudentForm.email.trim())) errs.email = "Valid email required";
+    if (!/^[A-Za-z0-9._/-]{2,32}$/.test(mgdStudentForm.admissionNumber.trim())) errs.admissionNumber = "Invalid admission number";
+    if (!availableStudentClasses.includes(String(mgdStudentForm.class))) errs.class = "Select a valid class";
+    const validSections = availableSectionsForStudentClass(String(mgdStudentForm.class));
+    if (!validSections.includes(String(mgdStudentForm.section))) errs.section = "Select a valid section";
+
+    if (!errs.admissionNumber) {
+      const dup = (mgdStudentList || []).find((s: any) => s.admissionNumber === mgdStudentForm.admissionNumber && s.id !== editingId);
+      if (dup) errs.admissionNumber = "Admission number already exists";
+    }
+    if (!errs.email) {
+      const dupEmail = (mgdStudentList || []).find((s: any) => (s.email || "").toLowerCase() === mgdStudentForm.email.toLowerCase() && s.id !== editingId);
+      if (dupEmail) errs.email = "Email already exists";
+    }
+    return errs;
   };
 
   // ── FIX #6: Excel-only upload with validation ──────────────────────────────
@@ -472,7 +492,9 @@ export default function AdminDashboard() {
   const totalStudents = safeStudents.length;
   const totalTeachers = safeTeachers.length;
   const totalClasses = safeSections.length;
-  const totalSubjects = (subjectList ?? []).length;
+  const totalSubjects = Array.from(new Set(safeSections.flatMap((cs: any) => {
+    try { return JSON.parse(cs.subjects || "[]"); } catch { return []; }
+  }))).length;
   const avgClassSize = totalClasses > 0 ? (totalStudents / totalClasses).toFixed(1) : "—";
   const stuTeacherRatio = totalTeachers > 0 ? (totalStudents / totalTeachers).toFixed(1) : "—";
 
@@ -551,13 +573,13 @@ export default function AdminDashboard() {
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
               <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
             </svg>
-            Mgd Students
+            Students
           </button>
           <button className={`sf-nav-tab${activeSection === "mgd-teachers" ? " on" : ""}`} onClick={() => setActiveSection("mgd-teachers")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>
             </svg>
-            Mgd Teachers
+            Teachers
           </button>
           <button className={`sf-nav-tab${activeSection === "custom-insights" ? " on" : ""}`} onClick={() => setActiveSection("custom-insights")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -611,7 +633,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* ── KPI cards — overview tab only ── */}
-        {activeSection === "overview" && (
+        {false && activeSection === "overview" && (
           <div className="sf-funnel" style={{ gridTemplateColumns: "repeat(3, 1fr)", rowGap: "20px" }}>
             {[
               { id: "kpi-health",       label: "School Academic Health",  value: kpis ? `${kpis.healthScore}` : "–",                                          badge: kpis?.healthGrade,   badgeBg: kpis?.healthGrade === "A" ? "var(--green-bg)" : kpis?.healthGrade === "B" ? "var(--amber-bg)" : "var(--red-bg)", badgeColor: kpis?.healthGrade === "A" ? "var(--green)" : kpis?.healthGrade === "B" ? "var(--amber)" : "var(--red)", numColor: kpis ? kpiColor(kpis.healthScore) : undefined,               delta: kpis ? (kpis.healthScore >= 65 ? `↑ Grade ${kpis.healthGrade}` : "→ Needs focus") : "Loading", deltaUp: kpis?.healthScore >= 65, desc: "Composite of performance, engagement and teacher effectiveness." },
@@ -863,16 +885,7 @@ export default function AdminDashboard() {
                                   {isEditingThis && (
                                     <div style={{ background: "#faf9ff", border: "1px solid #b3a6f0", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 14px 16px" }}>
                                       <div style={{ fontSize: 12, fontWeight: 700, color: "#3d2c8d", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Edit Section {cs.section}</div>
-                                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginBottom: 10 }}>
-                                        <div>
-                                          <Input placeholder="Class (integer)" type="number" value={classSectionForm.className} onChange={e => setClassSectionForm(v => ({ ...v, className: e.target.value }))} style={{ borderColor: classSectionErrors.className ? "#d94f4f" : undefined }} />
-                                          {classSectionErrors.className && <div style={{ fontSize: 11, color: "#d94f4f" }}>{classSectionErrors.className}</div>}
-                                        </div>
-                                        <div>
-                                          <Input placeholder="Section (A-Z)" value={classSectionForm.section} maxLength={1} onChange={e => setClassSectionForm(v => ({ ...v, section: e.target.value.toUpperCase() }))} style={{ borderColor: classSectionErrors.section ? "#d94f4f" : undefined }} />
-                                          {classSectionErrors.section && <div style={{ fontSize: 11, color: "#d94f4f" }}>{classSectionErrors.section}</div>}
-                                        </div>
-                                      </div>
+                                      <div style={{ fontSize: 12, color: "var(--mid)", marginBottom: 10 }}>Class and section are locked. Only subjects can be edited.</div>
                                       <div style={{ marginBottom: 12 }}>
                                         <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 6 }}>Subjects</div>
                                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -887,14 +900,10 @@ export default function AdminDashboard() {
                                       <div style={{ display: "flex", gap: 8 }}>
                                         <Button onClick={() => {
                                           const errs: any = {};
-                                          if (!classSectionForm.className || isNaN(parseInt(classSectionForm.className))) errs.className = "Integer required";
-                                          if (!classSectionForm.section || !/^[A-Z]$/.test(classSectionForm.section)) errs.section = "Single capital letter required";
                                           if (!classSectionForm.subjects.length) errs.subjects = "Select at least one subject";
                                           if (Object.keys(errs).length) { setClassSectionErrors(errs); return; }
-                                          const dup = (classSectionList || []).find((c: any) => String(c.className) === classSectionForm.className && c.section === classSectionForm.section && c.id !== editingClassSection.id);
-                                          if (dup) { setClassSectionErrors({ className: `Class ${classSectionForm.className}-${classSectionForm.section} already exists` }); return; }
                                           setClassSectionErrors({});
-                                          updateClassSectionMut.mutate({ id: editingClassSection.id, className: parseInt(classSectionForm.className), section: classSectionForm.section, subjects: classSectionForm.subjects });
+                                          updateClassSectionMut.mutate({ id: editingClassSection.id, subjects: classSectionForm.subjects });
                                         }}>Save Changes</Button>
                                         <Button variant="outline" onClick={() => { setEditingClassSection(null); setClassSectionErrors({}); }}>Cancel</Button>
                                       </div>
@@ -947,26 +956,45 @@ export default function AdminDashboard() {
                     <Input placeholder="Student Name" value={mgdStudentForm.studentName} onChange={e => setMgdStudentForm(v => ({ ...v, studentName: e.target.value }))} style={{ borderColor: mgdStudentErrors.studentName ? "#d94f4f" : undefined }} />
                     {mgdStudentErrors.studentName && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.studentName}</div>}
                   </div>
-                  <Input placeholder="Phone Number" value={mgdStudentForm.phoneNumber} onChange={e => setMgdStudentForm(v => ({ ...v, phoneNumber: e.target.value }))} />
-                  <Input placeholder="Email" value={mgdStudentForm.email} onChange={e => setMgdStudentForm(v => ({ ...v, email: e.target.value }))} />
+                  <div>
+                    <Input placeholder="Phone Number" value={mgdStudentForm.phoneNumber} onChange={e => setMgdStudentForm(v => ({ ...v, phoneNumber: e.target.value }))} style={{ borderColor: mgdStudentErrors.phoneNumber ? "#d94f4f" : undefined }} />
+                    {mgdStudentErrors.phoneNumber && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.phoneNumber}</div>}
+                  </div>
+                  <div>
+                    <Input placeholder="Email" value={mgdStudentForm.email} onChange={e => setMgdStudentForm(v => ({ ...v, email: e.target.value }))} style={{ borderColor: mgdStudentErrors.email ? "#d94f4f" : undefined }} />
+                    {mgdStudentErrors.email && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.email}</div>}
+                  </div>
                   <div>
                     <Input placeholder="Admission Number (unique)" value={mgdStudentForm.admissionNumber} onChange={e => setMgdStudentForm(v => ({ ...v, admissionNumber: e.target.value }))} style={{ borderColor: mgdStudentErrors.admissionNumber ? "#d94f4f" : undefined }} />
                     {mgdStudentErrors.admissionNumber && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.admissionNumber}</div>}
                   </div>
-                  <Input placeholder="Class" value={mgdStudentForm.class} onChange={e => setMgdStudentForm(v => ({ ...v, class: e.target.value }))} />
-                  <Input placeholder="Section" value={mgdStudentForm.section} maxLength={1} onChange={e => setMgdStudentForm(v => ({ ...v, section: e.target.value.toUpperCase() }))} />
+                  <div>
+                    <select
+                      value={mgdStudentForm.class}
+                      onChange={e => setMgdStudentForm(v => ({ ...v, class: e.target.value, section: "" }))}
+                      style={{ width: "100%", height: 36, borderRadius: 8, border: `1px solid ${mgdStudentErrors.class ? "#d94f4f" : "var(--rule)"}`, background: "var(--pane)", padding: "0 10px", fontSize: 13 }}
+                    >
+                      <option value="">Select Class</option>
+                      {availableStudentClasses.map((cls) => <option key={cls} value={cls}>Class {cls}</option>)}
+                    </select>
+                    {mgdStudentErrors.class && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.class}</div>}
+                  </div>
+                  <div>
+                    <select
+                      value={mgdStudentForm.section}
+                      onChange={e => setMgdStudentForm(v => ({ ...v, section: e.target.value }))}
+                      disabled={!mgdStudentForm.class}
+                      style={{ width: "100%", height: 36, borderRadius: 8, border: `1px solid ${mgdStudentErrors.section ? "#d94f4f" : "var(--rule)"}`, background: "var(--pane)", padding: "0 10px", fontSize: 13, opacity: !mgdStudentForm.class ? 0.6 : 1 }}
+                    >
+                      <option value="">Select Section</option>
+                      {availableSectionsForStudentClass(mgdStudentForm.class).map((sec) => <option key={sec} value={sec}>Section {sec}</option>)}
+                    </select>
+                    {mgdStudentErrors.section && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.section}</div>}
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                   <Button onClick={() => {
-                    const errs: any = {};
-                    if (!mgdStudentForm.studentName.trim()) errs.studentName = "Name required";
-                    if (!mgdStudentForm.admissionNumber.trim()) errs.admissionNumber = "Admission number required";
-                    if (!mgdStudentForm.class.trim()) errs.class = "Class required";
-                    if (!mgdStudentForm.section.trim()) errs.section = "Section required";
-                    if (!errs.admissionNumber) {
-                      const dup = (mgdStudentList || []).find((s: any) => s.admissionNumber === mgdStudentForm.admissionNumber);
-                      if (dup) errs.admissionNumber = "Admission number already exists";
-                    }
+                    const errs = validateMgdStudentForm();
                     if (Object.keys(errs).length) { setMgdStudentErrors(errs); return; }
                     setMgdStudentErrors({});
                     addMgdStudentMut.mutate(mgdStudentForm);
@@ -1004,8 +1032,7 @@ export default function AdminDashboard() {
                 <div className="sf-empty" style={{ marginTop: 16 }}><div className="sf-empty-icon">🔍</div>No students match your search.</div>
               );
 
-              // Reusable inline student edit form
-              const StudentInlineEditForm = ({ s }: { s: any }) => (
+              const renderStudentInlineEditForm = (s: any) => (
                 <div style={{ background: "#faf9ff", border: "1px solid #b3a6f0", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 14px 16px" }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "#3d2c8d", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Edit: {s.studentName}</div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
@@ -1013,24 +1040,45 @@ export default function AdminDashboard() {
                       <Input placeholder="Student Name" value={mgdStudentForm.studentName} onChange={e => setMgdStudentForm(v => ({ ...v, studentName: e.target.value }))} style={{ borderColor: mgdStudentErrors.studentName ? "#d94f4f" : undefined }} />
                       {mgdStudentErrors.studentName && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.studentName}</div>}
                     </div>
-                    <Input placeholder="Phone Number" value={mgdStudentForm.phoneNumber} onChange={e => setMgdStudentForm(v => ({ ...v, phoneNumber: e.target.value }))} />
-                    <Input placeholder="Email" value={mgdStudentForm.email} onChange={e => setMgdStudentForm(v => ({ ...v, email: e.target.value }))} />
+                    <div>
+                      <Input placeholder="Phone Number" value={mgdStudentForm.phoneNumber} onChange={e => setMgdStudentForm(v => ({ ...v, phoneNumber: e.target.value }))} style={{ borderColor: mgdStudentErrors.phoneNumber ? "#d94f4f" : undefined }} />
+                      {mgdStudentErrors.phoneNumber && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.phoneNumber}</div>}
+                    </div>
+                    <div>
+                      <Input placeholder="Email" value={mgdStudentForm.email} onChange={e => setMgdStudentForm(v => ({ ...v, email: e.target.value }))} style={{ borderColor: mgdStudentErrors.email ? "#d94f4f" : undefined }} />
+                      {mgdStudentErrors.email && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.email}</div>}
+                    </div>
                     <div>
                       <Input placeholder="Admission Number" value={mgdStudentForm.admissionNumber} onChange={e => setMgdStudentForm(v => ({ ...v, admissionNumber: e.target.value }))} style={{ borderColor: mgdStudentErrors.admissionNumber ? "#d94f4f" : undefined }} />
                       {mgdStudentErrors.admissionNumber && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.admissionNumber}</div>}
                     </div>
-                    <Input placeholder="Class" value={mgdStudentForm.class} onChange={e => setMgdStudentForm(v => ({ ...v, class: e.target.value }))} />
-                    <Input placeholder="Section" value={mgdStudentForm.section} maxLength={1} onChange={e => setMgdStudentForm(v => ({ ...v, section: e.target.value.toUpperCase() }))} />
+                    <div>
+                      <select
+                        value={mgdStudentForm.class}
+                        onChange={e => setMgdStudentForm(v => ({ ...v, class: e.target.value, section: "" }))}
+                        style={{ width: "100%", height: 36, borderRadius: 8, border: `1px solid ${mgdStudentErrors.class ? "#d94f4f" : "var(--rule)"}`, background: "var(--pane)", padding: "0 10px", fontSize: 13 }}
+                      >
+                        <option value="">Select Class</option>
+                        {availableStudentClasses.map((cls) => <option key={cls} value={cls}>Class {cls}</option>)}
+                      </select>
+                      {mgdStudentErrors.class && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.class}</div>}
+                    </div>
+                    <div>
+                      <select
+                        value={mgdStudentForm.section}
+                        onChange={e => setMgdStudentForm(v => ({ ...v, section: e.target.value }))}
+                        disabled={!mgdStudentForm.class}
+                        style={{ width: "100%", height: 36, borderRadius: 8, border: `1px solid ${mgdStudentErrors.section ? "#d94f4f" : "var(--rule)"}`, background: "var(--pane)", padding: "0 10px", fontSize: 13, opacity: !mgdStudentForm.class ? 0.6 : 1 }}
+                      >
+                        <option value="">Select Section</option>
+                        {availableSectionsForStudentClass(mgdStudentForm.class).map((sec) => <option key={sec} value={sec}>Section {sec}</option>)}
+                      </select>
+                      {mgdStudentErrors.section && <div style={{ fontSize: 11, color: "#d94f4f" }}>{mgdStudentErrors.section}</div>}
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <Button onClick={() => {
-                      const errs: any = {};
-                      if (!mgdStudentForm.studentName.trim()) errs.studentName = "Name required";
-                      if (!mgdStudentForm.admissionNumber.trim()) errs.admissionNumber = "Admission number required";
-                      if (!errs.admissionNumber) {
-                        const dup = (mgdStudentList || []).find((d: any) => d.admissionNumber === mgdStudentForm.admissionNumber && d.id !== s.id);
-                        if (dup) errs.admissionNumber = "Admission number already exists";
-                      }
+                      const errs = validateMgdStudentForm(s.id);
                       if (Object.keys(errs).length) { setMgdStudentErrors(errs); return; }
                       setMgdStudentErrors({});
                       updateMgdStudentMut.mutate({ id: s.id, ...mgdStudentForm });
@@ -1060,7 +1108,7 @@ export default function AdminDashboard() {
                               <DropdownItem danger onClick={() => { setBulkDotMenu(null); setDeleteConfirm({ type: "mgdStudent", id: s.id }); setDeletePassword(""); setDeleteError(""); }}>🗑 Delete</DropdownItem>
                             </InlineDropdown>
                           </div>
-                          {isEditingThis && <StudentInlineEditForm s={s} />}
+                          {isEditingThis && renderStudentInlineEditForm(s)}
                         </div>
                       );
                     })}
@@ -1136,7 +1184,7 @@ export default function AdminDashboard() {
                                                 <DropdownItem danger onClick={() => { setBulkDotMenu(null); setDeleteConfirm({ type: "mgdStudent", id: s.id }); setDeletePassword(""); setDeleteError(""); }}>🗑 Delete</DropdownItem>
                                               </InlineDropdown>
                                             </div>
-                                            {isEditingThis && <StudentInlineEditForm s={s} />}
+                                            {isEditingThis && renderStudentInlineEditForm(s)}
                                           </div>
                                         );
                                       })}
@@ -1565,7 +1613,7 @@ export default function AdminDashboard() {
                                     }));
                                     setTeacherAssignClass(""); setTeacherAssignSection(""); setTeacherAssignSubjects([]);
                                   }}
-                                >+ Stage Assignment</Button>
+                                >+ Add Assignment</Button>
                               </div>
 
                               {/* ── Single Save + Cancel ── */}

@@ -19,6 +19,7 @@ export const teachers = pgTable("teachers", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   password: text("password").notNull(),
+  assignments: text("assignments").notNull().default("[]"),
   subjectsAssigned: text("subjects_assigned"),
   classesAssigned: text("classes_assigned"),
   isClassTeacher: integer("is_class_teacher").notNull().default(0),
@@ -33,6 +34,7 @@ export const students = pgTable("students", {
   name: text("name").notNull(),
   studentClass: text("class").notNull(),
   section: text("section").notNull(),
+  email: text("email"),
   password: text("password").notNull(),
   phone: text("phone"),
   profilePhotoUrl: text("profile_photo_url"),
@@ -328,6 +330,7 @@ export const adminUsers = pgTable("admin_users", {
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   phoneNumber: text("phone_number"),
+  profilePhotoUrl: text("profile_photo_url"),
   role: text("role").notNull().default("ADMIN"), // "ADMIN" | "PRINCIPAL"
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
