@@ -228,6 +228,7 @@ export default function CustomInsights({ role }: Props) {
   const subText = role === "admin"
     ? "Ask any question about teacher workload, student enrolment, or operational data"
     : "Ask any question about academic outcomes, class performance, or intervention needs";
+  const insightsTitle = role === "principal" ? "AI Insights" : "Custom Insights";
 
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -343,7 +344,7 @@ Generate the JSON response now.`;
       {/* Header */}
       <div className="sf-analytics-head">
         <div>
-          <div className="sf-section-title">Custom Insights</div>
+          <div className="sf-section-title">{insightsTitle}</div>
           <div className="sf-section-sub">{subText} — AI plots the answer from live data</div>
         </div>
         <span className="sf-chart-badge" style={{ background: "var(--lav-bg)", color: "var(--lavender)", border: "1.5px solid var(--lav-card)", fontSize: 11, padding: "4px 10px", borderRadius: 8, fontWeight: 700, display: "flex", alignItems: "center", gap: 5 }}>

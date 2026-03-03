@@ -842,9 +842,12 @@ export class DatabaseStorage implements IStorage {
   }> {
     const [studentCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(students);
     const [teacherCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(teachers);
+    const [managedStudentCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(managedStudents);
+    const [managedTeacherCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(managedTeachers);
     const [examCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(exams);
     const [hwCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(homework);
     const [hwSubCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(homeworkSubmissions);
+    const [classSectionCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(classSections);
 
     const allEvals = await db.select({
       totalMarks: evaluations.totalMarks,
@@ -868,13 +871,19 @@ export class DatabaseStorage implements IStorage {
     const allStudents = await db.select({ cls: students.studentClass, sec: students.section }).from(students);
     allStudents.forEach(s => classSet.add(`${s.cls}-${s.sec}`));
 
+    const directStudents = Number(studentCount.count);
+    const directTeachers = Number(teacherCount.count);
+    const totalStudentsCount = directStudents > 0 ? directStudents : Number(managedStudentCount.count);
+    const totalTeachersCount = directTeachers > 0 ? directTeachers : Number(managedTeacherCount.count);
+    const activeClassesCount = classSet.size > 0 ? classSet.size : Number(classSectionCount.count);
+
     return {
-      totalStudents: Number(studentCount.count),
-      totalTeachers: Number(teacherCount.count),
+      totalStudents: totalStudentsCount,
+      totalTeachers: totalTeachersCount,
       totalExams: Number(examCount.count),
       sheetsEvaluated,
       avgPerformance,
-      activeClasses: classSet.size,
+      activeClasses: activeClassesCount,
       homeworkAssigned: Number(hwCount.count),
       homeworkSubmitted: Number(hwSubCount.count),
     };
