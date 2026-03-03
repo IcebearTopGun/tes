@@ -873,9 +873,14 @@ export class DatabaseStorage implements IStorage {
 
     const directStudents = Number(studentCount.count);
     const directTeachers = Number(teacherCount.count);
-    const totalStudentsCount = directStudents > 0 ? directStudents : Number(managedStudentCount.count);
-    const totalTeachersCount = directTeachers > 0 ? directTeachers : Number(managedTeacherCount.count);
-    const activeClassesCount = classSet.size > 0 ? classSet.size : Number(classSectionCount.count);
+    const managedStudentsTotal = Number(managedStudentCount.count);
+    const managedTeachersTotal = Number(managedTeacherCount.count);
+    const classSectionsTotal = Number(classSectionCount.count);
+
+    // Admin-managed tables are the source of truth for roster KPIs.
+    const totalStudentsCount = managedStudentsTotal > 0 ? managedStudentsTotal : directStudents;
+    const totalTeachersCount = managedTeachersTotal > 0 ? managedTeachersTotal : directTeachers;
+    const activeClassesCount = classSectionsTotal > 0 ? classSectionsTotal : classSet.size;
 
     return {
       totalStudents: totalStudentsCount,
@@ -1335,7 +1340,7 @@ export class DatabaseStorage implements IStorage {
 
   // ─── ManagedStudents ────────────────────────────────────────────────────────
   async getAllManagedStudents(): Promise<ManagedStudent[]> {
-    return db.select().from(managedStudents).orderBy(managedStudents.studentName);
+    return db.select().from(managedStudents).orderBy(managedStudents.name);
   }
 
   async getManagedStudentByAdmission(admissionNumber: string): Promise<ManagedStudent | undefined> {
@@ -1371,7 +1376,7 @@ export class DatabaseStorage implements IStorage {
 
   // ─── ManagedTeachers ────────────────────────────────────────────────────────
   async getAllManagedTeachers(): Promise<ManagedTeacher[]> {
-    return db.select().from(managedTeachers).orderBy(managedTeachers.teacherName);
+    return db.select().from(managedTeachers).orderBy(managedTeachers.name);
   }
 
   async getManagedTeacherByEmployeeId(employeeId: string): Promise<ManagedTeacher | undefined> {

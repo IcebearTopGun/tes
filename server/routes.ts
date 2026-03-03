@@ -210,10 +210,14 @@ async function initAdminUsers() {
       )
     `);
     try {
-      await db.execute(drizzleSql`ALTER TABLE students ADD COLUMN IF NOT EXISTS email TEXT`);
+      await db.execute(drizzleSql`ALTER TABLE managed_students ADD COLUMN IF NOT EXISTS password TEXT`);
+      await db.execute(drizzleSql`ALTER TABLE managed_students ADD COLUMN IF NOT EXISTS profile_photo_url TEXT`);
     } catch {}
     try {
-      await db.execute(drizzleSql`ALTER TABLE teachers ADD COLUMN IF NOT EXISTS assignments TEXT NOT NULL DEFAULT '[]'`);
+      await db.execute(drizzleSql`ALTER TABLE managed_teachers ADD COLUMN IF NOT EXISTS password TEXT`);
+      await db.execute(drizzleSql`ALTER TABLE managed_teachers ADD COLUMN IF NOT EXISTS subjects_assigned TEXT NOT NULL DEFAULT '[]'`);
+      await db.execute(drizzleSql`ALTER TABLE managed_teachers ADD COLUMN IF NOT EXISTS classes_assigned TEXT NOT NULL DEFAULT '[]'`);
+      await db.execute(drizzleSql`ALTER TABLE managed_teachers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT`);
     } catch {}
 
     // Seed admin + principal if not present
@@ -262,7 +266,7 @@ async function seedDatabase() {
   console.log("[seed] Seeding school data (50 students, 5 teachers, 1 admin)...");
 
   // Wipe everything in FK-safe order
-  await db.execute(drizzleSql`TRUNCATE TABLE homework_submissions, messages, deviation_logs, performance_profiles, evaluations, merged_answer_scripts, answer_sheet_pages, answer_sheets, ncert_chapters, conversations, homework, exams, students, teachers, admins RESTART IDENTITY CASCADE`);
+  await db.execute(drizzleSql`TRUNCATE TABLE homework_submissions, messages, deviation_logs, performance_profiles, evaluations, merged_answer_scripts, answer_sheet_pages, answer_sheets, ncert_chapters, conversations, homework, exams, managed_students, managed_teachers, admins RESTART IDENTITY CASCADE`);
 
   const hp = await bcrypt.hash("123", 10);
 

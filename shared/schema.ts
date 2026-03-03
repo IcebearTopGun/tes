@@ -13,31 +13,37 @@ export const admins = pgTable("admins", {
   profilePhotoUrl: text("profile_photo_url"),
 });
 
-export const teachers = pgTable("teachers", {
+// Single source-of-truth teacher roster (managed by admin)
+export const teachers = pgTable("managed_teachers", {
   id: serial("id").primaryKey(),
   employeeId: text("employee_id").notNull().unique(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  password: text("password").notNull(),
+  name: text("teacher_name").notNull(),
+  email: text("email"),
+  password: text("password"),
   assignments: text("assignments").notNull().default("[]"),
-  subjectsAssigned: text("subjects_assigned"),
-  classesAssigned: text("classes_assigned"),
+  subjectsAssigned: text("subjects_assigned").default("[]"),
+  classesAssigned: text("classes_assigned").default("[]"),
   isClassTeacher: integer("is_class_teacher").notNull().default(0),
   classTeacherOf: text("class_teacher_of"),
-  phone: text("phone"),
+  phone: text("phone_number"),
   profilePhotoUrl: text("profile_photo_url"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
-export const students = pgTable("students", {
+// Single source-of-truth student roster (managed by admin)
+export const students = pgTable("managed_students", {
   id: serial("id").primaryKey(),
   admissionNumber: text("admission_number").notNull().unique(),
-  name: text("name").notNull(),
+  name: text("student_name").notNull(),
   studentClass: text("class").notNull(),
   section: text("section").notNull(),
   email: text("email"),
-  password: text("password").notNull(),
-  phone: text("phone"),
+  password: text("password"),
+  phone: text("phone_number"),
   profilePhotoUrl: text("profile_photo_url"),
+  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
 export const EXAM_CATEGORIES = ["mid_term", "unit_test", "end_sem", "class_test"] as const;
@@ -346,33 +352,9 @@ export const classSections = pgTable("class_sections", {
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
-// ─── MANAGED STUDENTS TABLE ──────────────────────────────────────────────────
-export const managedStudents = pgTable("managed_students", {
-  id: serial("id").primaryKey(),
-  studentName: text("student_name").notNull(),
-  phoneNumber: text("phone_number"),
-  email: text("email"),
-  admissionNumber: text("admission_number").notNull().unique(),
-  class: text("class").notNull(),
-  section: text("section").notNull(),
-  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
-
-// ─── MANAGED TEACHERS TABLE ──────────────────────────────────────────────────
-export const managedTeachers = pgTable("managed_teachers", {
-  id: serial("id").primaryKey(),
-  teacherName: text("teacher_name").notNull(),
-  employeeId: text("employee_id").notNull().unique(),
-  email: text("email"),
-  phoneNumber: text("phone_number"),
-  // JSON: [{class, section, subjects:[]}]
-  assignments: text("assignments").notNull().default("[]"),
-  isClassTeacher: integer("is_class_teacher").notNull().default(0),
-  classTeacherOf: text("class_teacher_of"), // "5-A"
-  createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-  updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
-});
+// Backward-compatible aliases so existing managed-* API codepaths stay stable.
+export const managedStudents = students;
+export const managedTeachers = teachers;
 
 export const insertAdminUserSchema = createInsertSchema(adminUsers).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertClassSectionSchema = createInsertSchema(classSections).omit({ id: true, createdAt: true, updatedAt: true });
