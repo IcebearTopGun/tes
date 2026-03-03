@@ -40,7 +40,7 @@ const PRINCIPAL_QUESTIONS = [
 
 export default function PrincipalDashboard() {
   const { user, logout } = useAuth();
-  const [activeSection, setActiveSection] = useState("school-insights");
+  const [activeSection, setActiveSection] = useState("overview");
   const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
@@ -86,7 +86,7 @@ export default function PrincipalDashboard() {
   const { data: schoolInsights, isLoading: siLoading } = useQuery<any>({
     queryKey: ["/api/principal/school-insights"],
     queryFn: () => fetchWithAuth("/api/principal/school-insights").then(r => r.json()),
-    enabled: activeSection === "school-insights",
+    enabled: activeSection === "overview",
   });
 
   const [eduQualityOpen, setEduQualityOpen] = useState<number | null>(null);
@@ -162,11 +162,11 @@ export default function PrincipalDashboard() {
         </div>
 
         <div className="sf-nav-tabs">
-          <button className={`sf-nav-tab${activeSection === "school-insights" ? " on" : ""}`} onClick={() => setActiveSection("school-insights")}>
+          <button className={`sf-nav-tab${activeSection === "overview" ? " on" : ""}`} onClick={() => setActiveSection("overview")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
             </svg>
-            School Insights
+            Overview
           </button>
           <button className={`sf-nav-tab${activeSection === "teacher-insights" ? " on" : ""}`} onClick={() => setActiveSection("teacher-insights")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -232,6 +232,8 @@ export default function PrincipalDashboard() {
           </div>
         </div>
 
+        {activeSection === "overview" && (
+          <>
         {/* ── PRINCIPAL KPIs — exact same sf-funnel / sf-f-col pattern as AdminDashboard ── */}
         <div className="sf-funnel" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
           <div className="sf-f-col" data-testid="kpi-health">
@@ -305,6 +307,130 @@ export default function PrincipalDashboard() {
             <div className="sf-f-desc">Students scoring below 50% average across all their exams.</div>
           </div>
         </div>
+        <div className="sf-bottom-row">
+          <div className="sf-chart-card">
+            <div className="sf-chart-head">
+              <div className="sf-chart-ico-row">
+                <div className="sf-chart-ico sf-ci-lav">🏫</div>
+                <div>
+                  <div className="sf-chart-name">Overview Snapshot</div>
+                  <div className="sf-chart-desc">Quick school-wide status</div>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="sf-exam-item" style={{ cursor: "default" }}>
+                <div className="sf-exam-subj" style={{ background: "var(--lav-bg)" }}>📊</div>
+                <div className="sf-exam-info">
+                  <div className="sf-exam-name">Evaluations Processed</div>
+                  <div className="sf-exam-meta">{si.totalEvaluations || 0} total</div>
+                </div>
+              </div>
+              <div className="sf-exam-item" style={{ cursor: "default" }}>
+                <div className="sf-exam-subj" style={{ background: "var(--green-bg)" }}>🎯</div>
+                <div className="sf-exam-info">
+                  <div className="sf-exam-name">Overall Average</div>
+                  <div className="sf-exam-meta">{si.overallAvg || 0}%</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="sf-chart-card">
+            <div className="sf-chart-head">
+              <div className="sf-chart-ico-row">
+                <div className="sf-chart-ico sf-ci-green">📚</div>
+                <div>
+                  <div className="sf-chart-name">Top Subjects</div>
+                  <div className="sf-chart-desc">Best performing subjects</div>
+                </div>
+              </div>
+            </div>
+            {(si.subjectStrengths || []).slice(0, 5).map((s: any, idx: number) => (
+              <div key={idx} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                <span style={{ fontSize: 13, color: "var(--ink2)" }}>{s.subject}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: kpiColor(s.avgScore || 0) }}>{s.avgScore}%</span>
+              </div>
+            ))}
+            {(si.subjectStrengths || []).length === 0 && (
+              <div className="sf-empty"><div className="sf-empty-icon">📘</div>No subject insights yet.</div>
+            )}
+          </div>
+        </div>
+          </>
+        )}
+
+        {/* Minimal sections for non-overview tabs */}
+        {false && activeSection === "class-performance" && (
+          <div className="sf-panel">
+            <div className="sf-panel-title">Class Insights</div>
+            <div className="sf-panel-sub">Minimal class-wise performance summary</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(filteredClasses || []).slice(0, 12).map((c: any) => (
+                <div key={`${c.class}-${c.section}`} className="sf-exam-item" style={{ cursor: "default" }}>
+                  <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", fontSize: 11 }}>{c.class}{c.section}</div>
+                  <div className="sf-exam-info">
+                    <div className="sf-exam-name">Class {c.class} - Section {c.section}</div>
+                    <div className="sf-exam-meta">Participation {c.participation}% · Evaluated {c.evaluatedCount}/{c.totalStudents}</div>
+                  </div>
+                  <span className="sf-exam-status sf-es-done">{c.avgScore}%</span>
+                </div>
+              ))}
+              {(filteredClasses || []).length === 0 && <div className="sf-empty"><div className="sf-empty-icon">📈</div>No class data yet.</div>}
+            </div>
+          </div>
+        )}
+
+        {false && activeSection === "teacher-insights" && (
+          <div className="sf-panel">
+            <div className="sf-panel-title">Teacher Insights</div>
+            <div className="sf-panel-sub">Minimal teacher effectiveness summary</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(filteredTeachers || []).slice(0, 12).map((t: any) => (
+                <div key={t.teacherId} className="sf-exam-item" style={{ cursor: "default" }}>
+                  <div className="sf-exam-subj" style={{ background: "var(--blue-bg)", fontSize: 11 }}>{getInitials(t.name || "T")}</div>
+                  <div className="sf-exam-info">
+                    <div className="sf-exam-name">{t.name}</div>
+                    <div className="sf-exam-meta">{t.examCount} exams · {t.studentsEvaluated} students</div>
+                  </div>
+                  <span className="sf-exam-status sf-es-done">{t.avgScore}%</span>
+                </div>
+              ))}
+              {(filteredTeachers || []).length === 0 && <div className="sf-empty"><div className="sf-empty-icon">👩‍🏫</div>No teacher data yet.</div>}
+            </div>
+          </div>
+        )}
+
+        {activeSection === "education-quality" && (
+          <div className="sf-panel">
+            <div className="sf-panel-title">Quality of Education</div>
+            <div className="sf-panel-sub">Minimal curriculum-depth highlights</div>
+            {isLoadingEduQuality ? (
+              <div style={{ textAlign: "center", padding: 24 }}><div className="sf-spinner" /></div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {(eduQuality || []).slice(0, 10).map((e: any, idx: number) => (
+                  <div key={idx} className="sf-exam-item" style={{ cursor: "default" }}>
+                    <div className="sf-exam-subj" style={{ background: "var(--amber-bg)" }}>📘</div>
+                    <div className="sf-exam-info">
+                      <div className="sf-exam-name">{e.examName} · {e.subject} · Class {e.className}</div>
+                      <div className="sf-exam-meta">{e.teacherName}</div>
+                    </div>
+                    <span className="sf-exam-status">{e.overallDepthRating}</span>
+                  </div>
+                ))}
+                {(eduQuality || []).length === 0 && <div className="sf-empty"><div className="sf-empty-icon">📚</div>No quality analysis yet.</div>}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeSection === "custom-insights" && (
+          <div className="sf-panel">
+            <div className="sf-panel-title">Custom Insights</div>
+            <div className="sf-panel-sub">Run custom AI questions with principal context</div>
+            <CustomInsights role="principal" />
+          </div>
+        )}
 
         {/* ── CLASS PERFORMANCE TAB ── */}
         {activeSection === "class-performance" && (
@@ -520,7 +646,7 @@ export default function PrincipalDashboard() {
         )}
 
         {/* ── SCHOOL INSIGHTS TAB ── */}
-        {activeSection === "school-insights" && (
+        {false && activeSection === "school-insights" && (
           <>
             <div className="sf-analytics-head">
               <div>
@@ -673,7 +799,7 @@ export default function PrincipalDashboard() {
         )}
 
         {/* ── QUALITY OF EDUCATION TAB ── */}
-        {activeSection === "education-quality" && (
+        {false && activeSection === "education-quality" && (
           <div className="sf-panel">
             <div className="sf-analytics-head">
               <div>
@@ -891,7 +1017,7 @@ export default function PrincipalDashboard() {
         )}
 
         {/* ── CUSTOM INSIGHTS TAB ── */}
-        {activeSection === "custom-insights" && (
+        {false && activeSection === "custom-insights" && (
           <div className="sf-panel">
             <CustomInsights role="principal" />
           </div>

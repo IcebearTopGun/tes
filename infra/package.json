@@ -1,0 +1,28 @@
+{
+  "name": "tes-infra",
+  "private": true,
+  "version": "1.0.0",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy",
+    "localstack:up": "bash ./scripts/localstack-up.sh",
+    "localstack:down": "docker compose -f ./localstack/docker-compose.yml down",
+    "local:deploy": "bash ./scripts/localstack-deploy.sh"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.186.0",
+    "constructs": "^10.4.2",
+    "source-map-support": "^0.5.21"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.27",
+    "aws-cdk": "^2.1011.0",
+    "aws-cdk-local": "^2.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}

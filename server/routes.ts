@@ -12,6 +12,98 @@ import bcrypt from "bcryptjs";
 import OpenAI from "openai";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "super-secret-key";
+const isIntegrationTestMode = process.env.INTEGRATION_TEST_MODE === "1" || process.env.NODE_ENV === "test";
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 2);
+}
+
+function similarityScore(a: string, b: string): number {
+  const aTokens = new Set(tokenize(a));
+  const bTokens = new Set(tokenize(b));
+  if (aTokens.size === 0 || bTokens.size === 0) return 0;
+  let overlap = 0;
+  for (const t of aTokens) if (bTokens.has(t)) overlap++;
+  return overlap / Math.max(aTokens.size, 1);
+}
+
+function parseModelAnswers(modelAnswerText: string, fallbackTotalMarks: number): Array<{ qNum: number; answer: string; maxMarks: number }> {
+  const lines = modelAnswerText.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const parsed: Array<{ qNum: number; answer: string; maxMarks: number }> = [];
+  const re = /^Q\s*([0-9]+)\s*(?:\(\s*([0-9]+)\s*marks?\s*\))?\s*:\s*(.*)$/i;
+
+  for (const line of lines) {
+    const m = line.match(re);
+    if (!m) continue;
+    parsed.push({
+      qNum: Number(m[1]),
+      maxMarks: Number(m[2] || 0),
+      answer: m[3] || "",
+    });
+  }
+  if (parsed.length === 0) return [];
+
+  const explicitMarks = parsed.reduce((s, p) => s + (p.maxMarks || 0), 0);
+  if (explicitMarks === 0) {
+    const per = Math.max(1, Math.round(fallbackTotalMarks / parsed.length));
+    for (const p of parsed) p.maxMarks = per;
+  }
+  return parsed;
+}
+
+function buildLocalExamEvaluation(params: {
+  studentName: string;
+  admissionNumber: string;
+  examTotalMarks: number;
+  modelAnswerText: string;
+  studentAnswers: Array<{ question_number: number; answer_text: string }>;
+}) {
+  const modelByQ = new Map<number, { answer: string; maxMarks: number }>();
+  const parsedModel = parseModelAnswers(params.modelAnswerText || "", params.examTotalMarks);
+  for (const item of parsedModel) modelByQ.set(item.qNum, { answer: item.answer, maxMarks: item.maxMarks });
+
+  const allQuestionNos = new Set<number>([
+    ...params.studentAnswers.map((a) => Number(a.question_number || 0)).filter((n) => n > 0),
+    ...Array.from(modelByQ.keys()),
+  ]);
+
+  const qNos = Array.from(allQuestionNos).sort((a, b) => a - b);
+  const questions = qNos.map((qNum) => {
+    const student = params.studentAnswers.find((a) => Number(a.question_number) === qNum)?.answer_text || "";
+    const model = modelByQ.get(qNum)?.answer || "";
+    const maxMarks = modelByQ.get(qNum)?.maxMarks || Math.max(1, Math.round(params.examTotalMarks / Math.max(qNos.length, 1)));
+    const sim = model ? similarityScore(student, model) : Math.min(1, tokenize(student).length / 18);
+    const marksAwarded = Math.max(0, Math.min(maxMarks, Math.round(sim * maxMarks)));
+    return {
+      question_number: qNum,
+      chapter: "General",
+      marks_awarded: marksAwarded,
+      max_marks: maxMarks,
+      deviation_reason: sim >= 0.8 ? "Answer closely matches expected concepts." : sim >= 0.5 ? "Answer is partially correct but missing key concepts." : "Answer misses most expected concepts.",
+      improvement_suggestion: sim >= 0.8 ? "Maintain this level of detail and structure." : "Include more key terms and complete explanation as in model answer.",
+    };
+  });
+
+  const total_marks = Math.min(params.examTotalMarks, questions.reduce((s, q) => s + q.marks_awarded, 0));
+  const pct = params.examTotalMarks > 0 ? Math.round((total_marks / params.examTotalMarks) * 100) : 0;
+
+  return {
+    student_name: params.studentName,
+    admission_number: params.admissionNumber,
+    total_marks,
+    questions,
+    overall_feedback: pct >= 75
+      ? "Strong performance with clear concept coverage."
+      : pct >= 50
+        ? "Moderate performance; revise missing concepts for better scores."
+        : "Needs significant revision and more complete answers.",
+  };
+}
 
 function getOpenAIClient() {
   const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -27,6 +119,15 @@ async function extractDocumentText(dataUrl: string, label: string): Promise<stri
   if (!mimeMatch) return "";
   const mimeType = mimeMatch[1];
   const base64Data = mimeMatch[2];
+
+  if (mimeType === "text/plain" || mimeType === "application/json") {
+    try {
+      const text = Buffer.from(base64Data, "base64").toString("utf8").trim();
+      return text;
+    } catch {
+      return "";
+    }
+  }
 
   if (mimeType === "application/pdf") {
     console.log(`[EXTRACT] Extracting text from PDF (${label})...`);
@@ -760,7 +861,8 @@ export async function registerRoutes(
 
     const mimeMatch = imageBase64.match(/^data:([^;]+);base64,/);
     const mimeType = mimeMatch?.[1] ?? "";
-    if (!mimeType.startsWith("image/")) {
+    const isMockOcrPayload = isIntegrationTestMode && mimeType === "application/json";
+    if (!mimeType.startsWith("image/") && !isMockOcrPayload) {
       console.error(`[OCR] Unsupported file type: ${mimeType}`);
       return res.status(400).json({
         message: `Unsupported file type: ${mimeType || "unknown"}. Answer sheets must be image files (JPG, PNG, WEBP). PDFs cannot be processed — please photograph or scan the sheet as an image.`
@@ -770,31 +872,37 @@ export async function registerRoutes(
     console.log(`[OCR] Starting OCR for exam ${examId}, image size: ${imageBase64.length} chars, type: ${mimeType}`);
 
     try {
-      console.log("[OCR] Calling OpenAI GPT-4o vision...");
-      const response = await getOpenAIClient().chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Extract student information and answers from this handwritten answer sheet. Return ONLY valid JSON with fields: admission_number (string), student_name (string), and answers (array of {question_number: number, answer_text: string}). If you cannot read the admission number or name, use 'UNKNOWN'."
-              },
-              {
-                type: "image_url",
-                image_url: { url: imageBase64 },
-              },
-            ],
-          },
-        ],
-        response_format: { type: "json_object" }
-      });
+      let ocrData: any;
+      if (isMockOcrPayload) {
+        const payload = imageBase64.split(",")[1] || "";
+        const raw = Buffer.from(payload, "base64").toString("utf8");
+        ocrData = JSON.parse(raw);
+      } else {
+        console.log("[OCR] Calling OpenAI GPT-4o vision...");
+        const response = await getOpenAIClient().chat.completions.create({
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: "Extract student information and answers from this handwritten answer sheet. Return ONLY valid JSON with fields: admission_number (string), student_name (string), and answers (array of {question_number: number, answer_text: string}). If you cannot read the admission number or name, use 'UNKNOWN'."
+                },
+                {
+                  type: "image_url",
+                  image_url: { url: imageBase64 },
+                },
+              ],
+            },
+          ],
+          response_format: { type: "json_object" }
+        });
 
-      const rawContent = response.choices[0].message.content || "{}";
-      console.log("[OCR] Raw OpenAI response:", rawContent.substring(0, 300));
-
-      const ocrData = JSON.parse(rawContent);
+        const rawContent = response.choices[0].message.content || "{}";
+        console.log("[OCR] Raw OpenAI response:", rawContent.substring(0, 300));
+        ocrData = JSON.parse(rawContent);
+      }
       console.log(`[OCR] Parsed data — student: ${ocrData.student_name}, admission: ${ocrData.admission_number}, answers: ${ocrData.answers?.length ?? 0}`);
 
       const student = await storage.getStudentByAdmissionNumber(ocrData.admission_number);
@@ -963,16 +1071,28 @@ Return ONLY valid JSON with this exact structure:
   "overall_feedback": "<2-3 sentence summary of overall performance>"
 }`;
 
-      console.log("[EVAL] Calling OpenAI GPT-4o for evaluation (text-only)...");
-      const response = await getOpenAIClient().chat.completions.create({
-        model: "gpt-4o",
-        messages: [{ role: "user", content: evalPrompt }],
-        response_format: { type: "json_object" }
-      });
+      const shouldUseLocalEval = isIntegrationTestMode || !(process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY);
+      let evalData: any;
+      if (shouldUseLocalEval) {
+        evalData = buildLocalExamEvaluation({
+          studentName: sheet.studentName,
+          admissionNumber: sheet.admissionNumber,
+          examTotalMarks: exam.totalMarks,
+          modelAnswerText,
+          studentAnswers: ocrData.answers ?? [],
+        });
+      } else {
+        console.log("[EVAL] Calling OpenAI GPT-4o for evaluation (text-only)...");
+        const response = await getOpenAIClient().chat.completions.create({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: evalPrompt }],
+          response_format: { type: "json_object" }
+        });
 
-      const rawEval = response.choices[0].message.content || "{}";
-      console.log("[EVAL] Raw OpenAI response:", rawEval.substring(0, 300));
-      const evalData = JSON.parse(rawEval);
+        const rawEval = response.choices[0].message.content || "{}";
+        console.log("[EVAL] Raw OpenAI response:", rawEval.substring(0, 300));
+        evalData = JSON.parse(rawEval);
+      }
       console.log(`[EVAL] Parsed eval — student: ${evalData.student_name}, total_marks: ${evalData.total_marks}, questions: ${evalData.questions?.length ?? 0}`);
 
       const evaluation = await storage.createEvaluation({
@@ -1635,7 +1755,12 @@ Return JSON:
           aiFeedback = evalData.feedback || "";
         } catch (evalErr) {
           console.warn("[HW SUBMIT] AI eval failed:", evalErr);
-          status = "completed";
+          const sim = similarityScore(ocrText, hw.modelSolutionText || "");
+          correctnessScore = Math.max(0, Math.min(100, Math.round(sim * 100)));
+          status = correctnessScore >= 60 ? "completed" : "needs_improvement";
+          aiFeedback = status === "completed"
+            ? "Submission evaluated successfully. Good concept overlap with model solution."
+            : "Submission evaluated. Please improve concept coverage as per model solution.";
         }
       } else if (ocrText) {
         status = "completed";
@@ -3171,6 +3296,9 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       // In production, send SMS here. For now, log the OTP.
       console.log(`[OTP] Code ${code} sent to ${phone} for ${role} ${identifier}`);
 
+      if (isIntegrationTestMode) {
+        return res.json({ message: "OTP sent successfully", expiresIn: 300, code });
+      }
       res.json({ message: "OTP sent successfully", expiresIn: 300 });
     } catch (err) {
       console.error("[otp-send]", err);

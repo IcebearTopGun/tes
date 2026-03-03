@@ -60,6 +60,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const isIntegrationTestMode = process.env.INTEGRATION_TEST_MODE === "1";
   // Auto-create any missing tables (handles new schema columns added after deployment)
   try {
     const { pool } = await import("./db");
@@ -118,9 +119,11 @@ app.use((req, res, next) => {
   // doesn't interfere with the other routes
   if (process.env.NODE_ENV === "production") {
     serveStatic(app);
-  } else {
+  } else if (!isIntegrationTestMode) {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
+  } else {
+    console.log("[server] Integration test mode active: Vite disabled");
   }
 
   // ALWAYS serve the app on the port specified in the environment variable PORT

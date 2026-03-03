@@ -27,3 +27,11 @@ export async function fetchWithAuth(url: string, options: RequestInit = {}) {
   
   return response;
 }
+
+/**
+ * Fetch JSON with auth headers and typed response parsing.
+ */
+export async function fetchJsonWithAuth<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetchWithAuth(url, options);
+  return (await response.json()) as T;
+}

@@ -1,0 +1,125 @@
+name: CI + ECS Deploy (CDK)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "20"
+  AWS_REGION: us-east-1
+  ENV_NAME: prod
+  ECR_REPOSITORY: tes-app
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: tes
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d tes"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/tes
+      SESSION_SECRET: ci-session-secret
+      INTEGRATION_TEST_MODE: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply database schema
+        run: npm run db:push
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Build app
+        run: npm run build
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test-and-build
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install infra dependencies
+        run: npm --prefix infra ci
+
+      - name: CDK bootstrap
+        run: npm --prefix infra run cdk -- bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
+
+      - name: First deploy (create infrastructure + ECR)
+        run: >-
+          npm --prefix infra run cdk -- deploy TesEcsStack-${{ env.ENV_NAME }}
+          --require-approval never
+          -c account=${{ secrets.AWS_ACCOUNT_ID }}
+          -c region=${{ env.AWS_REGION }}
+          -c envName=${{ env.ENV_NAME }}
+          -c ecrRepoName=${{ env.ECR_REPOSITORY }}
+          -c appSecretArn=${{ secrets.APP_SECRET_ARN }}
+          -c desiredCount=0
+          -c imageTag=bootstrap
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI="$ECR_REGISTRY/${ECR_REPOSITORY}:$IMAGE_TAG"
+          docker build -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+
+      - name: Deploy app image with desired count
+        run: >-
+          npm --prefix infra run cdk -- deploy TesEcsStack-${{ env.ENV_NAME }}
+          --require-approval never
+          -c account=${{ secrets.AWS_ACCOUNT_ID }}
+          -c region=${{ env.AWS_REGION }}
+          -c envName=${{ env.ENV_NAME }}
+          -c ecrRepoName=${{ env.ECR_REPOSITORY }}
+          -c appSecretArn=${{ secrets.APP_SECRET_ARN }}
+          -c desiredCount=1
+          -c imageTag=${{ github.sha }}
