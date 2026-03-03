@@ -20,11 +20,10 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
   const [otpPhone, setOtpPhone] = useState("");
   const [otpIdentifier, setOtpIdentifier] = useState("");
   const [otpCode, setOtpCode] = useState("");
-  const { adminUserLogin, teacherSignup, studentSignup, requestOtp, verifyOtp } = useAuth();
+  const { adminUserLogin, requestOtp, verifyOtp } = useAuth();
 
   const isPending =
     adminUserLogin.isPending ||
-    teacherSignup.isPending || studentSignup.isPending ||
     requestOtp.isPending || verifyOtp.isPending;
 
   const schoolLoginSchema = z.object({
@@ -88,35 +87,31 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
         <Card className="border-border/50 shadow-premium bg-card/80 backdrop-blur-xl rounded-3xl overflow-hidden">
           <CardHeader className="text-center pb-6">
             <CardTitle className="font-display text-3xl font-bold tracking-tight">
-              {mode === "login" ? "Welcome back" : "Create an account"}
+              Welcome back
             </CardTitle>
             <CardDescription className="text-base mt-2">
-              {mode === "login" ? "Enter your credentials to access your dashboard" : "Join ScholarFlow to manage your educational journey"}
+              Enter your credentials to access your dashboard
             </CardDescription>
           </CardHeader>
           <CardContent>
             {/* 3 tabs: Student · Teacher · School */}
             <Tabs value={role} onValueChange={handleRoleChange} className="w-full mb-6">
-              <TabsList className={`grid w-full p-1 bg-muted/50 rounded-xl ${mode === "login" ? "grid-cols-3" : "grid-cols-2"}`}>
+              <TabsList className="grid w-full p-1 bg-muted/50 rounded-xl grid-cols-3">
                 <TabsTrigger value="student" className="rounded-lg font-medium data-[state=active]:shadow-sm">Student</TabsTrigger>
                 <TabsTrigger value="teacher" className="rounded-lg font-medium data-[state=active]:shadow-sm">Teacher</TabsTrigger>
-                {mode === "login" && (
-                  <TabsTrigger value="school" className="rounded-lg font-medium data-[state=active]:shadow-sm">School</TabsTrigger>
-                )}
+                <TabsTrigger value="school" className="rounded-lg font-medium data-[state=active]:shadow-sm">School</TabsTrigger>
               </TabsList>
             </Tabs>
 
             {/* OTP Login Flow for teacher / student */}
             {role !== "school" && (
               <div className="space-y-5">
-                {mode === "login" && (
-                  <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl">
-                    <Phone size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
-                    <span className="text-xs text-blue-700 dark:text-blue-300">
-                      {role === "teacher" ? "Teachers" : "Students"} sign in via OTP verification only
-                    </span>
-                  </div>
-                )}
+                <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl">
+                  <Phone size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="text-xs text-blue-700 dark:text-blue-300">
+                    {role === "teacher" ? "Teachers" : "Students"} sign in via OTP verification only
+                  </span>
+                </div>
 
                 <AnimatePresence mode="popLayout">
                   <motion.div
@@ -127,8 +122,7 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
                     transition={{ duration: 0.2 }}
                     className="space-y-4"
                   >
-                    {mode === "login" ? (
-                      otpStep === "phone" ? (
+                    {otpStep === "phone" ? (
                         <>
                           <div className="space-y-2">
                             <Label>{role === "teacher" ? "Employee ID" : "Admission Number"}</Label>
@@ -168,58 +162,20 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
                             Change phone number
                           </button>
                         </>
-                      )
-                    ) : (
-                      /* Signup */
-                      <>
-                        {role === "teacher" && (
-                          <>
-                            <div className="space-y-2"><Label htmlFor="employeeId">Employee ID</Label><Input id="employeeId" className="bg-background/50 h-11 rounded-xl" placeholder="T001" /></div>
-                            <div className="space-y-2"><Label htmlFor="name">Full Name</Label><Input id="name" className="bg-background/50 h-11 rounded-xl" placeholder="Ramesh Sharma" /></div>
-                            <div className="space-y-2"><Label htmlFor="email">Email Address</Label><Input id="email" type="email" className="bg-background/50 h-11 rounded-xl" placeholder="ramesh@school.edu" /></div>
-                            <div className="space-y-2"><Label htmlFor="phone">Phone Number</Label><Input id="phone" className="bg-background/50 h-11 rounded-xl" placeholder="9876543210" /></div>
-                          </>
-                        )}
-                        {role === "student" && (
-                          <>
-                            <div className="space-y-2"><Label htmlFor="admissionNumber">Admission Number</Label><Input id="admissionNumber" className="bg-background/50 h-11 rounded-xl" placeholder="S001" /></div>
-                            <div className="space-y-2"><Label htmlFor="name">Full Name</Label><Input id="name" className="bg-background/50 h-11 rounded-xl" placeholder="Aarav Sharma" /></div>
-                            <div className="space-y-2"><Label htmlFor="phone">Phone Number</Label><Input id="phone" className="bg-background/50 h-11 rounded-xl" placeholder="9876543210" /></div>
-                            <div className="grid grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <Label>Class</Label>
-                                <select className="w-full h-11 rounded-xl border border-input bg-background/50 px-3 text-sm">
-                                  <option value="">Select class</option>
-                                  {["9", "10", "11", "12"].map(c => <option key={c} value={c}>Class {c}</option>)}
-                                </select>
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Section</Label>
-                                <select className="w-full h-11 rounded-xl border border-input bg-background/50 px-3 text-sm">
-                                  <option value="">Select section</option>
-                                  {["A", "B", "C", "D"].map(s => <option key={s} value={s}>Section {s}</option>)}
-                                </select>
-                              </div>
-                            </div>
-                          </>
-                        )}
-                      </>
-                    )}
+                      )}
                   </motion.div>
                 </AnimatePresence>
 
-                {mode === "login" && (
-                  <Button
-                    type="button"
-                    disabled={isPending}
-                    className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all"
-                    onClick={otpStep === "phone" ? handleOtpRequest : handleOtpVerify}
-                  >
-                    {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : (
-                      otpStep === "phone" ? "Send OTP" : "Verify & Sign In"
-                    )}
-                  </Button>
-                )}
+                <Button
+                  type="button"
+                  disabled={isPending}
+                  className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all"
+                  onClick={otpStep === "phone" ? handleOtpRequest : handleOtpVerify}
+                >
+                  {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : (
+                    otpStep === "phone" ? "Send OTP" : "Verify & Sign In"
+                  )}
+                </Button>
               </div>
             )}
 
@@ -280,11 +236,7 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
 
             {role !== "school" && (
               <div className="mt-8 text-center text-sm text-muted-foreground">
-                {mode === "login" ? (
-                  <p>Don't have an account? <Link href="/signup" className="text-primary font-semibold hover:underline">Sign up</Link></p>
-                ) : (
-                  <p>Already have an account? <Link href="/login" className="text-primary font-semibold hover:underline">Log in</Link></p>
-                )}
+                <p>Accounts are created by school admin only.</p>
               </div>
             )}
           </CardContent>

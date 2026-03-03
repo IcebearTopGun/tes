@@ -215,7 +215,7 @@ export default function Home() {
           </ul>
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <Link href="/login"><button className="lp-btn-outline">Login</button></Link>
-            <Link href="/signup"><button className="lp-btn-primary">Request a Demo</button></Link>
+            <Link href="/login"><button className="lp-btn-primary">Request a Demo</button></Link>
           </div>
         </nav>
 
@@ -234,7 +234,7 @@ export default function Home() {
               EduSync is the AI intelligence layer for your entire school — automated answer checking, early risk detection, chapter-level learning gaps, and real-time performance insights in one calm platform.
             </p>
             <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
-              <Link href="/signup"><button className="lp-btn-hero">Get Started Free →</button></Link>
+              <Link href="/login"><button className="lp-btn-hero">Get Started Free →</button></Link>
               <button className="lp-btn-hero-sec">See how it works</button>
             </div>
           </div>
@@ -356,7 +356,7 @@ export default function Home() {
           <p style={{ fontSize: "1.05rem", color: C.textMid, marginBottom: 40, position: "relative", zIndex: 2, fontWeight: 300 }}>
             Join hundreds of schools already using EduSync to grade faster, identify struggling students earlier, and improve academic outcomes.
           </p>
-          <Link href="/signup"><button className="lp-cta-btn" style={{ position: "relative", zIndex: 2 }}>Get Started Free →</button></Link>
+          <Link href="/login"><button className="lp-cta-btn" style={{ position: "relative", zIndex: 2 }}>Get Started Free →</button></Link>
         </section>
 
         {/* FOOTER */}

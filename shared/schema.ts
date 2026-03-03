@@ -352,7 +352,6 @@ export const managedStudents = pgTable("managed_students", {
   admissionNumber: text("admission_number").notNull().unique(),
   class: text("class").notNull(),
   section: text("section").notNull(),
-  sessionYear: text("session_year").notNull(),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: text("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });

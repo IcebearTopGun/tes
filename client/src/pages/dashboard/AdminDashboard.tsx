@@ -302,7 +302,6 @@ export default function AdminDashboard() {
 
   // ── New state for Student tab hierarchy and search ──
   const [studentSearch, setStudentSearch] = useState("");
-  const [expandedStudentYear, setExpandedStudentYear] = useState<Set<string>>(new Set());
   const [expandedStudentClass, setExpandedStudentClass] = useState<Set<string>>(new Set());
   const [expandedStudentSection, setExpandedStudentSection] = useState<Set<string>>(new Set());
   // ── Teacher search ──

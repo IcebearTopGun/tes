@@ -1,5 +1,6 @@
 import "@/dashboard.css";
 import ProfileDrawer from "@/components/ProfileDrawer";
+import StudentTopNav from "@/components/student/StudentTopNav";
 import { useStudentDashboard } from "@/hooks/use-dashboard";
 import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
@@ -9,7 +10,7 @@ import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, X, Plus, Send, TrendingUp, MessageSquare, BookOpen, Upload } from "lucide-react";
+import { Loader2, X, Plus, Send, TrendingUp, MessageSquare, BookOpen } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Input } from "@/components/ui/input";
 
@@ -68,7 +69,7 @@ const DOT_COLORS = ["var(--ink)", "var(--lavender)", "var(--lav-card)", "var(--b
 
 export default function StudentDashboard() {
   const { data, isLoading, error } = useStudentDashboard();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -76,14 +77,8 @@ export default function StudentDashboard() {
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [revisionChapter, setRevisionChapter] = useState<{ chapter: string; subject: string } | null>(null);
   const [expandedQuestion, setExpandedQuestion] = useState<number | null>(null);
-  const [showAvaMenu, setShowAvaMenu] = useState(false);
-  const [activeTab, setActiveTab] = useState("overview");
   const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
-  const [uploadingHwId, setUploadingHwId] = useState<number | null>(null);
-  const hwFileRef = useRef<HTMLInputElement>(null);
-  const [pendingHwId, setPendingHwId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const avaRef = useRef<HTMLDivElement>(null);
 
   const { data: conversations } = useQuery<any[]>({
     queryKey: ["/api/student/chat/conversations"],
@@ -111,43 +106,6 @@ export default function StudentDashboard() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: homeworkList, isLoading: isHomeworkLoading, refetch: refetchHomework } = useQuery<any[]>({
-    queryKey: ["/api/student/homework"],
-    queryFn: () => fetchWithAuth("/api/student/homework"),
-    enabled: activeTab === "homework",
-    staleTime: 30000,
-  });
-
-  const { data: hwAnalytics, refetch: refetchHwAnalytics } = useQuery<any>({
-    queryKey: ["/api/student/homework/analytics"],
-    queryFn: () => fetchWithAuth("/api/student/homework/analytics"),
-    enabled: activeTab === "homework",
-    staleTime: 30000,
-  });
-
-  const submitHomework = useMutation({
-    mutationFn: ({ hwId, fileBase64 }: { hwId: number; fileBase64: string }) =>
-      fetchWithAuth(`/api/student/homework/${hwId}/submit`, { method: "POST", body: JSON.stringify({ fileBase64 }) }),
-    onSuccess: () => {
-      toast({ title: "Homework submitted", description: "Your work has been evaluated by AI." });
-      refetchHomework();
-      refetchHwAnalytics();
-    },
-    onError: () => toast({ title: "Submission failed", description: "Could not submit homework.", variant: "destructive" }),
-    onSettled: () => { setUploadingHwId(null); setPendingHwId(null); },
-  });
-
-  const handleHwFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || pendingHwId === null) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setUploadingHwId(pendingHwId);
-      submitHomework.mutate({ hwId: pendingHwId, fileBase64: reader.result as string });
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
-  };
 
   const startConversation = useMutation({
     mutationFn: () => fetchWithAuth("/api/student/chat/conversations", { method: "POST", body: JSON.stringify({ title: "Academic Chat" }) }),
@@ -164,14 +122,6 @@ export default function StudentDashboard() {
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (avaRef.current && !avaRef.current.contains(e.target as Node)) setShowAvaMenu(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
 
   if (isLoading) {
     return (
@@ -267,89 +217,7 @@ export default function StudentDashboard() {
 
   return (
     <div className="sf-root">
-      {/* TOP NAV */}
-      <nav className="sf-topnav">
-        <div className="sf-logo">
-          <div className="sf-logo-mark">S</div>
-          <span className="sf-logo-name">ScholarFlow</span>
-        </div>
-
-        <div className="sf-nav-tabs">
-          <button className={`sf-nav-tab${activeTab === "overview" ? " on" : ""}`} onClick={() => setActiveTab("overview")}>
-            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
-              <rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
-            </svg>
-            Overview
-          </button>
-          <button className={`sf-nav-tab${activeTab === "analytics" ? " on" : ""}`} onClick={() => setActiveTab("analytics")} style={{ display: "none" }}>
-            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
-            </svg>
-            Analytics
-          </button>
-          <button className={`sf-nav-tab${activeTab === "homework" ? " on" : ""}`} onClick={() => setActiveTab("homework")}>
-            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-              <polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-            </svg>
-            Homework
-          </button>
-          <button className="sf-nav-tab" style={{ display: "none" }}>
-            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
-            </svg>
-            Community
-          </button>
-          <button className="sf-nav-tab" onClick={() => setIsChatOpen(true)}>
-            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
-            </svg>
-            AI Coach
-          </button>
-          <button className="sf-nav-tab" onClick={() => setIsProfilePanelOpen(true)}>
-            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-            </svg>
-            Profile
-          </button>
-        </div>
-
-        <div className="sf-nav-right">
-          <div className="sf-search">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: "var(--dim)", flexShrink: 0 }}>
-              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-            </svg>
-            <input placeholder="Search…" />
-          </div>
-          <div className="sf-ic-btn">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-            </svg>
-            <span className="sf-notif-dot" />
-          </div>
-          <button className="sf-ai-btn" onClick={() => setIsChatOpen(true)} data-testid="button-open-student-chat">
-            <div className="sf-pulse" />AI Coach
-          </button>
-          <div className="sf-ava" ref={avaRef} onClick={() => setShowAvaMenu(v => !v)}>
-            {initials}
-            {showAvaMenu && (
-              <div className="sf-ava-menu">
-                <button className="sf-ava-menu-item danger" onClick={() => logout()}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                    <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-                  </svg>
-                  Sign Out
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </nav>
+      <StudentTopNav activeTab="overview" initials={initials} onProfileClick={() => setIsProfilePanelOpen(true)} />
 
       {/* PAGE */}
       <div className="sf-page">
@@ -365,8 +233,8 @@ export default function StudentDashboard() {
           <div className="sf-f-col">
             <div className="sf-f-cat">Avg Score</div>
             <div className="sf-f-num">{avgScore || 64}%</div>
-            <div className="sf-f-delta sf-d-flat">→ Mid-term</div>
-            <div className="sf-f-desc">Average across <b>{examsCount || 1} evaluated exam{examsCount !== 1 ? "s" : ""}</b> this term.</div>
+            <div className="sf-f-delta sf-d-flat">→ Current Performance</div>
+            <div className="sf-f-desc">Average across <b>{examsCount || 1} evaluated exam{examsCount !== 1 ? "s" : ""}</b>.</div>
           </div>
           <div className="sf-f-col">
             <div className="sf-f-cat">Class Rank</div>
@@ -378,7 +246,7 @@ export default function StudentDashboard() {
             <div className="sf-f-cat">Exams Done</div>
             <div className="sf-f-num">{examsCount || 1}</div>
             <div className="sf-f-delta sf-d-flat">✓ Evaluated</div>
-            <div className="sf-f-desc">{examsCount || 1} exam{examsCount !== 1 ? "s" : ""} graded by AI this term.</div>
+            <div className="sf-f-desc">{examsCount || 1} exam{examsCount !== 1 ? "s" : ""} graded by AI.</div>
           </div>
           <div className="sf-f-col">
             <div className="sf-f-cat">Homework</div>
@@ -390,7 +258,7 @@ export default function StudentDashboard() {
             <div className="sf-f-cat">Focus Areas</div>
             <div className="sf-f-num">{Math.max(improvementAreas.length, 2)}</div>
             <div className="sf-f-delta sf-d-dn">↓ Needs work</div>
-            <div className="sf-f-desc">Topics flagged by AI coach for revision.</div>
+            <div className="sf-f-desc">Topics flagged by AI tutotr for revision.</div>
           </div>
         </div>
 
@@ -430,7 +298,7 @@ export default function StudentDashboard() {
           {/* Academic Summary */}
           <div className="sf-card">
             <div className="sf-card-title">Academic Summary</div>
-            <div className="sf-card-sub">Performance report · Mid-term {new Date().getFullYear()}</div>
+            <div className="sf-card-sub">Performance report</div>
             <div className="sf-ai-note" data-testid="text-performance-summary">{aiInsight}</div>
             <div className="sf-sec-lbl">Score Breakdown</div>
             {scoreBars.map((bar, i) => (
@@ -551,7 +419,7 @@ export default function StudentDashboard() {
           {/* Exam Feedback */}
           <div className="sf-card">
             <div className="sf-card-title">Exam Feedback</div>
-            <div className="sf-card-sub">AI-generated evaluation · Mid-term {new Date().getFullYear()}</div>
+            <div className="sf-card-sub">AI-generated evaluation</div>
             {examsCount > 0 ? (
               <div className="sf-fb-item">
                 <div className="sf-fb-hd">
@@ -591,92 +459,8 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        {/* Hidden file input for homework upload */}
-        <input ref={hwFileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={handleHwFileChange} />
-
-        {/* HOMEWORK TAB */}
-        {activeTab === "homework" && (
-          <div>
-            {/* Regularity stats */}
-            {hwAnalytics && (
-              <div className="sf-rank-card" style={{ marginBottom: 16 }}>
-                <span className="sf-rank-trophy">📋</span>
-                <div className="sf-rank-info">
-                  <div className="sf-rank-label">Homework Regularity</div>
-                  <div className="sf-rank-num" style={{ fontSize: 22 }}>{hwAnalytics.regularityClass}</div>
-                  <div className="sf-rank-sub">{hwAnalytics.totalSubmitted} of {hwAnalytics.totalAssigned} submitted &nbsp;·&nbsp; {hwAnalytics.onTimePct}% on time</div>
-                </div>
-                <div className="sf-rank-divider" />
-                <div className="sf-rank-stat">
-                  <div className="sf-rank-stat-num">{hwAnalytics.streak}</div>
-                  <div className="sf-rank-stat-lbl">Streak</div>
-                </div>
-                <div className="sf-rank-divider" />
-                <div className="sf-rank-stat">
-                  <div className="sf-rank-stat-num">{hwAnalytics.onTimePct}%</div>
-                  <div className="sf-rank-stat-lbl">On-time</div>
-                </div>
-                <div className="sf-rank-divider" />
-                <div className="sf-rank-stat">
-                  <div className="sf-rank-stat-num">{hwAnalytics.avgCorrectness}%</div>
-                  <div className="sf-rank-stat-lbl">Correctness</div>
-                </div>
-              </div>
-            )}
-
-            {/* Homework list */}
-            <div className="sf-panel">
-              <div className="sf-panel-title">My Homework</div>
-              <div className="sf-panel-sub">Daily sync from your class — submit to get AI evaluation</div>
-              {isHomeworkLoading ? (
-                <div style={{ padding: "24px 0", textAlign: "center" }}><Spinner size="sm" /></div>
-              ) : !homeworkList || homeworkList.length === 0 ? (
-                <div className="sf-empty"><div className="sf-empty-icon">📚</div>No homework assigned yet for your class and section.</div>
-              ) : (
-                homeworkList.map((hw: any) => {
-                  const sub = hw.submission;
-                  const isOverdue = !sub && new Date() > new Date(hw.dueDate);
-                  const statusLabel = sub ? (sub.status === "needs_improvement" ? "Needs Improvement" : "Completed") : isOverdue ? "Overdue" : "Pending";
-                  const statusCls = sub ? (sub.status === "needs_improvement" ? "sf-es-draft" : "sf-es-done") : isOverdue ? "sf-es-draft" : "";
-                  const isUploading = uploadingHwId === hw.id;
-                  return (
-                    <div key={hw.id} className="sf-exam-item" style={{ cursor: "default", alignItems: "flex-start", flexDirection: "column", gap: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", width: "100%", gap: 12 }}>
-                        <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", flexShrink: 0 }}>📝</div>
-                        <div className="sf-exam-info" style={{ flex: 1 }}>
-                          <div className="sf-exam-name">{hw.subject}</div>
-                          <div className="sf-exam-meta">{hw.description}</div>
-                          <div className="sf-exam-meta">Due: {new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</div>
-                        </div>
-                        <span className={`sf-exam-status ${statusCls}`} style={{ flexShrink: 0 }}>{statusLabel}</span>
-                        {!sub && (
-                          <Button
-                            size="sm"
-                            className="rounded-xl gap-1"
-                            disabled={isUploading}
-                            onClick={() => { setPendingHwId(hw.id); hwFileRef.current?.click(); }}
-                            data-testid={`button-submit-hw-${hw.id}`}
-                          >
-                            {isUploading ? <><Loader2 className="h-3 w-3 animate-spin" /> Evaluating…</> : <><Upload className="h-3 w-3" /> Submit</>}
-                          </Button>
-                        )}
-                      </div>
-                      {sub?.aiFeedback && (
-                        <div style={{ width: "100%", padding: "10px 14px", background: "var(--lav-bg)", borderRadius: 10, fontSize: 12.5, color: "var(--ink2)", lineHeight: 1.6 }}>
-                          <b>AI Feedback:</b> {sub.aiFeedback}
-                          {sub.correctnessScore != null && <span style={{ marginLeft: 8, fontWeight: 700, color: sub.correctnessScore >= 70 ? "var(--green)" : "var(--amber)" }}>{sub.correctnessScore}% correct</span>}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        )}
-
         {/* ADAPTIVE REVISION PANEL — only in overview */}
-        {activeTab === "overview" && <AnimatePresence>
+        <AnimatePresence>
           {revisionChapter && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -749,7 +533,7 @@ export default function StudentDashboard() {
               </div>
             </motion.div>
           )}
-        </AnimatePresence>}
+        </AnimatePresence>
 
         <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
@@ -763,7 +547,7 @@ export default function StudentDashboard() {
               <div className="p-4 border-b flex items-center justify-between bg-primary text-primary-foreground shrink-0">
                 <div className="flex items-center gap-2">
                   <MessageSquare className="h-5 w-5" />
-                  <div><h2 className="font-bold leading-tight">AI Coach</h2><p className="text-xs text-primary-foreground/70">Your personal academic assistant</p></div>
+                  <div><h2 className="font-bold leading-tight">AI Tutotr</h2><p className="text-xs text-primary-foreground/70">Your personal academic assistant</p></div>
                 </div>
                 <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)} className="text-primary-foreground hover:bg-white/10 rounded-xl"><X className="h-5 w-5" /></Button>
               </div>
@@ -771,7 +555,7 @@ export default function StudentDashboard() {
                 {!activeConversationId ? (
                   <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6">
                     <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center"><TrendingUp className="h-8 w-8 text-primary" /></div>
-                    <div><h3 className="font-bold text-lg">Ask Your AI Coach</h3><p className="text-sm text-muted-foreground mt-2 max-w-xs">Get personalized academic guidance based on your performance data.</p></div>
+                    <div><h3 className="font-bold text-lg">Ask Your AI Tutotr</h3><p className="text-sm text-muted-foreground mt-2 max-w-xs">Get personalized academic guidance based on your performance data.</p></div>
                     <div className="w-full space-y-2">
                       <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider text-left">Example questions</p>
                       {STUDENT_EXAMPLE_QUESTIONS.map(q => (
@@ -797,7 +581,7 @@ export default function StudentDashboard() {
                     <div className="p-4 border-t bg-muted/30 shrink-0">
                       <div className="flex items-center gap-2 mb-2"><Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 rounded-lg" onClick={() => setActiveConversationId(null)}><Plus className="h-3 w-3 mr-1" /> New</Button></div>
                       <form onSubmit={e => { e.preventDefault(); if (chatMessage.trim()) sendMessage.mutate(chatMessage); }} className="flex gap-2">
-                        <Input placeholder="Ask your AI coach…" value={chatMessage} onChange={e => setChatMessage(e.target.value)} className="rounded-xl bg-background" disabled={sendMessage.isPending} />
+                        <Input placeholder="Ask your AI tutotr…" value={chatMessage} onChange={e => setChatMessage(e.target.value)} className="rounded-xl bg-background" disabled={sendMessage.isPending} />
                         <Button type="submit" size="icon" className="rounded-xl shrink-0" disabled={sendMessage.isPending || !chatMessage.trim()}><Send className="h-4 w-4" /></Button>
                       </form>
                     </div>

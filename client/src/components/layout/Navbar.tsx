@@ -40,7 +40,7 @@ export function Navbar() {
               <Link href="/login">
                 <Button variant="ghost" className="font-medium">Log in</Button>
               </Link>
-              <Link href="/signup">
+              <Link href="/login">
                 <Button className="font-medium rounded-full shadow-premium hover:shadow-lg hover:-translate-y-0.5 transition-all">
                   Get Started
                 </Button>

@@ -113,11 +113,14 @@ async function initAdminUsers() {
         admission_number TEXT NOT NULL UNIQUE,
         class TEXT NOT NULL,
         section TEXT NOT NULL,
-        session_year TEXT NOT NULL,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
       )
     `);
+    // Backward-compatibility cleanup: remove legacy session_year column if it exists.
+    try {
+      await db.execute(drizzleSql`ALTER TABLE managed_students DROP COLUMN IF EXISTS session_year`);
+    } catch {}
     await db.execute(drizzleSql`
       CREATE TABLE IF NOT EXISTS managed_teachers (
         id SERIAL PRIMARY KEY,
@@ -422,82 +425,22 @@ export async function registerRoutes(
 
   // TEACHER LOGIN
   app.post(api.auth.teacherLogin.path, async (req, res) => {
-    try {
-      const input = api.auth.teacherLogin.input.parse(req.body);
-      const teacher = await storage.getTeacherByEmployeeId(input.employeeId);
-      if (!teacher || !(await bcrypt.compare(input.password, teacher.password))) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-      const token = jwt.sign({ id: teacher.id, role: "teacher" }, JWT_SECRET, { expiresIn: "1d" });
-      const { password, ...teacherWithoutPassword } = teacher;
-      res.json({ token, role: "teacher", user: teacherWithoutPassword });
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      res.status(500).json({ message: "Internal server error" });
-    }
+    return res.status(403).json({ message: "Teacher password login is disabled. Use OTP login." });
   });
 
   // STUDENT LOGIN
   app.post(api.auth.studentLogin.path, async (req, res) => {
-    try {
-      const input = api.auth.studentLogin.input.parse(req.body);
-      const student = await storage.getStudentByAdmissionNumber(input.admissionNumber);
-      if (!student || !(await bcrypt.compare(input.password, student.password))) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-      const token = jwt.sign({ id: student.id, role: "student" }, JWT_SECRET, { expiresIn: "1d" });
-      const { password, ...studentWithoutPassword } = student;
-      res.json({ token, role: "student", user: studentWithoutPassword });
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message });
-      }
-      res.status(500).json({ message: "Internal server error" });
-    }
+    return res.status(403).json({ message: "Student password login is disabled. Use OTP login." });
   });
 
   // TEACHER SIGNUP
   app.post(api.auth.teacherSignup.path, async (req, res) => {
-    try {
-      const input = api.auth.teacherSignup.input.parse(req.body);
-      const existing = await storage.getTeacherByEmployeeId(input.employeeId);
-      if (existing) {
-        return res.status(400).json({ message: "Employee ID already exists" });
-      }
-      const hashedPassword = await bcrypt.hash(input.password, 10);
-      const teacher = await storage.createTeacher({ ...input, password: hashedPassword });
-      const token = jwt.sign({ id: teacher.id, role: "teacher" }, JWT_SECRET, { expiresIn: "1d" });
-      const { password, ...teacherWithoutPassword } = teacher;
-      res.status(201).json({ token, role: "teacher", user: teacherWithoutPassword });
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path.join('.') });
-      }
-      res.status(500).json({ message: "Internal server error" });
-    }
+    return res.status(403).json({ message: "Teacher signup is disabled. Admin must create managed teacher records." });
   });
 
   // STUDENT SIGNUP
   app.post(api.auth.studentSignup.path, async (req, res) => {
-    try {
-      const input = api.auth.studentSignup.input.parse(req.body);
-      const existing = await storage.getStudentByAdmissionNumber(input.admissionNumber);
-      if (existing) {
-        return res.status(400).json({ message: "Admission Number already exists" });
-      }
-      const hashedPassword = await bcrypt.hash(input.password, 10);
-      const student = await storage.createStudent({ ...input, password: hashedPassword });
-      const token = jwt.sign({ id: student.id, role: "student" }, JWT_SECRET, { expiresIn: "1d" });
-      const { password, ...studentWithoutPassword } = student;
-      res.status(201).json({ token, role: "student", user: studentWithoutPassword });
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ message: err.errors[0].message, field: err.errors[0].path.join('.') });
-      }
-      res.status(500).json({ message: "Internal server error" });
-    }
+    return res.status(403).json({ message: "Student signup is disabled. Admin must create managed student records." });
   });
 
   // ─── ADMIN LOGIN ──────────────────────────────────────────────────────────
@@ -1594,20 +1537,29 @@ Return ONLY valid JSON:
       // Attach submission status for each homework
       const withStatus = await Promise.all(hws.map(async (hw) => {
         const sub = await storage.getHomeworkSubmission(hw.id, req.user!.id);
-        return { ...hw, submission: sub || null };
+        const now = new Date();
+        const due = new Date(hw.dueDate);
+        return { ...hw, submission: sub || null, editable: now <= due };
       }));
+      withStatus.sort((a, b) => {
+        const subjectCmp = String(a.subject || "").localeCompare(String(b.subject || ""));
+        if (subjectCmp !== 0) return subjectCmp;
+        return new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime();
+      });
       res.json(withStatus);
     } catch (err: any) {
       res.status(500).json({ message: "Failed to load homework", detail: err?.message });
     }
   });
 
-  // Student: submit homework (upload image/pdf, run OCR, AI evaluate)
+  // Student: submit homework (upload single or bulk image/pdf, run OCR, AI evaluate)
   app.post("/api/student/homework/:id/submit", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
     const homeworkId = parseInt(req.params.id);
-    const { fileBase64 } = req.body;
-    if (!fileBase64) return res.status(400).json({ message: "fileBase64 is required" });
+    const fileBase64List = Array.isArray(req.body?.filesBase64)
+      ? req.body.filesBase64.filter((f: any) => typeof f === "string" && f.trim().length > 0)
+      : (typeof req.body?.fileBase64 === "string" ? [req.body.fileBase64] : []);
+    if (fileBase64List.length === 0) return res.status(400).json({ message: "fileBase64 or filesBase64 is required" });
 
     try {
       const student = await storage.getStudent(req.user.id);
@@ -1628,12 +1580,20 @@ Return ONLY valid JSON:
       const due = new Date(hw.dueDate);
       const isOnTime = now <= due ? 1 : 0;
 
-      // OCR extraction
+      // Allow late first submission, but lock edits after due date
+      if (existing && now > due) {
+        return res.status(400).json({ message: "Homework cannot be edited after due date." });
+      }
+
+      // OCR extraction from all uploaded pages/files
       let ocrText = "";
-      try {
-        ocrText = await extractDocumentText(fileBase64, "homework submission");
-      } catch (ocrErr) {
-        console.warn("[HW SUBMIT] OCR failed:", ocrErr);
+      for (let i = 0; i < fileBase64List.length; i++) {
+        try {
+          const text = await extractDocumentText(fileBase64List[i], `homework submission ${i + 1}`);
+          if (text) ocrText += `${ocrText ? "\n\n" : ""}${text}`;
+        } catch (ocrErr) {
+          console.warn("[HW SUBMIT] OCR failed:", ocrErr);
+        }
       }
 
       // AI evaluation of correctness
@@ -1686,7 +1646,7 @@ Return JSON:
       let submission;
       if (existing) {
         submission = await storage.updateHomeworkSubmission(existing.id, {
-          fileBase64,
+          fileBase64: fileBase64List.length === 1 ? fileBase64List[0] : JSON.stringify(fileBase64List),
           ocrText,
           correctnessScore,
           status,
@@ -1699,7 +1659,7 @@ Return JSON:
           homeworkId,
           studentId: req.user.id,
           admissionNumber: student.admissionNumber,
-          fileBase64,
+          fileBase64: fileBase64List.length === 1 ? fileBase64List[0] : JSON.stringify(fileBase64List),
           ocrText,
           correctnessScore,
           status,
@@ -1734,6 +1694,8 @@ Return JSON:
 
       const onTimePct = totalSubmitted > 0 ? Math.round((onTimeCount / totalSubmitted) * 100) : 0;
       const completionPct = totalAssigned > 0 ? Math.round((totalSubmitted / totalAssigned) * 100) : 0;
+      const lateSubmissions = submissions.filter(s => s.isOnTime !== 1).length;
+      const pendingCount = Math.max(0, totalAssigned - totalSubmitted);
 
       let regularityClass = "Irregular";
       if (completionPct >= 80 && onTimePct >= 75) regularityClass = "Regular";
@@ -1756,9 +1718,144 @@ Return JSON:
         streak,
         completedCount,
         needsImprovementCount,
+        lateSubmissions,
+        pendingCount,
       });
     } catch (err: any) {
       res.status(500).json({ message: "Failed to load homework analytics" });
+    }
+  });
+
+  // Student: ask questions about one homework evaluation only (own record only)
+  app.post("/api/student/homework/:id/chat", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const homeworkId = parseInt(req.params.id);
+      const { question } = req.body;
+      if (!question || typeof question !== "string") return res.status(400).json({ message: "question is required" });
+
+      const student = await storage.getStudent(req.user.id);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      const allHw = await storage.getHomeworkForStudent(student.studentClass, student.section);
+      const hw = allHw.find(h => h.id === homeworkId);
+      if (!hw) return res.status(404).json({ message: "Homework not found" });
+
+      const submission = await storage.getHomeworkSubmission(homeworkId, req.user.id);
+      if (!submission) return res.status(404).json({ message: "No submission found for this homework" });
+
+      const prompt = `You are a study tutor helping a student with ONLY one homework submission.
+Do not discuss any other student or other homework.
+
+Homework:
+- Subject: ${hw.subject}
+- Description: ${hw.description}
+- Due date: ${hw.dueDate}
+
+Student's submission result:
+- Status: ${submission.status}
+- Correctness score: ${submission.correctnessScore ?? "N/A"}
+- On time: ${submission.isOnTime === 1 ? "Yes" : "No"}
+- AI feedback: ${submission.aiFeedback || "N/A"}
+
+Answer the student's question briefly and specifically.`;
+
+      const response = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: question },
+        ],
+        max_tokens: 450,
+      });
+
+      res.json({ answer: response.choices[0].message.content || "I couldn't analyze that right now." });
+    } catch (err: any) {
+      console.error("[STUDENT HW CHAT] Error:", err?.message);
+      res.status(500).json({ message: "Chat failed" });
+    }
+  });
+
+  // Student: list exam evaluations (own data only)
+  app.get("/api/student/evaluations", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const student = await storage.getStudent(req.user.id);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
+      const formatted = evals.map((e: any) => {
+        let questions: any[] = [];
+        try { questions = JSON.parse(e.questions || "[]"); } catch {}
+        const areasOfImprovement = questions
+          .filter((q: any) => (q.max_marks ?? 0) > 0 && (q.marks_awarded ?? 0) < (q.max_marks ?? 0) * 0.7)
+          .map((q: any) => q.improvement_suggestion || q.chapter || `Question ${q.question_number}`)
+          .filter(Boolean)
+          .slice(0, 5);
+
+        const pct = e.maxMarks > 0 ? Math.round((e.totalMarks / e.maxMarks) * 100) : 0;
+        return {
+          id: e.evaluationId,
+          examName: e.examName,
+          subject: e.subject,
+          category: e.category,
+          totalMarks: e.totalMarks,
+          maxMarks: e.maxMarks,
+          pct,
+          overallFeedback: e.overallFeedback || "",
+          areasOfImprovement,
+          evaluatedAt: new Date().toISOString(),
+        };
+      });
+
+      res.json(formatted);
+    } catch (err: any) {
+      console.error("[STUDENT EVAL LIST] Error:", err?.message);
+      res.status(500).json({ message: "Failed to load evaluations" });
+    }
+  });
+
+  // Student: ask questions about one exam evaluation only (own data only)
+  app.post("/api/student/evaluations/:id/chat", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const evalId = parseInt(req.params.id);
+      const { question } = req.body;
+      if (!question || typeof question !== "string") return res.status(400).json({ message: "question is required" });
+
+      const student = await storage.getStudent(req.user.id);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+
+      const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
+      const evaluation = evals.find((e: any) => e.evaluationId === evalId);
+      if (!evaluation) return res.status(404).json({ message: "Evaluation not found" });
+
+      const prompt = `You are a study tutor helping a student understand ONLY one exam evaluation.
+Do not discuss any other student's data.
+
+Evaluation context:
+- Exam: ${evaluation.examName}
+- Subject: ${evaluation.subject}
+- Category: ${evaluation.category}
+- Score: ${evaluation.totalMarks}/${evaluation.maxMarks}
+- Overall feedback: ${evaluation.overallFeedback || "N/A"}
+- Questions JSON: ${evaluation.questions || "[]"}
+
+Answer the question with actionable study guidance.`;
+
+      const response = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: question },
+        ],
+        max_tokens: 450,
+      });
+
+      res.json({ answer: response.choices[0].message.content || "I couldn't analyze that right now." });
+    } catch (err: any) {
+      console.error("[STUDENT EVAL CHAT] Error:", err?.message);
+      res.status(500).json({ message: "Chat failed" });
     }
   });
 
@@ -3054,13 +3151,13 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
 
       // Verify the user exists and phone matches
       if (role === "teacher") {
-        const teacher = await storage.getTeacherByEmployeeId(identifier);
-        if (!teacher) return res.status(404).json({ message: "Teacher not found with this Employee ID" });
-        if (!teacher.phone || teacher.phone !== phone) return res.status(400).json({ message: "Phone number does not match records" });
+        const managedTeacher = await storage.getManagedTeacherByEmployeeId(identifier);
+        if (!managedTeacher) return res.status(404).json({ message: "Teacher not found with this Employee ID" });
+        if (!managedTeacher.phoneNumber || managedTeacher.phoneNumber !== phone) return res.status(400).json({ message: "Phone number does not match records" });
       } else if (role === "student") {
-        const student = await storage.getStudentByAdmissionNumber(identifier);
-        if (!student) return res.status(404).json({ message: "Student not found with this Admission Number" });
-        if (!student.phone || student.phone !== phone) return res.status(400).json({ message: "Phone number does not match records" });
+        const managed = await storage.getManagedStudentByAdmission(identifier);
+        if (!managed) return res.status(404).json({ message: "Student not found with this Admission Number" });
+        if (!managed.phoneNumber || managed.phoneNumber !== phone) return res.status(400).json({ message: "Phone number does not match records" });
       } else {
         return res.status(400).json({ message: "Invalid role" });
       }
@@ -3104,14 +3201,71 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
 
       // Login the user
       if (role === "teacher") {
-        const teacher = await storage.getTeacherByEmployeeId(identifier);
-        if (!teacher) return res.status(404).json({ message: "Teacher not found" });
+        const managedTeacher = await storage.getManagedTeacherByEmployeeId(identifier);
+        if (!managedTeacher) return res.status(404).json({ message: "Teacher not found" });
+
+        // Provision/sync runtime teacher record from managed_teacher.
+        let teacher = await storage.getTeacherByEmployeeId(managedTeacher.employeeId);
+        const assignments = (() => {
+          try { return JSON.parse(managedTeacher.assignments || "[]"); } catch { return []; }
+        })() as Array<{ class?: string; section?: string; subjects?: string[] }>;
+        const subjects = Array.from(new Set(assignments.flatMap((a) => a.subjects || []).filter(Boolean)));
+        const classes = Array.from(new Set(assignments.map((a) => a.class).filter(Boolean)));
+
+        if (!teacher) {
+          const tempPasswordHash = await bcrypt.hash(`otp-${managedTeacher.employeeId}-${Date.now()}`, 10);
+          teacher = await storage.createTeacher({
+            employeeId: managedTeacher.employeeId,
+            name: managedTeacher.teacherName,
+            email: managedTeacher.email || `${managedTeacher.employeeId.toLowerCase()}@teacher.local`,
+            password: tempPasswordHash,
+            phone: managedTeacher.phoneNumber || null,
+            subjectsAssigned: JSON.stringify(subjects),
+            classesAssigned: JSON.stringify(classes),
+            isClassTeacher: managedTeacher.isClassTeacher || 0,
+            classTeacherOf: managedTeacher.classTeacherOf || "",
+          });
+        } else {
+          await storage.updateTeacher(teacher.id, {
+            name: managedTeacher.teacherName,
+            phone: managedTeacher.phoneNumber || null,
+            email: managedTeacher.email || teacher.email,
+            subjectsAssigned: JSON.stringify(subjects),
+            classesAssigned: JSON.stringify(classes),
+            isClassTeacher: managedTeacher.isClassTeacher || 0,
+            classTeacherOf: managedTeacher.classTeacherOf || "",
+          } as any);
+          teacher = (await storage.getTeacherByEmployeeId(managedTeacher.employeeId)) || teacher;
+        }
+
         const token = jwt.sign({ id: teacher.id, role: "teacher" }, JWT_SECRET, { expiresIn: "1d" });
         const { password, ...teacherWithoutPassword } = teacher;
         res.json({ token, role: "teacher", user: teacherWithoutPassword });
       } else if (role === "student") {
-        const student = await storage.getStudentByAdmissionNumber(identifier);
-        if (!student) return res.status(404).json({ message: "Student not found" });
+        const managed = await storage.getManagedStudentByAdmission(identifier);
+        if (!managed) return res.status(404).json({ message: "Student not found" });
+        let student = await storage.getStudentByAdmissionNumber(identifier);
+
+        if (!student) {
+          const tempPasswordHash = await bcrypt.hash(`otp-${managed.admissionNumber}-${Date.now()}`, 10);
+          student = await storage.createStudent({
+            admissionNumber: managed.admissionNumber,
+            name: managed.studentName,
+            studentClass: managed.class,
+            section: managed.section,
+            phone: managed.phoneNumber || null,
+            password: tempPasswordHash,
+          });
+        } else {
+          await storage.updateStudent(student.id, {
+            name: managed.studentName,
+            studentClass: managed.class,
+            section: managed.section,
+            phone: managed.phoneNumber || null,
+          } as any);
+          student = (await storage.getStudentByAdmissionNumber(identifier)) || student;
+        }
+
         const token = jwt.sign({ id: student.id, role: "student" }, JWT_SECRET, { expiresIn: "1d" });
         const { password, ...studentWithoutPassword } = student;
         res.json({ token, role: "student", user: studentWithoutPassword });
@@ -3287,13 +3441,13 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
   app.post("/api/admin/managed-students", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
-      const { studentName, phoneNumber, email, admissionNumber, class: cls, section, sessionYear } = req.body;
-      if (!studentName || !admissionNumber || !cls || !section || !sessionYear) {
-        return res.status(400).json({ message: "studentName, admissionNumber, class, section, sessionYear required" });
+      const { studentName, phoneNumber, email, admissionNumber, class: cls, section } = req.body;
+      if (!studentName || !admissionNumber || !cls || !section) {
+        return res.status(400).json({ message: "studentName, admissionNumber, class, section required" });
       }
       const existing = await storage.getManagedStudentByAdmission(admissionNumber);
       if (existing) return res.status(409).json({ message: "Admission number already exists", duplicate: true });
-      const created = await storage.createManagedStudent({ studentName, phoneNumber, email, admissionNumber, class: cls, section, sessionYear });
+      const created = await storage.createManagedStudent({ studentName, phoneNumber, email, admissionNumber, class: cls, section });
       res.status(201).json(created);
     } catch (err) { res.status(500).json({ message: "Failed to create" }); }
   });
@@ -3302,7 +3456,7 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
       const id = parseInt(req.params.id, 10);
-      const { studentName, phoneNumber, email, admissionNumber, class: cls, section, sessionYear } = req.body;
+      const { studentName, phoneNumber, email, admissionNumber, class: cls, section } = req.body;
       const updateData: any = {};
       if (studentName !== undefined) updateData.studentName = studentName;
       if (phoneNumber !== undefined) updateData.phoneNumber = phoneNumber;
@@ -3310,7 +3464,6 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       if (admissionNumber !== undefined) updateData.admissionNumber = admissionNumber;
       if (cls !== undefined) updateData.class = cls;
       if (section !== undefined) updateData.section = section;
-      if (sessionYear !== undefined) updateData.sessionYear = sessionYear;
       const updated = await storage.updateManagedStudent(id, updateData);
       res.json(updated);
     } catch (err) { res.status(500).json({ message: "Failed to update" }); }
@@ -3341,7 +3494,6 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
         admissionNumber: String(r.admissionNumber || ""),
         class: String(r.class || r.studentClass || ""),
         section: String(r.section || ""),
-        sessionYear: String(r.sessionYear || r.currentSessionYear || new Date().getFullYear() + "-" + (new Date().getFullYear() + 1)),
       }));
       const result = await storage.bulkCreateManagedStudents(parsed);
       res.json(result);

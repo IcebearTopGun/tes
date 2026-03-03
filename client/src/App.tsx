@@ -12,6 +12,8 @@ import Home from "./pages/Home";
 import AuthPage from "./pages/auth/AuthPage";
 import TeacherDashboard from "./pages/dashboard/TeacherDashboard";
 import StudentDashboard from "./pages/dashboard/StudentDashboard";
+import StudentHomeworkPage from "./pages/dashboard/StudentHomeworkPage";
+import StudentEvaluationsPage from "./pages/dashboard/StudentEvaluationsPage";
 import AdminDashboard from "./pages/dashboard/AdminDashboard";
 import PrincipalDashboard from "./pages/dashboard/PrincipalDashboard";
 import NcertChapters from "./pages/NcertChapters";
@@ -66,7 +68,7 @@ function Router() {
         {() => <AuthPage mode="login" />}
       </Route>
       <Route path="/signup">
-        {() => <AuthPage mode="signup" />}
+        {() => <AuthPage mode="login" />}
       </Route>
       
       {/* Protected Routes */}
@@ -75,6 +77,12 @@ function Router() {
       </Route>
       <Route path="/student-dashboard">
         {() => <ProtectedRoute component={StudentDashboard} allowedRole="student" />}
+      </Route>
+      <Route path="/student-dashboard/homework">
+        {() => <ProtectedRoute component={StudentHomeworkPage} allowedRole="student" />}
+      </Route>
+      <Route path="/student-dashboard/evaluations">
+        {() => <ProtectedRoute component={StudentEvaluationsPage} allowedRole="student" />}
       </Route>
       <Route path="/ncert-chapters">
         {() => <ProtectedRoute component={NcertChapters} allowedRole="teacher" />}
