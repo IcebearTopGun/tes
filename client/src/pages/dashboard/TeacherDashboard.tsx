@@ -2440,7 +2440,7 @@ export default function TeacherDashboard() {
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
             </svg>
-            Analytics
+            Evaluator
           </button>
           <button className={`sf-nav-tab${activeSection === "results" ? " on" : ""}`} onClick={() => setActiveSection("results")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2540,7 +2540,12 @@ export default function TeacherDashboard() {
                 <div className="sf-section-sub">
                   {viewMode === "class" && teacherScope?.isClassTeacher
                     ? `Class ${teacherScope.classTeacherOf} — all subjects view`
-                    : "Live data from evaluated answer sheets"}
+                    : viewMode === "subject"
+                      ? [
+                          classFilter ? `Class ${classFilter}` : "All Classes",
+                          subjectFilter ? subjectFilter : "All Subjects",
+                        ].join(" · ") + " — live data from evaluated answer sheets"
+                      : "Live data from evaluated answer sheets"}
                 </div>
               </div>
               <div className="sf-filter-row">
@@ -2548,7 +2553,7 @@ export default function TeacherDashboard() {
                   <div style={{ display: "flex", gap: 4, padding: "2px", background: "var(--cream2)", borderRadius: 10, border: "1.5px solid var(--rule)" }}>
                     <button
                       data-testid="button-view-subject"
-                      onClick={() => setViewMode("subject")}
+                      onClick={() => { setViewMode("subject"); setClassFilter(""); setSubjectFilter(""); }}
                       style={{
                         padding: "4px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
                         background: viewMode === "subject" ? "var(--card)" : "transparent",
@@ -2561,7 +2566,7 @@ export default function TeacherDashboard() {
                     </button>
                     <button
                       data-testid="button-view-class"
-                      onClick={() => setViewMode("class")}
+                      onClick={() => { setViewMode("class"); setClassFilter(""); setSubjectFilter(""); }}
                       style={{
                         padding: "4px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
                         background: viewMode === "class" ? "var(--card)" : "transparent",
@@ -2576,7 +2581,7 @@ export default function TeacherDashboard() {
                 )}
                 {viewMode !== "class" && (
                   <>
-                    <select className="sf-fsel" value={classFilter} onChange={e => setClassFilter(e.target.value)}>
+                    <select className="sf-fsel" value={classFilter} onChange={e => { setClassFilter(e.target.value); setSubjectFilter(""); }}>
                       <option value="">All Classes</option>
                       {(filterOptions?.classes || []).map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -2597,8 +2602,14 @@ export default function TeacherDashboard() {
                   <div className="sf-chart-ico-row">
                     <div className="sf-chart-ico sf-ci-lav">📊</div>
                     <div>
-                      <div className="sf-chart-name">Class Average by Subject</div>
-                      <div className="sf-chart-desc">Avg marks scored vs max marks</div>
+                      <div className="sf-chart-name">
+                        {viewMode === "class" ? "Subject Averages — Full Class" : "Class Average by Subject"}
+                      </div>
+                      <div className="sf-chart-desc">
+                        {viewMode === "class"
+                          ? `All subjects · Class ${teacherScope?.classTeacherOf || ""}`
+                          : [classFilter && `Class ${classFilter}`, subjectFilter].filter(Boolean).join(" · ") || "Avg marks scored vs max marks"}
+                      </div>
                     </div>
                   </div>
                   <span className="sf-chart-badge sf-cb-live">Live</span>
@@ -2619,8 +2630,14 @@ export default function TeacherDashboard() {
                   <div className="sf-chart-ico-row">
                     <div className="sf-chart-ico sf-ci-grn">👤</div>
                     <div>
-                      <div className="sf-chart-name">Student Performance</div>
-                      <div className="sf-chart-desc">Score percentage per student</div>
+                      <div className="sf-chart-name">
+                        {viewMode === "class" ? "Top Students — Full Class" : "Student Performance"}
+                      </div>
+                      <div className="sf-chart-desc">
+                        {viewMode === "class"
+                          ? `Across all subjects · Class ${teacherScope?.classTeacherOf || ""}`
+                          : [classFilter && `Class ${classFilter}`, subjectFilter].filter(Boolean).join(" · ") || "Score percentage per student"}
+                      </div>
                     </div>
                   </div>
                   <span className="sf-chart-badge sf-cb-live">Live</span>
@@ -2651,7 +2668,11 @@ export default function TeacherDashboard() {
                     <div className="sf-chart-ico sf-ci-amb">🍩</div>
                     <div>
                       <div className="sf-chart-name">Marks Distribution</div>
-                      <div className="sf-chart-desc">Students grouped by score range</div>
+                      <div className="sf-chart-desc">
+                        {viewMode === "class"
+                          ? `Score spread · Class ${teacherScope?.classTeacherOf || ""}`
+                          : [classFilter && `Class ${classFilter}`, subjectFilter].filter(Boolean).join(" · ") || "Students grouped by score range"}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2690,7 +2711,11 @@ export default function TeacherDashboard() {
                     <div className="sf-chart-ico sf-ci-pnk">📈</div>
                     <div>
                       <div className="sf-chart-name">Improvement Trends</div>
-                      <div className="sf-chart-desc">Average class score across exams</div>
+                      <div className="sf-chart-desc">
+                        {viewMode === "class"
+                          ? `Score trend · Class ${teacherScope?.classTeacherOf || ""}`
+                          : [classFilter && `Class ${classFilter}`, subjectFilter].filter(Boolean).join(" · ") || "Average class score across exams"}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2791,56 +2816,6 @@ export default function TeacherDashboard() {
                   </>
                 )}
               </div>
-            </div>
-
-            {/* ── EARLY WARNING SYSTEM ── */}
-            <div className="sf-card" style={{ marginTop: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                <div>
-                  <div className="sf-card-title">Early Warning System</div>
-                  <div className="sf-card-sub">Students flagged by score decline or low homework engagement</div>
-                </div>
-                <span className="sf-chart-badge sf-cb-live" style={{ fontSize: 11 }}>Auto</span>
-              </div>
-              {isLoadingEW ? (
-                <div style={{ padding: "20px 0", textAlign: "center" }}><div className="sf-spinner" /></div>
-              ) : !earlyWarnings || earlyWarnings.length === 0 ? (
-                <div className="sf-empty">
-                  <div className="sf-empty-icon">🟢</div>
-                  No at-risk students detected. Evaluate more answer sheets to enable early warnings.
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-                  {earlyWarnings.slice(0, 6).map((w: any, i: number) => {
-                    const riskColor = w.riskLevel === "HIGH" ? "#d94f4f" : w.riskLevel === "MEDIUM" ? "#d08a2b" : "#3a8a5c";
-                    const riskBg = w.riskLevel === "HIGH" ? "#fff0f0" : w.riskLevel === "MEDIUM" ? "#fff8ed" : "#f0faf4";
-                    const riskIcon = w.riskLevel === "HIGH" ? "🔴" : w.riskLevel === "MEDIUM" ? "🟡" : "🟢";
-                    return (
-                      <div
-                        key={i}
-                        data-testid={`ew-student-${w.admissionNumber}`}
-                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: riskBg, border: `1.5px solid ${riskColor}22` }}
-                      >
-                        <div style={{ width: 36, height: 36, borderRadius: "50%", background: `${riskColor}1a`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 700, color: riskColor, flexShrink: 0 }}>
-                          {w.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.studentName}</div>
-                          <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>
-                            Class {w.studentClass} &nbsp;·&nbsp; Score: {w.earlierAvgPct}% → {w.recentAvgPct}% &nbsp;·&nbsp; HW: {w.hwSubmitted}/{w.hwTotal} submitted
-                          </div>
-                        </div>
-                        <div style={{ textAlign: "right", flexShrink: 0 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: riskColor, display: "flex", alignItems: "center", gap: 3 }}>
-                            {riskIcon} {w.riskLevel}
-                          </div>
-                          <div style={{ fontSize: 10, color: "var(--mid)", marginTop: 1 }}>Risk {w.riskScore}</div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
 
             {/* ── QUESTION QUALITY ANALYSIS ── */}
