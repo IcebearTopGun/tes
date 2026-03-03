@@ -1565,6 +1565,458 @@ function pctColor(pct: number) {
   return "var(--red)";
 }
 
+
+// ─── ExamAiChat ───────────────────────────────────────────────────────────────
+function ExamAiChat({ exam, onClose }: { exam: any; onClose: () => void }) {
+  const [input, setInput] = useState("");
+  const [history, setHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+
+  useEffect(() => { setTimeout(() => inputRef.current?.focus(), 80); }, []);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [history, loading]);
+
+  const isLocked = exam.examDate && exam.examDate <= new Date().toISOString().split("T")[0];
+
+  const QUICK_PROMPTS = [
+    "Summarise this exam",
+    "Who scored highest?",
+    "What are the common mistakes?",
+    "Show evaluation breakdown",
+    "Which students haven\'t been evaluated?",
+  ];
+
+  const send = async (text: string) => {
+    if (!text.trim() || loading) return;
+    const userMsg = { role: "user" as const, content: text };
+    setHistory(h => [...h, userMsg]);
+    setInput("");
+    setLoading(true);
+    try {
+      const res = await fetchWithAuth(`/api/teacher/exams/${exam.id}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ question: text, history }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed");
+      setHistory(h => [...h, { role: "assistant", content: data.answer }]);
+    } catch (err: any) {
+      toast({ title: "AI Error", description: err.message, variant: "destructive" });
+      setHistory(h => h.slice(0, -1));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 100,
+      display: "flex", alignItems: "flex-end", justifyContent: "flex-end",
+      pointerEvents: "none",
+    }}>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{
+          position: "absolute", inset: 0, background: "rgba(26,26,46,0.22)",
+          backdropFilter: "blur(3px)", pointerEvents: "all",
+        }}
+      />
+      {/* Panel */}
+      <div style={{
+        position: "relative", width: 400, height: "100vh",
+        background: "#0f0f1e", display: "flex", flexDirection: "column",
+        boxShadow: "-8px 0 40px rgba(0,0,0,0.3)", pointerEvents: "all",
+      }}>
+        {/* ── Header ── */}
+        <div style={{
+          padding: "16px 20px 14px", background: "#13132a",
+          borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <div style={{
+                  width: 26, height: 26, borderRadius: 7, flexShrink: 0,
+                  background: "linear-gradient(135deg, #6c47d8, #3b82f6)",
+                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13,
+                }}>✦</div>
+                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", color: "rgba(255,255,255,0.45)", textTransform: "uppercase" }}>Exam AI</span>
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", lineHeight: 1.3, paddingRight: 8 }}>
+                {exam.examName || `${exam.subject} Exam`}
+              </div>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 3 }}>
+                {exam.subject} · Class {exam.className}{exam.section ? ` · ${exam.section}` : ""} · {exam.totalMarks} marks
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+                <span style={{
+                  fontSize: 10, padding: "2px 7px", borderRadius: 4, fontWeight: 600,
+                  background: isLocked ? "rgba(251,191,36,0.15)" : "rgba(34,197,94,0.15)",
+                  color: isLocked ? "#fbbf24" : "#4ade80",
+                  border: `1px solid ${isLocked ? "rgba(251,191,36,0.25)" : "rgba(34,197,94,0.25)"}`,
+                }}>
+                  {isLocked
+                    ? "🔒 Locked"
+                    : exam.examDate
+                      ? `📅 ${new Date(exam.examDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+                      : "No date set"}
+                </span>
+                {(exam.sheetsEvaluated || 0) > 0 && (
+                  <span style={{
+                    fontSize: 10, padding: "2px 7px", borderRadius: 4, fontWeight: 600,
+                    background: "rgba(99,102,241,0.15)", color: "#a5b4fc",
+                    border: "1px solid rgba(99,102,241,0.25)",
+                  }}>
+                    ✅ {exam.sheetsEvaluated} evaluated
+                  </span>
+                )}
+              </div>
+              {exam.description && (
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 8, lineHeight: 1.5, display: "-webkit-box", overflow: "hidden", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as any }}>
+                  {exam.description}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                width: 28, height: 28, borderRadius: "50%", flexShrink: 0,
+                background: "rgba(255,255,255,0.08)", border: "none",
+                cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 14,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all 0.15s"
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "rgba(255,255,255,0.15)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "rgba(255,255,255,0.08)")}
+            >✕</button>
+          </div>
+        </div>
+
+        {/* ── Messages ── */}
+        <div ref={scrollRef} style={{
+          flex: 1, overflowY: "auto", padding: "16px 16px 8px",
+          display: "flex", flexDirection: "column", gap: 12,
+          background: "#0d0d1f",
+        }}>
+          {history.length === 0 && !loading && (
+            <div style={{ padding: "12px 0" }}>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", marginBottom: 14, textAlign: "center" }}>
+                Ask anything about this exam
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {QUICK_PROMPTS.map(q => (
+                  <button
+                    key={q}
+                    onClick={() => send(q)}
+                    style={{
+                      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 10, padding: "10px 14px", textAlign: "left",
+                      fontSize: 13, color: "rgba(255,255,255,0.7)", cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 10, transition: "all 0.15s",
+                      fontFamily: "inherit",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(108,71,216,0.12)"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.3)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; }}
+                  >
+                    <span style={{ fontSize: 10, opacity: 0.5 }}>↗</span> {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {history.map((msg, i) => (
+            <div key={i} style={{
+              display: "flex", gap: 10, alignItems: "flex-end",
+              justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+            }}>
+              {msg.role === "assistant" && (
+                <div style={{
+                  width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+                  background: "linear-gradient(135deg,#6c47d8,#3b82f6)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 11, color: "#fff", fontWeight: 700,
+                }}>✦</div>
+              )}
+              <div style={{
+                maxWidth: "82%", padding: "10px 13px", borderRadius: 12,
+                fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap",
+                ...(msg.role === "user" ? {
+                  background: "linear-gradient(135deg,#6c47d8,#4f46e5)",
+                  color: "#fff", borderBottomRightRadius: 4,
+                } : {
+                  background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.88)",
+                  border: "1px solid rgba(255,255,255,0.08)", borderBottomLeftRadius: 4,
+                })
+              }}>{msg.content}</div>
+            </div>
+          ))}
+
+          {loading && (
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+              <div style={{ width: 24, height: 24, borderRadius: 6, background: "linear-gradient(135deg,#6c47d8,#3b82f6)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#fff", fontWeight: 700 }}>✦</div>
+              <div style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "12px 12px 12px 4px", padding: "10px 14px", display: "flex", gap: 5 }}>
+                {[0,1,2].map(i => (
+                  <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: "rgba(255,255,255,0.4)", animation: `hwDot 1.2s ${i * 0.2}s infinite` }} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Input ── */}
+        <div style={{
+          padding: "12px 16px 16px", borderTop: "1px solid rgba(255,255,255,0.07)",
+          background: "#13132a", flexShrink: 0
+        }}>
+          <form
+            onSubmit={e => { e.preventDefault(); send(input); }}
+            style={{ display: "flex", gap: 8, alignItems: "center" }}
+          >
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              placeholder="Ask about this exam…"
+              disabled={loading}
+              style={{
+                flex: 1, background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10,
+                padding: "10px 14px", fontSize: 13, color: "#fff",
+                outline: "none", fontFamily: "inherit", transition: "border-color 0.15s",
+              }}
+              onFocus={e => (e.currentTarget.style.borderColor = "rgba(108,71,216,0.6)")}
+              onBlur={e => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)")}
+            />
+            <button
+              type="submit"
+              disabled={!input.trim() || loading}
+              style={{
+                width: 36, height: 36, borderRadius: 9, flexShrink: 0,
+                background: input.trim() && !loading ? "linear-gradient(135deg,#6c47d8,#4f46e5)" : "rgba(255,255,255,0.08)",
+                border: "none", cursor: input.trim() && !loading ? "pointer" : "default",
+                color: "#fff", fontSize: 16, display: "flex",
+                alignItems: "center", justifyContent: "center", transition: "all 0.15s",
+              }}
+            >↑</button>
+          </form>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 8, textAlign: "center" }}>
+            Powered by AI · answers are based on this exam\'s data only
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── ExamListItem ─────────────────────────────────────────────────────────────
+function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catColor, today, onEdit, onDelete, onChat, onExpand, isExpanded, answerSheets, onUploadComplete }: {
+  exam: any; isLocked: boolean; subjectIcon: string; evaluated: boolean;
+  catLabel: Record<string, string>; catColor: Record<string, string>; today: string;
+  onEdit: () => void; onDelete: () => void; onChat: () => void;
+  onExpand: () => void; isExpanded: boolean;
+  answerSheets?: any[]; onUploadComplete: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const catClr = catColor[exam.category] || "#6c47d8";
+  const examDateLabel = exam.examDate
+    ? new Date(exam.examDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+    : null;
+
+  return (
+    <div style={{
+      borderRadius: 14, border: `1.5px solid ${isLocked ? "rgba(26,26,46,.07)" : "rgba(26,26,46,.1)"}`,
+      marginBottom: 8, background: isLocked ? "#fafaf8" : "#fff",
+      opacity: isLocked ? 0.88 : 1, transition: "box-shadow 0.15s", overflow: "visible",
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", padding: "13px 14px", gap: 12 }}>
+        {/* Subject icon */}
+        <div
+          onClick={onExpand}
+          style={{ width: 40, height: 40, borderRadius: 10, background: isLocked ? "var(--cream)" : "var(--lav-bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0, marginTop: 1, cursor: "pointer" }}
+        >{subjectIcon}</div>
+
+        {/* Main info */}
+        <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={onExpand}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{exam.examName || `${exam.subject} Exam`}</div>
+            {exam.category && (
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: `${catClr}18`, color: catClr, fontWeight: 700 }}>
+                {catLabel[exam.category] || exam.category}
+              </span>
+            )}
+            {isLocked && (
+              <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 4, background: "#fef3c7", color: "#92400e", fontWeight: 700, border: "1px solid #fde68a" }}>
+                🔒 Locked
+              </span>
+            )}
+            <span style={{ fontSize: 11, color: "var(--mid)", opacity: 0.5, marginLeft: 4 }}>{isExpanded ? "▲" : "▼"}</span>
+          </div>
+
+          {/* Exam description preview if present */}
+          {exam.description && (
+            <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical" as any }}>
+              {exam.description}
+            </div>
+          )}
+
+          {/* Badges */}
+          <div style={{ display: "flex", gap: 7, marginTop: 7, alignItems: "center", flexWrap: "wrap" }}>
+            {examDateLabel && (
+              <span style={{
+                display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600,
+                color: isLocked ? "#92400e" : "#166534",
+                background: isLocked ? "#fef3c7" : "#dcfce7",
+                padding: "2px 8px", borderRadius: 6,
+              }}>
+                {isLocked ? "🔒" : "📅"} Exam: {examDateLabel}
+              </span>
+            )}
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600,
+              color: evaluated ? "#166534" : "var(--mid)",
+              background: evaluated ? "#dcfce7" : "var(--cream)",
+              padding: "2px 8px", borderRadius: 6,
+            }}>
+              ✅ {exam.sheetsEvaluated || 0} evaluated
+            </span>
+            <span style={{
+              display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11,
+              color: "var(--mid)", padding: "2px 8px", borderRadius: 6, background: "var(--cream)",
+            }}>
+              📊 {exam.totalMarks} marks
+            </span>
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+          {/* AI Chat icon */}
+          <button
+            onClick={onChat}
+            title="Ask AI about this exam"
+            style={{
+              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+              border: "1.5px solid rgba(108,71,216,0.25)",
+              background: "linear-gradient(135deg,rgba(108,71,216,0.08),rgba(59,130,246,0.08))",
+              cursor: "pointer", fontSize: 15, color: "#6c47d8",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              transition: "all 0.15s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = "rgba(108,71,216,0.18)"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.5)"; }}
+            onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg,rgba(108,71,216,0.08),rgba(59,130,246,0.08))"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.25)"; }}
+          >✦</button>
+
+
+          {/* Three-dot menu */}
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => setMenuOpen(p => !p)}
+              style={{
+                width: 32, height: 32, borderRadius: 8,
+                border: "1.5px solid var(--border)", background: "#fff",
+                cursor: "pointer", fontSize: 17, color: "var(--mid)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all 0.15s"
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "var(--cream)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "#fff")}
+            >⋮</button>
+            {menuOpen && (
+              <div
+                style={{
+                  position: "absolute", right: 0, top: 36, zIndex: 50,
+                  background: "#fff", border: "1.5px solid var(--border)", borderRadius: 12,
+                  boxShadow: "0 6px 24px rgba(0,0,0,.12)", minWidth: 190, overflow: "hidden"
+                }}
+                onMouseLeave={() => setMenuOpen(false)}
+              >
+                {!isLocked ? (
+                  <button
+                    style={{ width: "100%", padding: "11px 16px", textAlign: "left", fontSize: 13, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "var(--cream)")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                    onClick={() => { setMenuOpen(false); onEdit(); }}
+                  ><span>✏️</span> Edit Exam</button>
+                ) : (
+                  <div style={{ padding: "11px 16px", fontSize: 12, color: "var(--mid)", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span>🔒</span>
+                    <div>
+                      <div style={{ fontWeight: 600, color: "var(--mid)" }}>Editing locked</div>
+                      <div style={{ fontSize: 10, marginTop: 1 }}>Exam date has passed</div>
+                    </div>
+                  </div>
+                )}
+                <div style={{ height: 1, background: "var(--border)", margin: "0 12px" }} />
+                {!isLocked ? (
+                  <button
+                    style={{ width: "100%", padding: "11px 16px", textAlign: "left", fontSize: 13, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", color: "#d94f4f", display: "flex", alignItems: "center", gap: 8 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "#fff0f0")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                    onClick={() => { setMenuOpen(false); onDelete(); }}
+                  ><span>🗑️</span> Delete Exam</button>
+                ) : (
+                  <div style={{ padding: "11px 16px", fontSize: 12, color: "var(--mid)", display: "flex", alignItems: "center", gap: 8 }}>
+                    <span>🔒</span>
+                    <div>
+                      <div style={{ fontWeight: 600, color: "var(--mid)" }}>Deletion locked</div>
+                      <div style={{ fontSize: 10, marginTop: 1 }}>Exam date has passed</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded body */}
+      {isExpanded && (
+        <div style={{ padding: "0 14px 18px", borderTop: "1px solid var(--rule)" }}>
+          {exam.description && (
+            <div style={{ marginTop: 14, marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Description</div>
+              <div style={{ fontSize: 13, color: "var(--ink)", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, padding: "10px 14px", lineHeight: 1.6 }}>
+                {exam.description}
+              </div>
+            </div>
+          )}
+          {exam.modelAnswerText && (
+            <div style={{ marginTop: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Model Answer</div>
+              <div style={{ fontSize: 13, color: "var(--ink)", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, padding: "10px 14px", whiteSpace: "pre-wrap", lineHeight: 1.7, maxHeight: 140, overflowY: "auto" }}>
+                {exam.modelAnswerText}
+              </div>
+            </div>
+          )}
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, marginTop: 14 }}>Upload Answer Sheets</div>
+          <BulkUploadZone examId={exam.id} onUploadComplete={onUploadComplete} />
+          {answerSheets && answerSheets.filter((s: any) => s.status === "evaluated").length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Evaluated Results</div>
+              {answerSheets.filter((s: any) => s.status === "evaluated").map((sheet: any) => (
+                <div key={sheet.id} className="sf-exam-item" style={{ cursor: "default" }}>
+                  <div className="sf-exam-subj" style={{ background: "var(--green-bg)", fontSize: 12 }}>{getInitials(sheet.studentName || sheet.admissionNumber)}</div>
+                  <div className="sf-exam-info">
+                    <div className="sf-exam-name">{sheet.studentName || sheet.admissionNumber}</div>
+                    <div className="sf-exam-meta">{sheet.admissionNumber}</div>
+                  </div>
+                  <span className="sf-exam-status sf-es-done">{sheet.evaluation?.totalMarks ?? sheet.totalMarks ?? "?"}/{exam.totalMarks}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function TeacherDashboard() {
   const { data, isLoading } = useTeacherDashboard();
   const { user, logout } = useAuth();
@@ -1613,10 +2065,13 @@ export default function TeacherDashboard() {
   const [isHwEvalOpen, setIsHwEvalOpen] = useState(false);
   const [hwChatHw, setHwChatHw] = useState<any | null>(null); // AI chat target homework
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
+  const [examAiTarget, setExamAiTarget] = useState<any | null>(null);
   const [viewMode, setViewMode] = useState<"subject" | "class">("subject");
   // Exam create form enhancements
   const [examSection, setExamSection] = useState("");
   const [examSubjectCode, setExamSubjectCode] = useState("");
+  const [examDescription, setExamDescription] = useState("");
+  const [examDate, setExamDate] = useState("");
   const [useNcert, setUseNcert] = useState(false);
   const [questionImages, setQuestionImages] = useState<string[]>([]);
   const [modelAnswerImages, setModelAnswerImages] = useState<string[]>([]);
@@ -1852,12 +2307,15 @@ export default function TeacherDashboard() {
         section: examSection || null,
         subjectCode: examSubjectCode || null,
         useNcert: useNcert ? 1 : 0,
+        description: examDescription || null,
+        examDate: examDate || null,
       });
       queryClient.invalidateQueries({ queryKey: [api.exams.list.path] });
       toast({ title: "Exam created" });
       setIsDialogOpen(false);
       form.reset();
       setExamSection(""); setExamSubjectCode(""); setUseNcert(false);
+      setExamDescription(""); setExamDate("");
       setQuestionImages([]); setModelAnswerImages([]);
     } catch { toast({ title: "Error", description: "Failed to create exam", variant: "destructive" }); }
   };
@@ -1969,14 +2427,14 @@ export default function TeacherDashboard() {
             </svg>
             Early Warning
           </button>
-          <button className="sf-nav-tab" onClick={() => setIsDialogOpen(true)}>
+          <button className={`sf-nav-tab${activeSection === "exams" ? " on" : ""}`} onClick={() => setActiveSection("exams")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="3" y="4" width="18" height="18" rx="2"/>
               <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
               <line x1="3" y1="10" x2="21" y2="10"/>
+              <line x1="8" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="13" y2="18"/>
             </svg>
-            Create Exam
-            <span className="sf-nav-badge sf-nb-new">New</span>
+            Exams
           </button>
           <button className={`sf-nav-tab${activeSection === "sheets" ? " on" : ""}`} onClick={() => setActiveSection("sheets")}>
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2946,95 +3404,164 @@ export default function TeacherDashboard() {
           );
         })()}
 
-        {/* ── EXAMS TAB — Repository View ── */}
-        {activeSection === "exams" && (
-          <div className="sf-panel">
-            <div className="sf-panel-title">Exam Repository</div>
-            <div className="sf-panel-sub">All your exams — expand any card to view the model answer and upload student scripts</div>
-            {isLoadingExams ? (
-              <div style={{ textAlign: "center", padding: "32px" }}><div className="sf-spinner" /></div>
-            ) : examsList && examsList.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {examsList.map((exam: any) => {
-                  const isExpanded = expandedExamId === exam.id;
-                  const isThisExam = selectedExamId === String(exam.id);
-                  const subjectIcon = exam.subject?.toLowerCase().includes("math") ? "📐" : exam.subject?.toLowerCase().includes("sci") ? "🔬" : exam.subject?.toLowerCase().includes("eng") ? "📖" : exam.subject?.toLowerCase().includes("phys") ? "⚛️" : exam.subject?.toLowerCase().includes("chem") ? "⚗️" : exam.subject?.toLowerCase().includes("bio") ? "🧬" : "📝";
-                  const evaluated = (exam.sheetsEvaluated || 0) > 0;
-                  return (
-                    <div key={exam.id} style={{ border: "1.5px solid var(--rule)", borderRadius: 16, overflow: "hidden", background: isExpanded ? "var(--pane)" : "var(--card)" }}>
-                      {/* Card header — always visible */}
-                      <div
-                        style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", cursor: "pointer" }}
-                        onClick={() => {
-                          const next = isExpanded ? null : exam.id;
-                          setExpandedExamId(next);
-                          if (next) setSelectedExamId(String(exam.id));
-                        }}
-                        data-testid={`exam-card-${exam.id}`}
-                      >
-                        <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", flexShrink: 0 }}>{subjectIcon}</div>
-                        <div className="sf-exam-info" style={{ flex: 1 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <span className="sf-exam-name">{exam.examName || `${exam.subject} Exam`}</span>
-                            {exam.category && (() => {
-                              const clr: Record<string, string> = { unit_test: "#6c47d8", class_test: "#2563c0", homework: "#1a7a54", half_yearly: "#92400e", annual: "#b91c1c", quiz: "#1e40af", assignment: "#7e22ce" };
-                              const lbl: Record<string, string> = { unit_test: "Unit Test", class_test: "Class Test", homework: "Homework", half_yearly: "Half Yearly", annual: "Annual Exam", quiz: "Quiz", assignment: "Assignment" };
-                              return <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 10, background: `${clr[exam.category] || "#6c47d8"}18`, color: clr[exam.category] || "#6c47d8", fontWeight: 700 }}>{lbl[exam.category] || exam.category}</span>;
-                            })()}
-                          </div>
-                          <div className="sf-exam-meta">
-                            Class {exam.className} · {exam.totalMarks} marks · {new Date(exam.createdAt || Date.now()).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {exam.sheetsEvaluated || 0} evaluated
-                          </div>
-                        </div>
-                        <span className={`sf-exam-status ${evaluated ? "sf-es-done" : "sf-es-draft"}`}>{evaluated ? "Evaluated" : "Pending"}</span>
-                        <span style={{ fontSize: 16, color: "var(--mid)", marginLeft: 4 }}>{isExpanded ? "▲" : "▼"}</span>
+        {/* ── EXAMS TAB — Grouped List View ── */}
+        {activeSection === "exams" && (() => {
+          const today = new Date().toISOString().split("T")[0];
+
+          // Sort exams descending by createdAt
+          const sortedExams = [...(examsList || [])].sort((a: any, b: any) =>
+            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
+
+          // Group by class+section
+          const grouped = new Map<string, any[]>();
+          for (const exam of sortedExams) {
+            const key = `Class ${exam.className}${exam.section ? ` · Sec ${exam.section}` : ""}`;
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key)!.push(exam);
+          }
+
+          // Sort groups numerically
+          const sortedKeys = [...grouped.keys()].sort((a, b) => {
+            const numA = parseInt(a.replace(/\D/g, "")) || 0;
+            const numB = parseInt(b.replace(/\D/g, "")) || 0;
+            return numA !== numB ? numA - numB : a.localeCompare(b);
+          });
+
+          // Stats
+          const totalExamsAll = sortedExams.length;
+          const upcomingExams = sortedExams.filter((e: any) => e.examDate && e.examDate > today);
+          const pastExams = sortedExams.filter((e: any) => e.examDate && e.examDate <= today);
+          const evaluatedExams = sortedExams.filter((e: any) => (e.sheetsEvaluated || 0) > 0);
+          const totalSheets = sortedExams.reduce((s: number, e: any) => s + (e.sheetsEvaluated || 0), 0);
+
+          const examStatsCards = [
+            {
+              icon: "📋",
+              label: "Total Exams",
+              value: totalExamsAll,
+              sub: "created so far",
+              accent: "#4f46e5",
+              bg: "#f0edff",
+              border: "#c7b8f5",
+            },
+            {
+              icon: "📅",
+              label: "Upcoming",
+              value: upcomingExams.length,
+              sub: "exam date in future",
+              accent: "#166534",
+              bg: "#f0fdf4",
+              border: "#bbf7d0",
+            },
+            {
+              icon: "🔒",
+              label: "Past / Locked",
+              value: pastExams.length,
+              sub: "date passed, no edits",
+              accent: "#92400e",
+              bg: "#fffbeb",
+              border: "#fde68a",
+            },
+            {
+              icon: "✅",
+              label: "Sheets Evaluated",
+              value: totalSheets,
+              sub: evaluatedExams.length > 0 ? `across ${evaluatedExams.length} exam${evaluatedExams.length !== 1 ? "s" : ""}` : "no evaluations yet",
+              accent: totalSheets > 0 ? "#166534" : "var(--mid)",
+              bg: totalSheets > 0 ? "#f0fdf4" : "var(--cream)",
+              border: totalSheets > 0 ? "#bbf7d0" : "var(--border)",
+            },
+          ];
+
+          return (
+            <div>
+              {/* ── STATS ── */}
+              {sortedExams.length > 0 && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 16 }}>
+                  {examStatsCards.map(s => (
+                    <div key={s.label} style={{ borderRadius: 14, padding: "14px 16px", background: s.bg, border: `1.5px solid ${s.border}`, display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                        <span style={{ fontSize: 16 }}>{s.icon}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: s.accent, textTransform: "uppercase", letterSpacing: "0.06em" }}>{s.label}</span>
                       </div>
-
-                      {/* Expanded body */}
-                      {isExpanded && (
-                        <div style={{ padding: "0 18px 20px", borderTop: "1px solid var(--rule)" }}>
-                          {/* Model Answer */}
-                          <div style={{ marginTop: 16, marginBottom: 16 }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Model Answer</div>
-                            <div style={{ fontSize: 13, color: "var(--ink)", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, padding: "12px 14px", whiteSpace: "pre-wrap", lineHeight: 1.7, maxHeight: 160, overflowY: "auto" }}>
-                              {exam.modelAnswerText || "No model answer provided."}
-                            </div>
-                          </div>
-
-                          {/* Bulk Upload Zone */}
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, marginTop: 16 }}>Upload Answer Sheets</div>
-                          <BulkUploadZone
-                            examId={exam.id}
-                            onUploadComplete={() => { refetchSheets(); refetchMergedScripts(); queryClient.invalidateQueries({ queryKey: ["/api/analytics"] }); }}
-                          />
-
-                          {/* Evaluated sheets (from single upload) */}
-                          {isThisExam && answerSheets && answerSheets.filter((s: any) => s.status === "evaluated").length > 0 && (
-                            <div style={{ marginTop: 16 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Evaluated Results</div>
-                              {answerSheets.filter((s: any) => s.status === "evaluated").map((sheet: any) => (
-                                <div key={sheet.id} className="sf-exam-item" style={{ cursor: "default" }}>
-                                  <div className="sf-exam-subj" style={{ background: "var(--green-bg)", fontSize: 12 }}>{getInitials(sheet.studentName || sheet.admissionNumber)}</div>
-                                  <div className="sf-exam-info">
-                                    <div className="sf-exam-name">{sheet.studentName || sheet.admissionNumber}</div>
-                                    <div className="sf-exam-meta">{sheet.admissionNumber}</div>
-                                  </div>
-                                  <span className="sf-exam-status sf-es-done">{sheet.evaluation?.totalMarks ?? sheet.totalMarks ?? "?"}/{exam.totalMarks}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      <div style={{ fontSize: 28, fontWeight: 800, color: s.accent, lineHeight: 1, fontFamily: "'Fraunces', serif" }}>{s.value}</div>
+                      <div style={{ fontSize: 11, color: s.accent, opacity: 0.7, fontWeight: 500 }}>{s.sub}</div>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+              )}
+
+              {/* ── HEADER ── */}
+              <div className="sf-panel" style={{ marginBottom: 0 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <div className="sf-panel-title">All Exams</div>
+                  <div className="sf-panel-sub">Grouped by class · sorted latest first · exams on/past exam date are locked</div>
+                </div>
+
+                {isLoadingExams ? (
+                  <div style={{ padding: "32px 0", textAlign: "center" }}><div className="sf-spinner" /></div>
+                ) : sortedExams.length === 0 ? (
+                  <div className="sf-empty" style={{ padding: "40px 0" }}>
+                    <div className="sf-empty-icon">📋</div>
+                    <div style={{ fontWeight: 600, color: "var(--ink2)", marginBottom: 4 }}>No exams created yet</div>
+                    <div style={{ fontSize: 12, color: "var(--mid)" }}>Click "Create Exam" to get started</div>
+                  </div>
+                ) : (
+                  sortedKeys.map(groupKey => {
+                    const items = grouped.get(groupKey)!;
+                    const upcomingInGroup = items.filter((e: any) => e.examDate && e.examDate > today).length;
+                    return (
+                      <HwClassGroup
+                        key={groupKey}
+                        label={groupKey}
+                        count={items.length}
+                        activeCount={upcomingInGroup}
+                      >
+                        {items.map((exam: any) => {
+                          // An exam is "locked" if examDate is today or in the past
+                          const isLocked = exam.examDate && exam.examDate <= today;
+                          const subjectIcon = exam.subject?.toLowerCase().includes("math") ? "📐" : exam.subject?.toLowerCase().includes("sci") ? "🔬" : exam.subject?.toLowerCase().includes("eng") ? "📖" : exam.subject?.toLowerCase().includes("phys") ? "⚛️" : exam.subject?.toLowerCase().includes("chem") ? "⚗️" : exam.subject?.toLowerCase().includes("bio") ? "🧬" : "📝";
+                          const evaluated = (exam.sheetsEvaluated || 0) > 0;
+                          const catLabel: Record<string, string> = { unit_test: "Unit Test", class_test: "Class Test", homework: "Homework", half_yearly: "Half Yearly", annual: "Annual Exam", quiz: "Quiz", assignment: "Assignment", mid_term: "Mid Term", end_sem: "End Sem" };
+                          const catColor: Record<string, string> = { unit_test: "#6c47d8", class_test: "#2563c0", mid_term: "#92400e", end_sem: "#b91c1c", class_test: "#2563c0" };
+
+                          return (
+                            <ExamListItem
+                              key={exam.id}
+                              exam={exam}
+                              isLocked={!!isLocked}
+                              subjectIcon={subjectIcon}
+                              evaluated={evaluated}
+                              catLabel={catLabel}
+                              catColor={catColor}
+                              today={today}
+                              onEdit={() => { /* edit exam — future enhancement */ toast({ title: "Edit exam", description: "Exam editing coming soon." }); }}
+                              onDelete={() => {
+                                if (confirm("Delete this exam? All answer sheets and evaluations will also be removed.")) {
+                                  fetchWithAuth(`/api/exams/${exam.id}`, { method: "DELETE" })
+                                    .then(r => {
+                                      if (r.ok) { toast({ title: "Exam deleted." }); queryClient.invalidateQueries({ queryKey: [api.exams.list.path] }); }
+                                      else toast({ title: "Error", description: "Could not delete exam.", variant: "destructive" });
+                                    });
+                                }
+                              }}
+                              onChat={() => setExamAiTarget(exam)}
+                              onExpand={() => { setExpandedExamId(exam.id === expandedExamId ? null : exam.id); setSelectedExamId(String(exam.id)); }}
+                              isExpanded={expandedExamId === exam.id}
+                              answerSheets={selectedExamId === String(exam.id) ? answerSheets : undefined}
+                              onUploadComplete={() => { refetchSheets(); refetchMergedScripts(); queryClient.invalidateQueries({ queryKey: ["/api/analytics"] }); }}
+                            />
+                          );
+                        })}
+                      </HwClassGroup>
+                    );
+                  })
+                )}
               </div>
-            ) : (
-              <div className="sf-empty"><div className="sf-empty-icon">📝</div>No exams yet. Create your first exam using the button above.</div>
-            )}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {/* ── SHEETS TAB (standalone upload view) ── */}
         {activeSection === "sheets" && (
@@ -3432,10 +3959,13 @@ export default function TeacherDashboard() {
         <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
 
+      {/* ── EXAM AI CHAT ── */}
+      {examAiTarget && <ExamAiChat exam={examAiTarget} onClose={() => setExamAiTarget(null)} />}
+
       {/* ── CREATE EXAM DIALOG ── */}
       <Dialog open={isDialogOpen} onOpenChange={(open) => {
         setIsDialogOpen(open);
-        if (!open) { setQuestionImages([]); setModelAnswerImages([]); setExamSection(""); setExamSubjectCode(""); setUseNcert(false); }
+        if (!open) { setQuestionImages([]); setModelAnswerImages([]); setExamSection(""); setExamSubjectCode(""); setUseNcert(false); setExamDescription(""); setExamDate(""); }
       }}>
         <DialogContent className="sm:max-w-[600px] rounded-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Create New Exam</DialogTitle></DialogHeader>
@@ -3557,10 +4087,44 @@ export default function TeacherDashboard() {
                 );
               })()}
 
-              {/* Subject Code — auto-filled, editable */}
+              {/* Subject Code — auto-filled, read-only */}
               <div>
-                <label className="text-sm font-medium">Subject Code <span className="text-muted-foreground font-normal text-xs">(auto-filled)</span></label>
-                <Input placeholder="e.g. MATH9A" value={examSubjectCode} onChange={e => setExamSubjectCode(e.target.value)} className="rounded-xl mt-1" />
+                <label className="text-sm font-medium">Subject Code <span className="text-muted-foreground font-normal text-xs">(auto-filled · read-only)</span></label>
+                <Input placeholder="e.g. MATH9A" value={examSubjectCode} readOnly tabIndex={-1} className="rounded-xl mt-1 bg-muted/40 cursor-not-allowed select-none text-muted-foreground border-dashed" />
+              </div>
+
+              {/* Exam Date — required */}
+              <div>
+                <label className="text-sm font-medium block mb-1">
+                  Exam Date <span style={{ color: "#dc2626" }}>*</span>
+                </label>
+                <Input
+                  type="date"
+                  value={examDate}
+                  onChange={e => setExamDate(e.target.value)}
+                  className="rounded-xl"
+                  data-testid="input-exam-date"
+                />
+                {!examDate && (
+                  <p className="text-xs text-muted-foreground mt-1">Required — select the date when this exam will be held.</p>
+                )}
+              </div>
+
+              {/* Exam Description — required */}
+              <div>
+                <label className="text-sm font-medium block mb-1">
+                  Exam Description <span style={{ color: "#dc2626" }}>*</span>
+                </label>
+                <Textarea
+                  placeholder="Describe the exam scope, chapters covered, important instructions for students…"
+                  className="rounded-xl min-h-[80px] text-sm"
+                  value={examDescription}
+                  onChange={e => setExamDescription(e.target.value)}
+                  data-testid="input-exam-description"
+                />
+                {!examDescription.trim() && (
+                  <p className="text-xs text-muted-foreground mt-1">Required — provide a brief description of the exam.</p>
+                )}
               </div>
               {/* Category + Total Marks */}
               <div className="grid grid-cols-2 gap-4">
@@ -3584,9 +4148,9 @@ export default function TeacherDashboard() {
                 <p className="text-sm font-mono font-semibold text-primary">{generatedExamName}</p>
               </div>
 
-              {/* Questions — text OR images */}
+              {/* Questions — text OR images, required */}
               <div>
-                <label className="text-sm font-medium block mb-1">Questions</label>
+                <label className="text-sm font-medium block mb-1">Questions <span style={{ color: "#dc2626" }}>*</span></label>
                 <FormField control={form.control} name="questionText" render={({ field }) => (
                   <FormItem>
                     <FormControl><Textarea placeholder={"Q1 (10 marks): Explain photosynthesis.\nQ2 (10 marks): State Newton's First Law."} className="rounded-xl min-h-[80px] text-sm" data-testid="input-question-text" {...field} /></FormControl>
@@ -3649,7 +4213,18 @@ export default function TeacherDashboard() {
                 </div>
               </div>
 
-              <Button type="submit" className="w-full rounded-xl" disabled={form.formState.isSubmitting}>
+              {(!examDescription.trim() || !examDate || (!form.watch("questionText")?.trim() && questionImages.length === 0)) && (
+                <div style={{ padding: "10px 14px", borderRadius: 10, background: "#fef2f2", border: "1.5px solid #fca5a5", fontSize: 12, color: "#dc2626", display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <span style={{ fontSize: 15, flexShrink: 0 }}>⚠️</span>
+                  <div>
+                    <div style={{ fontWeight: 700, marginBottom: 2 }}>Required fields missing:</div>
+                    {!examDate && <div>• Exam Date</div>}
+                    {!examDescription.trim() && <div>• Exam Description</div>}
+                    {!form.watch("questionText")?.trim() && questionImages.length === 0 && <div>• Questions (text or images)</div>}
+                  </div>
+                </div>
+              )}
+              <Button type="submit" className="w-full rounded-xl" disabled={form.formState.isSubmitting || !examDescription.trim() || !examDate || (!form.watch("questionText")?.trim() && questionImages.length === 0)}>
                 {form.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Exam"}
               </Button>
             </form>
