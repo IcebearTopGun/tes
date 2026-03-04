@@ -23,6 +23,9 @@ export function AppRouter() {
       <Route path="/student-dashboard">
         {() => <ProtectedRoute component={StudentDashboard} allowedRole="student" />}
       </Route>
+      <Route path="/student-dashboard/ai-insights">
+        {() => <ProtectedRoute component={StudentDashboard} allowedRole="student" />}
+      </Route>
       <Route path="/student-dashboard/homework">
         {() => <ProtectedRoute component={StudentHomeworkPage} allowedRole="student" />}
       </Route>

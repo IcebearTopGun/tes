@@ -95,6 +95,10 @@ const EXCEL_SCHEMAS: Record<string, { col: string; required: boolean; type?: "nu
     { col: "class",       required: true, type: "number" },
     { col: "section",     required: true, type: "letter" },
     { col: "subjects",    required: true  },
+    { col: "isClassTeacher", required: false },
+    { col: "classTeacherOf", required: false },
+    { col: "classTeacherClass", required: false },
+    { col: "classTeacherSection", required: false },
   ],
 };
 
@@ -381,7 +385,23 @@ export default function AdminDashboard() {
   const addClassSectionMut = useMutation({ mutationFn: (data: any) => fetchWithAuth("/api/admin/class-sections", { method: "POST", body: JSON.stringify(data) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setShowAddClassSection(false); setEditingClassSection(null); } });
   const updateClassSectionMut = useMutation({ mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/class-sections/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setEditingClassSection(null); setShowAddClassSection(false); setClassSectionForm({ className: "", section: "", subjects: [] }); } });
   const deleteClassSectionMut = useMutation({ mutationFn: ({ id, password, deleteSubject }: any) => fetchWithAuth(`/api/admin/class-sections/${id}`, { method: "DELETE", body: JSON.stringify({ password, deleteSubject }) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setDeleteConfirm(null); setDeletePassword(""); }, onError: () => { setDeleteError("Incorrect password or operation failed"); } });
-  const bulkUploadClassSectionsMut = useMutation({ mutationFn: (records: any[]) => fetchWithAuth("/api/admin/class-sections/bulk-upload", { method: "POST", body: JSON.stringify({ records }) }).then(r => r.json()), onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setBulkUploadResult(data); setBulkUploadErrors([]); } });
+  const bulkUploadClassSectionsMut = useMutation({
+    mutationFn: async (records: any[]) => {
+      const r = await fetchWithAuth("/api/admin/class-sections/bulk-upload", { method: "POST", body: JSON.stringify({ records }) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json?.message || "Bulk upload failed");
+      return json;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] });
+      setBulkUploadResult(data);
+      setBulkUploadErrors(data?.errors || []);
+    },
+    onError: (err: any) => {
+      setBulkUploadResult(null);
+      setBulkUploadErrors([err?.message || "Bulk upload failed"]);
+    }
+  });
   const addMgdStudentMut = useMutation({
     mutationFn: async (data: any) => {
       const r = await fetchWithAuth("/api/admin/managed-students", { method: "POST", body: JSON.stringify(data) });
@@ -401,7 +421,24 @@ export default function AdminDashboard() {
   });
   const updateMgdStudentMut = useMutation({ mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/managed-students/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setEditingMgdStudent(null); setShowAddMgdStudent(false); } });
   const deleteMgdStudentMut = useMutation({ mutationFn: ({ id, password }: any) => fetchWithAuth(`/api/admin/managed-students/${id}`, { method: "DELETE", body: JSON.stringify({ password }) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setDeleteConfirm(null); setDeletePassword(""); }, onError: () => { setDeleteError("Incorrect password or operation failed"); } });
-  const bulkUploadMgdStudentsMut = useMutation({ mutationFn: (records: any[]) => fetchWithAuth("/api/admin/managed-students/bulk-upload", { method: "POST", body: JSON.stringify({ records }) }).then(r => r.json()), onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setBulkUploadResult(data); setBulkUploadErrors([]); } });
+  const bulkUploadMgdStudentsMut = useMutation({
+    mutationFn: async (records: any[]) => {
+      const r = await fetchWithAuth("/api/admin/managed-students/bulk-upload", { method: "POST", body: JSON.stringify({ records }) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json?.message || "Bulk upload failed");
+      return json;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] });
+      setBulkUploadResult(data);
+      setBulkUploadErrors(data?.errors || []);
+    },
+    onError: (err: any) => {
+      setBulkUploadResult(null);
+      setBulkUploadErrors([err?.message || "Bulk upload failed"]);
+    }
+  });
   const addMgdTeacherMut = useMutation({
     mutationFn: async (data: any) => {
       const r = await fetchWithAuth("/api/admin/managed-teachers", { method: "POST", body: JSON.stringify(data) });
@@ -421,7 +458,24 @@ export default function AdminDashboard() {
   });
   const updateMgdTeacherMut = useMutation({ mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/managed-teachers/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setEditingMgdTeacher(null); setShowAddMgdTeacher(false); } });
   const deleteMgdTeacherMut = useMutation({ mutationFn: ({ id, password, deleteSubjectOnly, className, section, subject }: any) => fetchWithAuth(`/api/admin/managed-teachers/${id}`, { method: "DELETE", body: JSON.stringify({ password, deleteSubjectOnly, className, section, subject }) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setDeleteConfirm(null); setDeletePassword(""); }, onError: () => { setDeleteError("Incorrect password or operation failed"); } });
-  const bulkUploadMgdTeachersMut = useMutation({ mutationFn: (records: any[]) => fetchWithAuth("/api/admin/managed-teachers/bulk-upload", { method: "POST", body: JSON.stringify({ records }) }).then(r => r.json()), onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setBulkUploadResult(data); setBulkUploadErrors([]); } });
+  const bulkUploadMgdTeachersMut = useMutation({
+    mutationFn: async (records: any[]) => {
+      const r = await fetchWithAuth("/api/admin/managed-teachers/bulk-upload", { method: "POST", body: JSON.stringify({ records }) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json?.message || "Bulk upload failed");
+      return json;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] });
+      setBulkUploadResult(data);
+      setBulkUploadErrors(data?.errors || []);
+    },
+    onError: (err: any) => {
+      setBulkUploadResult(null);
+      setBulkUploadErrors([err?.message || "Bulk upload failed"]);
+    }
+  });
 
   // ── Delete handler ──
   const handleDeleteConfirm = () => {
@@ -524,7 +578,7 @@ export default function AdminDashboard() {
     const defs: Record<string, { header: string[]; row: string[] }> = {
       classSection: { header: ["class", "section", "subjects"], row: ["5", "A", "English,Maths,Science"] },
       mgdStudent: { header: ["studentName", "phoneNumber", "email", "admissionNumber", "class", "section"], row: ["Rahul Sharma", "9876543210", "rahul@school.edu", "2024001", "5", "A"] },
-      mgdTeacher: { header: ["teacherName", "employeeId", "email", "phoneNumber", "class", "section", "subjects", "isClassTeacher"], row: ["Ramesh Singh", "T100", "ramesh@school.edu", "9876543210", "5", "A", "English,Maths", "false"] },
+      mgdTeacher: { header: ["teacherName", "employeeId", "email", "phoneNumber", "class", "section", "subjects", "isClassTeacher", "classTeacherOf", "classTeacherClass", "classTeacherSection"], row: ["Ramesh Singh", "T100", "ramesh@school.edu", "9876543210", "5", "A", "English,Maths", "true", "5-A", "5", "A"] },
     };
     const def = defs[type];
     if (!def) return;

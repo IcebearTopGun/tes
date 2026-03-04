@@ -46,7 +46,7 @@ export default function StudentDashboard() {
   const { data, isLoading } = useStudentDashboard();
   const { user } = useAuth();
   const [location] = useLocation();
-  const activeSection = new URLSearchParams(location.split("?")[1] || "").get("tab") === "ai-insights" ? "ai-insights" : "overview";
+  const activeSection = location.startsWith("/student-dashboard/ai-insights") ? "ai-insights" : "overview";
 
   const [revisionChapter, setRevisionChapter] = useState<{ chapter: string; subject: string } | null>(null);
   const [expandedQuestion, setExpandedQuestion] = useState<number | null>(null);

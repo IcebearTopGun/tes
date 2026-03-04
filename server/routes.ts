@@ -363,8 +363,9 @@ function normalizeSection(value: unknown): string {
   return String(value ?? "").trim().toUpperCase();
 }
 
-function validateStudentPayload(payload: any, opts: { partial?: boolean } = {}) {
+export function validateStudentPayload(payload: any, opts: { partial?: boolean; requireContact?: boolean } = {}) {
   const partial = !!opts.partial;
+  const requireContact = opts.requireContact !== false;
   const errs: string[] = [];
   const name = String(payload?.name ?? payload?.studentName ?? "").trim();
   const admissionNumber = String(payload?.admissionNumber ?? "").trim();
@@ -380,11 +381,12 @@ function validateStudentPayload(payload: any, opts: { partial?: boolean } = {}) 
     if (!ADMISSION_RE.test(admissionNumber)) errs.push("Admission number must be 2-32 characters and alphanumeric");
   }
   if (!partial || "phone" in payload || "phoneNumber" in payload) {
-    if (!PHONE_RE.test(phone)) errs.push("Phone number must be 10-15 digits");
+    if (requireContact && !phone) errs.push("Phone number is required");
+    else if (phone && !PHONE_RE.test(phone)) errs.push("Phone number must be 10-15 digits");
   }
   if (!partial || "email" in payload) {
-    if (!email) errs.push("Email is required");
-    else if (!EMAIL_RE.test(email)) errs.push("Email format is invalid");
+    if (requireContact && !email) errs.push("Email is required");
+    else if (email && !EMAIL_RE.test(email)) errs.push("Email format is invalid");
   }
   if (!partial || "studentClass" in payload || "class" in payload) {
     if (!CLASS_RE.test(studentClass)) errs.push("Class must be numeric");
@@ -394,6 +396,10 @@ function validateStudentPayload(payload: any, opts: { partial?: boolean } = {}) 
   }
 
   return { errs, normalized: { name, admissionNumber, phone, email, studentClass, section } };
+}
+
+export function isStudentBulkDuplicate(admissionNumber: string, admissionSet: Set<string>): boolean {
+  return admissionSet.has(admissionNumber);
 }
 
 function normalizeAssignments(input: any): Array<{ class: string; section: string; subjects: string[] }> {
@@ -409,16 +415,19 @@ function normalizeAssignments(input: any): Array<{ class: string; section: strin
     .filter((a) => CLASS_RE.test(a.class) && SECTION_RE.test(a.section) && a.subjects.length > 0);
 }
 
-function validateTeacherPayload(payload: any, opts: { partial?: boolean } = {}) {
+export function validateTeacherPayload(payload: any, opts: { partial?: boolean; requireContact?: boolean } = {}) {
   const partial = !!opts.partial;
+  const requireContact = opts.requireContact !== false;
   const errs: string[] = [];
   const teacherName = String(payload?.teacherName ?? payload?.name ?? "").trim();
   const employeeId = String(payload?.employeeId ?? "").trim();
   const phone = String(payload?.phone ?? payload?.phoneNumber ?? "").trim();
   const email = String(payload?.email ?? "").trim();
   const assignments = normalizeAssignments(payload?.assignments ?? []);
-  const isClassTeacher = payload?.isClassTeacher === true || payload?.isClassTeacher === 1 || payload?.isClassTeacher === "true";
-  const classTeacherOf = payload?.classTeacherOf ? String(payload.classTeacherOf).trim() : "";
+  const isClassTeacher = payload?.isClassTeacher === true || payload?.isClassTeacher === 1 || payload?.isClassTeacher === "true" || payload?.isClassTeacher === "1";
+  const classTeacherOf = payload?.classTeacherOf
+    ? String(payload.classTeacherOf).trim()
+    : (payload?.class && payload?.section ? `${normalizeClass(payload.class)}-${normalizeSection(payload.section)}` : "");
 
   if (!partial || "teacherName" in payload || "name" in payload) {
     if (!teacherName || teacherName.length < 2) errs.push("Valid teacher name is required");
@@ -427,10 +436,12 @@ function validateTeacherPayload(payload: any, opts: { partial?: boolean } = {}) 
     if (!EMPLOYEE_RE.test(employeeId)) errs.push("Employee ID must be 2-32 characters and alphanumeric");
   }
   if (!partial || "phoneNumber" in payload || "phone" in payload) {
-    if (!PHONE_RE.test(phone)) errs.push("Phone number must be 10-15 digits");
+    if (requireContact && !phone) errs.push("Phone number is required");
+    else if (phone && !PHONE_RE.test(phone)) errs.push("Phone number must be 10-15 digits");
   }
   if (!partial || "email" in payload) {
-    if (!EMAIL_RE.test(email)) errs.push("Valid email is required");
+    if (requireContact && !email) errs.push("Email is required");
+    else if (email && !EMAIL_RE.test(email)) errs.push("Valid email is required");
   }
   if (!partial || "assignments" in payload) {
     if (!assignments.length) errs.push("At least one class-section-subject assignment is required");
@@ -440,6 +451,10 @@ function validateTeacherPayload(payload: any, opts: { partial?: boolean } = {}) 
   }
 
   return { errs, normalized: { teacherName, employeeId, phone, email, assignments, isClassTeacher, classTeacherOf } };
+}
+
+export function isTeacherBulkDuplicate(employeeId: string, employeeSet: Set<string>): boolean {
+  return employeeSet.has(employeeId);
 }
 
 function deriveTeacherLists(assignments: Array<{ class: string; section: string; subjects: string[] }>) {
@@ -3757,9 +3772,9 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       if (!Array.isArray(records)) return res.status(400).json({ message: "Records array required" });
       const allStudents = await storage.getAllStudents();
       const byAdmission = new Set(allStudents.map((s) => s.admissionNumber));
-      const byEmail = new Set(allStudents.map((s: any) => (s.email || "").toLowerCase()).filter(Boolean));
       let created = 0;
       const duplicates: string[] = [];
+      const errors: string[] = [];
       for (const r of records) {
         const candidate = {
           studentName: r.studentName || r.name || "",
@@ -3769,10 +3784,17 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
           class: String(r.class || r.studentClass || "").trim(),
           section: String(r.section || "").trim().toUpperCase(),
         };
-        const { errs, normalized } = validateStudentPayload(candidate, { partial: false });
-        if (errs.length) { duplicates.push(normalized.admissionNumber || candidate.admissionNumber || "invalid-row"); continue; }
-        const cls = await storage.getClassSectionByClassAndSection(parseInt(normalized.studentClass, 10), normalized.section);
-        if (!cls || byAdmission.has(normalized.admissionNumber) || (normalized.email && byEmail.has(normalized.email.toLowerCase()))) {
+        const { errs, normalized } = validateStudentPayload(candidate, { partial: false, requireContact: false });
+        if (errs.length) { errors.push(`${normalized.admissionNumber || candidate.admissionNumber || "row"}: ${errs[0]}`); continue; }
+        const existingClassSection = await storage.getClassSectionByClassAndSection(parseInt(normalized.studentClass, 10), normalized.section);
+        if (!existingClassSection) {
+          await storage.createClassSection({
+            className: parseInt(normalized.studentClass, 10),
+            section: normalized.section,
+            subjects: JSON.stringify([]),
+          });
+        }
+        if (byAdmission.has(normalized.admissionNumber)) {
           duplicates.push(normalized.admissionNumber);
           continue;
         }
@@ -3787,10 +3809,9 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
           password,
         } as any);
         byAdmission.add(normalized.admissionNumber);
-        if (normalized.email) byEmail.add(normalized.email.toLowerCase());
         created++;
       }
-      res.json({ created, duplicates });
+      res.json({ created, duplicates, errors });
     } catch (err) { res.status(500).json({ message: "Bulk upload failed" }); }
   });
 
@@ -3953,9 +3974,9 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       if (!Array.isArray(records)) return res.status(400).json({ message: "Records array required" });
       const allTeachers = await storage.getAllTeachers();
       const byEmployeeId = new Set(allTeachers.map((t) => t.employeeId));
-      const byEmail = new Set(allTeachers.map((t) => (t.email || "").toLowerCase()).filter(Boolean));
       let created = 0;
       const duplicates: string[] = [];
+      const errors: string[] = [];
 
       for (const r of records) {
         const assignments = [];
@@ -3972,16 +3993,38 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
           email: r.email || "",
           phoneNumber: r.phoneNumber || r.phone || "",
           assignments,
-          isClassTeacher: r.isClassTeacher === "true" || r.isClassTeacher === true,
-          classTeacherOf: r.classTeacherOf || null,
+          isClassTeacher: r.isClassTeacher === "true" || r.isClassTeacher === true || r.isClassTeacher === 1 || r.isClassTeacher === "1",
+          classTeacherOf: r.classTeacherOf || (r.classTeacherClass && r.classTeacherSection ? `${String(r.classTeacherClass).trim()}-${String(r.classTeacherSection).trim().toUpperCase()}` : null),
+          class: r.class,
+          section: r.section,
         };
-        const { errs, normalized } = validateTeacherPayload(candidate, { partial: false });
-        if (errs.length || byEmployeeId.has(normalized.employeeId) || byEmail.has(normalized.email.toLowerCase())) {
-          duplicates.push(normalized.employeeId || String(r.employeeId || "invalid-row"));
+        const { errs, normalized } = validateTeacherPayload(candidate, { partial: false, requireContact: false });
+        if (errs.length || byEmployeeId.has(normalized.employeeId)) {
+          if (errs.length) errors.push(`${normalized.employeeId || String(r.employeeId || "row")}: ${errs[0]}`);
+          else duplicates.push(normalized.employeeId || String(r.employeeId || "invalid-row"));
           continue;
         }
+        for (const assignment of normalized.assignments) {
+          const classNum = parseInt(assignment.class, 10);
+          const section = assignment.section;
+          const existingClassSection = await storage.getClassSectionByClassAndSection(classNum, section);
+          if (!existingClassSection) {
+            await storage.createClassSection({
+              className: classNum,
+              section,
+              subjects: JSON.stringify(assignment.subjects),
+            });
+            continue;
+          }
+          let currentSubjects: string[] = [];
+          try { currentSubjects = JSON.parse(existingClassSection.subjects || "[]"); } catch {}
+          const mergedSubjects = Array.from(new Set([...(currentSubjects || []), ...assignment.subjects]));
+          if (mergedSubjects.length !== currentSubjects.length) {
+            await storage.updateClassSection(existingClassSection.id, { subjects: JSON.stringify(mergedSubjects) });
+          }
+        }
         const assignmentError = await validateTeacherAssignments(normalized.assignments);
-        if (assignmentError) { duplicates.push(normalized.employeeId); continue; }
+        if (assignmentError) { errors.push(`${normalized.employeeId}: ${assignmentError}`); continue; }
         if (normalized.isClassTeacher && normalized.classTeacherOf) {
           const isUnique = await ensureUniqueClassTeacher(normalized.classTeacherOf);
           if (!isUnique) { duplicates.push(normalized.employeeId); continue; }
@@ -4001,11 +4044,10 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
           classTeacherOf: normalized.isClassTeacher ? normalized.classTeacherOf : "",
         } as any);
         byEmployeeId.add(normalized.employeeId);
-        byEmail.add(normalized.email.toLowerCase());
         created++;
       }
 
-      res.json({ created, duplicates });
+      res.json({ created, duplicates, errors });
     } catch (err) { res.status(500).json({ message: "Bulk upload failed" }); }
   });
 
