@@ -266,7 +266,7 @@ async function seedDatabase() {
   console.log("[seed] Seeding school data (50 students, 5 teachers, 1 admin)...");
 
   // Wipe everything in FK-safe order
-  await db.execute(drizzleSql`TRUNCATE TABLE homework_submissions, messages, deviation_logs, performance_profiles, evaluations, merged_answer_scripts, answer_sheet_pages, answer_sheets, ncert_chapters, conversations, homework, exams, managed_students, managed_teachers, admins RESTART IDENTITY CASCADE`);
+  await db.execute(drizzleSql`TRUNCATE TABLE homework_submissions, messages, deviation_logs, performance_profiles, evaluations, merged_answer_scripts, answer_sheet_pages, answer_sheets, ncert_chapters, conversations, homework, exams, admins RESTART IDENTITY CASCADE`);
 
   const hp = await bcrypt.hash("123", 10);
 
@@ -4033,6 +4033,7 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const allSheets = await storage.getAllAnswerSheets?.() || [];
       const allExams = await storage.getAllExams?.() || [];
       const allStudents = await storage.getAllStudents();
+      const allClassSections = await storage.getAllClassSections?.() || [];
 
       // Build exam map
       const examMap = new Map(allExams.map((e: any) => [e.id, e]));
@@ -4060,6 +4061,12 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
         const key = `${s.studentClass}-${s.section}`;
         if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0 };
         classData[key].totalStudents++;
+      }
+
+      // Ensure all class-sections created by admin are present (even if no evaluations yet)
+      for (const cs of allClassSections) {
+        const key = `${cs.className}-${cs.section}`;
+        if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0 };
       }
 
       const result = Object.entries(classData).map(([key, data]) => {
@@ -4093,6 +4100,11 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const teacherMap = new Map(allTeachers.map((t: any) => [t.id, t]));
 
       const teacherData: Record<number, { name: string; scores: number[]; examCount: number; studentSet: Set<string>; examsOverTime: string[] }> = {};
+
+      // Include all teachers created by admin, even with no evaluations yet
+      for (const t of allTeachers) {
+        teacherData[t.id] = { name: t?.name || "Unknown", scores: [], examCount: 0, studentSet: new Set(), examsOverTime: [] };
+      }
 
       for (const ev of allEvals) {
         const sheet = sheetMap.get(ev.answerSheetId);

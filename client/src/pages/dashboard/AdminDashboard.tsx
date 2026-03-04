@@ -484,12 +484,29 @@ export default function AdminDashboard() {
           else if (type === "mgdTeacher") bulkUploadMgdTeachersMut.mutate(rows);
         };
 
-        const text = e.target?.result as string;
+        const text = (e.target?.result as string).replace(/^\uFEFF/, "");
         const lines = text.split(/\r?\n/).filter(l => l.trim());
         if (lines.length < 2) { setBulkUploadErrors(["File appears empty. Ensure it has a header row and at least one data row."]); return; }
-        const headers = parseCsvLine(lines[0]).map(h => h.replace(/^\uFEFF/, ""));
-        const rows = lines.slice(1).map(line => {
-          const cols = parseCsvLine(line);
+
+        let startIdx = 0;
+        let delimiter = ",";
+        const sepMatch = lines[0].trim().match(/^sep=(.)$/i);
+        if (sepMatch) {
+          delimiter = sepMatch[1];
+          startIdx = 1;
+        } else {
+          const first = lines[0];
+          if (first.includes(";") && !first.includes(",")) delimiter = ";";
+          if (first.includes("\t") && !first.includes(",") && !first.includes(";")) delimiter = "\t";
+        }
+
+        const splitRow = (line: string) =>
+          delimiter === "," ? parseCsvLine(line) : line.split(delimiter).map(c => c.trim().replace(/^"|"$/g, ""));
+
+        if (lines.length - startIdx < 2) { setBulkUploadErrors(["File appears empty. Ensure it has a header row and at least one data row."]); return; }
+        const headers = splitRow(lines[startIdx]).map(h => h.replace(/^\uFEFF/, ""));
+        const rows = lines.slice(startIdx + 1).map(line => {
+          const cols = splitRow(line);
           const obj: any = {};
           headers.forEach((h, i) => { obj[h] = cols[i] ?? ""; });
           return obj;
