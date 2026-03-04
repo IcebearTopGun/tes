@@ -424,9 +424,10 @@ export function validateTeacherPayload(payload: any, opts: { partial?: boolean; 
   const phone = String(payload?.phone ?? payload?.phoneNumber ?? "").trim();
   const email = String(payload?.email ?? "").trim();
   const assignments = normalizeAssignments(payload?.assignments ?? []);
-  const isClassTeacher = payload?.isClassTeacher === true || payload?.isClassTeacher === 1 || payload?.isClassTeacher === "true" || payload?.isClassTeacher === "1";
+  const isClassTeacherRaw = String(payload?.isClassTeacher ?? "").trim().toLowerCase();
+  const isClassTeacher = payload?.isClassTeacher === true || payload?.isClassTeacher === 1 || ["true", "1", "yes", "y"].includes(isClassTeacherRaw);
   const classTeacherOf = payload?.classTeacherOf
-    ? String(payload.classTeacherOf).trim()
+    ? String(payload.classTeacherOf).trim().replace(/\s*-\s*/g, "-")
     : (payload?.class && payload?.section ? `${normalizeClass(payload.class)}-${normalizeSection(payload.section)}` : "");
 
   if (!partial || "teacherName" in payload || "name" in payload) {
@@ -2511,13 +2512,12 @@ ${hwContext}`;
         .filter((v, i, a) => a.findIndex(x => x.className === v.className && x.section === v.section) === i);
 
       const uniqueClasses = [...new Set(allClassSections.map(c => c.className))].sort();
-      const DEFAULT_CLASSES = ["8", "9", "10", "11", "12"];
       const DEFAULT_SUBJECTS = ["Mathematics", "Science", "English", "Social Studies", "Hindi", "Physics", "Chemistry", "Biology", "History", "Geography"];
 
       res.json({
         subjects: allSubjectNames.length > 0 ? allSubjectNames : DEFAULT_SUBJECTS,
         structuredSubjects: structuredSubjects.length > 0 ? structuredSubjects : [],
-        classes: uniqueClasses.length > 0 ? uniqueClasses : DEFAULT_CLASSES,
+        classes: uniqueClasses,
         classSections: allClassSections.length > 0 ? allClassSections : [],
         sections: ["A", "B", "C", "D"],
       });
@@ -3993,8 +3993,15 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
           email: r.email || "",
           phoneNumber: r.phoneNumber || r.phone || "",
           assignments,
-          isClassTeacher: r.isClassTeacher === "true" || r.isClassTeacher === true || r.isClassTeacher === 1 || r.isClassTeacher === "1",
-          classTeacherOf: r.classTeacherOf || (r.classTeacherClass && r.classTeacherSection ? `${String(r.classTeacherClass).trim()}-${String(r.classTeacherSection).trim().toUpperCase()}` : null),
+          isClassTeacher: (() => {
+            const raw = String(r.isClassTeacher ?? "").trim().toLowerCase();
+            return r.isClassTeacher === true || r.isClassTeacher === 1 || ["true", "1", "yes", "y"].includes(raw);
+          })(),
+          classTeacherOf: r.classTeacherOf || (
+            (r.classTeacherOfClass || r.classTeacherClass) && (r.classTeacherOfSection || r.classTeacherSection)
+              ? `${String(r.classTeacherOfClass || r.classTeacherClass).trim()}-${String(r.classTeacherOfSection || r.classTeacherSection).trim().toUpperCase()}`
+              : null
+          ),
           class: r.class,
           section: r.section,
         };

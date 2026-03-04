@@ -97,6 +97,8 @@ const EXCEL_SCHEMAS: Record<string, { col: string; required: boolean; type?: "nu
     { col: "subjects",    required: true  },
     { col: "isClassTeacher", required: false },
     { col: "classTeacherOf", required: false },
+    { col: "classTeacherOfClass", required: false },
+    { col: "classTeacherOfSection", required: false },
     { col: "classTeacherClass", required: false },
     { col: "classTeacherSection", required: false },
   ],
@@ -578,7 +580,7 @@ export default function AdminDashboard() {
     const defs: Record<string, { header: string[]; row: string[] }> = {
       classSection: { header: ["class", "section", "subjects"], row: ["5", "A", "English,Maths,Science"] },
       mgdStudent: { header: ["studentName", "phoneNumber", "email", "admissionNumber", "class", "section"], row: ["Rahul Sharma", "9876543210", "rahul@school.edu", "2024001", "5", "A"] },
-      mgdTeacher: { header: ["teacherName", "employeeId", "email", "phoneNumber", "class", "section", "subjects", "isClassTeacher", "classTeacherOf", "classTeacherClass", "classTeacherSection"], row: ["Ramesh Singh", "T100", "ramesh@school.edu", "9876543210", "5", "A", "English,Maths", "true", "5-A", "5", "A"] },
+      mgdTeacher: { header: ["teacherName", "employeeId", "email", "phoneNumber", "class", "section", "subjects", "isClassTeacher", "classTeacherOfClass", "classTeacherOfSection"], row: ["Ramesh Singh", "T100", "ramesh@school.edu", "9876543210", "5", "A", "English,Maths", "true", "5", "A"] },
     };
     const def = defs[type];
     if (!def) return;

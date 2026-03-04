@@ -3867,7 +3867,7 @@ export default function TeacherDashboard() {
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {(teacherOptions?.classes?.length ? teacherOptions.classes : ["8", "9", "10", "11", "12"]).map(c => (
+                      {assignedClasses.map(c => (
                         <SelectItem key={c} value={c}>Class {c}</SelectItem>
                       ))}
                     </SelectContent>
