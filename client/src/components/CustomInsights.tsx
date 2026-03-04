@@ -216,6 +216,15 @@ const PRINCIPAL_PROMPTS = [
   "How has overall school performance trended across evaluations?",
 ];
 
+const TEACHER_PROMPTS = [
+  "Show class-wise average score for my assigned classes",
+  "Which students in my classes are currently at risk?",
+  "Compare subject performance across my assigned sections",
+  "Summarize homework completion for my classes",
+  "What chapters are the weakest based on recent evaluations?",
+  "Show score distribution for my latest evaluations",
+];
+
 const STUDENT_PROMPTS = [
   "Show my latest subject-wise performance as a chart",
   "Which areas should I prioritize this week?",
@@ -226,20 +235,30 @@ const STUDENT_PROMPTS = [
 ];
 
 interface Props {
-  role: "admin" | "principal" | "student";
+  role: "admin" | "principal" | "teacher" | "student";
 }
 
 export default function CustomInsights({ role }: Props) {
-  const EXAMPLE_PROMPTS = role === "admin" ? ADMIN_PROMPTS : role === "principal" ? PRINCIPAL_PROMPTS : STUDENT_PROMPTS;
+  const EXAMPLE_PROMPTS = role === "admin"
+    ? ADMIN_PROMPTS
+    : role === "principal"
+      ? PRINCIPAL_PROMPTS
+      : role === "teacher"
+        ? TEACHER_PROMPTS
+        : STUDENT_PROMPTS;
   const placeholderText = role === "admin"
     ? "e.g. 'Which teacher has the highest evaluation workload this term?'"
     : role === "principal"
       ? "e.g. 'Which class has the lowest average performance? Show as a bar chart'"
+      : role === "teacher"
+        ? "e.g. 'Show score distribution for my Class 10 sections'"
       : "e.g. 'Show my weakest subjects and suggest what to focus on this week'";
   const subText = role === "admin"
     ? "Ask any question about teacher workload, student enrolment, or operational data"
     : role === "principal"
       ? "Ask any question about academic outcomes, class performance, or intervention needs"
+      : role === "teacher"
+        ? "Ask questions about your assigned classes, students, evaluations, and homework"
       : "Ask questions about your own evaluations, homework progress, and learning gaps";
   const insightsTitle = role === "admin" ? "Custom Insights" : "AI Insights";
 
@@ -279,6 +298,23 @@ export default function CustomInsights({ role }: Props) {
           homeworkAnalytics: homeworkAnalyticsRes.status === "fulfilled" ? homeworkAnalyticsRes.value : {},
           evaluations: evaluationsRes.status === "fulfilled" ? evaluationsRes.value : [],
           performanceProfile: profileRes.status === "fulfilled" ? profileRes.value : {},
+        };
+      } else if (role === "teacher") {
+        const [dashboardRes, analyticsRes, earlyWarningRes, scopeRes, optionsRes, homeworkRes] = await Promise.allSettled([
+          fetchWithAuth("/api/teacher/dashboard").then(r => r.json()),
+          fetchWithAuth("/api/analytics").then(r => r.json()),
+          fetchWithAuth("/api/teacher/early-warning").then(r => r.json()),
+          fetchWithAuth("/api/teacher/scope").then(r => r.json()),
+          fetchWithAuth("/api/teacher/options").then(r => r.json()),
+          fetchWithAuth("/api/teacher/homework").then(r => r.json()),
+        ]);
+        dataContext = {
+          dashboard: dashboardRes.status === "fulfilled" ? dashboardRes.value : {},
+          analytics: analyticsRes.status === "fulfilled" ? analyticsRes.value : {},
+          earlyWarning: earlyWarningRes.status === "fulfilled" ? earlyWarningRes.value : [],
+          teacherScope: scopeRes.status === "fulfilled" ? scopeRes.value : {},
+          teacherOptions: optionsRes.status === "fulfilled" ? optionsRes.value : {},
+          homework: homeworkRes.status === "fulfilled" ? homeworkRes.value : [],
         };
       } else {
         const [statsRes, cpRes, teRes, siRes] = await Promise.allSettled([

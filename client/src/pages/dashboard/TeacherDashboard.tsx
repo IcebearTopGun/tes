@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, X, Upload, MessageSquare, TrendingUp, Send, Star, Plus, BookOpen as BookOpenIcon, BarChart2, ChevronDown, ChevronUp, Info } from "lucide-react";
+import { Loader2, X, Upload, TrendingUp, Send, Star, Plus, BookOpen as BookOpenIcon, BarChart2, ChevronDown, ChevronUp, Info } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +38,7 @@ import { useToast } from "@/hooks/use-toast";
 import { api, buildUrl } from "@shared/routes";
 import { fetchWithAuth } from "@/lib/fetcher";
 import ProfileDrawer from "@/components/ProfileDrawer";
+import CustomInsights from "@/components/CustomInsights";
 import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
 import { getInitials } from "@/shared/utils/identity";
@@ -1220,8 +1221,7 @@ function HwFormBody({
         <div>
           <div style={{ marginBottom: 6 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <label className="sf-fld-lbl">Task Description</label>
-              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#fee2e2", color: "#dc2626", fontWeight: 700 }}>Required</span>
+              <label className="sf-fld-lbl">Task Description <span style={{ fontSize: 10, color: "var(--mid)" }}>*</span></label>
             </div>
             <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>Describe what students need to do. Rich formatting is supported.</div>
           </div>
@@ -1240,8 +1240,7 @@ function HwFormBody({
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <label className="sf-fld-lbl">Write Questions</label>
-              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#fee2e2", color: "#dc2626", fontWeight: 700 }}>Required</span>
+              <label className="sf-fld-lbl">Write Questions <span style={{ fontSize: 10, color: "var(--mid)" }}>*</span></label>
             </div>
             <RichTextEditor
               value={questionsText}
@@ -1298,32 +1297,27 @@ function HwFormBody({
           />
 
           {/* NCERT toggle */}
-          <button
-            type="button"
-            onClick={() => onUseNcert(!useNcert)}
+          <label
             style={{
-              display: "flex", alignItems: "flex-start", gap: 12,
+              display: "flex", alignItems: "flex-start", gap: 10,
               padding: "12px 14px", borderRadius: 12, cursor: "pointer",
-              border: `1.5px solid ${useNcert ? "#3b82f6" : "var(--border)"}`,
-              background: useNcert ? "#eff6ff" : "#fafaf9",
-              textAlign: "left", width: "100%", transition: "all 0.15s"
+              border: "1.5px solid var(--border)", background: "#fff",
+              textAlign: "left", width: "100%",
             }}
           >
-            <div style={{
-              width: 18, height: 18, borderRadius: 5, marginTop: 1, flexShrink: 0,
-              border: `2px solid ${useNcert ? "#3b82f6" : "var(--border)"}`,
-              background: useNcert ? "#3b82f6" : "transparent",
-              display: "flex", alignItems: "center", justifyContent: "center"
-            }}>
-              {useNcert && <span style={{ color: "#fff", fontSize: 11, fontWeight: 900 }}>✓</span>}
-            </div>
+            <input
+              type="checkbox"
+              checked={useNcert}
+              onChange={(e) => onUseNcert(e.target.checked)}
+              style={{ marginTop: 2, width: 16, height: 16, accentColor: "#1a1a2e", cursor: "pointer" }}
+            />
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>📚 Reference NCERT books for evaluation</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>Reference NCERT books for evaluation</div>
               <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 2 }}>
-                AI will use the NCERT textbook for Class {hwClass || "—"}, {hwSubject || "—"} when grading student submissions.
+                AI will use NCERT for Class {hwClass || "—"}, {hwSubject || "—"} while grading submissions.
               </div>
             </div>
-          </button>
+          </label>
         </div>
       )}
     </div>
@@ -2340,6 +2334,16 @@ export default function TeacherDashboard() {
   const studentPerformance = analytics?.studentPerformance || [];
   const marksDistribution = analytics?.marksDistribution || [];
   const improvementTrends = analytics?.improvementTrends || [];
+  const assignedClasses = teacherOptions?.classSections?.length
+    ? Array.from(new Set(teacherOptions.classSections.map((cs: ClassSection) => String(cs.className)))).sort((a, b) => Number(a) - Number(b))
+    : Array.from(new Set((teacherScope?.classesAssigned || []).map(String))).sort((a, b) => Number(a) - Number(b));
+  const assignedSubjects = teacherOptions?.structuredSubjects?.length
+    ? Array.from(new Set(
+        teacherOptions.structuredSubjects
+          .filter((s: StructuredSubject) => !classFilter || s.className === classFilter)
+          .map((s: StructuredSubject) => s.name),
+      )).sort()
+    : Array.from(new Set((teacherScope?.subjectsAssigned || []).map(String))).sort();
 
   const totalDistCount = marksDistribution.reduce((s, d) => s + d.count, 0);
   const distParts = [
@@ -2445,22 +2449,15 @@ export default function TeacherDashboard() {
             </svg>
             Results
           </button>
+          <button className={`sf-nav-tab${activeSection === "ai-insights" ? " on" : ""}`} onClick={() => setActiveSection("ai-insights")}>
+            <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+            </svg>
+            AI Insights
+          </button>
         </div>
 
         <div className="sf-nav-right">
-          <div className="sf-ic-btn">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-            </svg>
-            <span className="sf-notif-dot" />
-          </div>
-          <button className="sf-btn-analyst" onClick={() => setIsChatOpen(true)} data-testid="button-ai-analyst">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
-            </svg>
-            AI Analyst
-          </button>
           <button className="sf-btn-create" onClick={() => setIsDialogOpen(true)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
@@ -2563,7 +2560,11 @@ export default function TeacherDashboard() {
                     </button>
                     <button
                       data-testid="button-view-class"
-                      onClick={() => { setViewMode("class"); setClassFilter(""); setSubjectFilter(""); }}
+                      onClick={() => {
+                        setViewMode("class");
+                        setClassFilter(teacherScope.classTeacherOf?.split("-")?.[0] || "");
+                        setSubjectFilter("");
+                      }}
                       style={{
                         padding: "4px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
                         background: viewMode === "class" ? "var(--card)" : "transparent",
@@ -2580,11 +2581,11 @@ export default function TeacherDashboard() {
                   <>
                     <select className="sf-fsel" value={classFilter} onChange={e => { setClassFilter(e.target.value); setSubjectFilter(""); }}>
                       <option value="">All Classes</option>
-                      {(filterOptions?.classes || []).map(c => <option key={c} value={c}>{c}</option>)}
+                      {assignedClasses.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                     <select className="sf-fsel" value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)}>
                       <option value="">All Subjects</option>
-                      {(filterOptions?.subjects || []).map(s => <option key={s} value={s}>{s}</option>)}
+                      {assignedSubjects.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </>
                 )}
@@ -2738,80 +2739,6 @@ export default function TeacherDashboard() {
                 <div className="sf-trend-labels">
                   {improvementTrends.slice(-5).map((t, i) => <span key={i} className="sf-trend-lbl">{t.examName?.split(" ").slice(-1)[0] || `E${i + 1}`}</span>)}
                 </div>
-              </div>
-            </div>
-
-            {/* BOTTOM ROW */}
-            <div className="sf-bottom-row">
-              {/* Recent Exams */}
-              <div className="sf-card">
-                <div className="sf-card-title">Recent Exams</div>
-                <div className="sf-card-sub">Created exams and their current status</div>
-                {isLoadingExams ? (
-                  <div style={{ textAlign: "center", padding: "24px 0" }}><div className="sf-spinner" /></div>
-                ) : examsList && examsList.length > 0 ? (
-                  examsList.slice(0, 4).map((exam: any, i) => {
-                    const evaluated = (exam.sheetsEvaluated || 0) > 0;
-                    const subjectEmoji = exam.subject?.toLowerCase().includes("bio") ? "🧬" : exam.subject?.toLowerCase().includes("chem") ? "⚗️" : exam.subject?.toLowerCase().includes("math") ? "📐" : exam.subject?.toLowerCase().includes("phys") ? "⚛️" : "📝";
-                    return (
-                      <div key={exam.id} className="sf-exam-item" onClick={() => { setSelectedExamId(String(exam.id)); setActiveSection("sheets"); }}>
-                        <div className="sf-exam-subj" style={{ background: "var(--lav-bg)" }}>{subjectEmoji}</div>
-                        <div className="sf-exam-info">
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                            <div className="sf-exam-name">{exam.examName || `${exam.subject} Exam`}</div>
-                            {exam.category && (() => {
-                              const clr: Record<string, string> = { unit_test: "#6c47d8", class_test: "#2563c0", homework: "#1a7a54", half_yearly: "#92400e", annual: "#b91c1c", quiz: "#1e40af", assignment: "#7e22ce" };
-                              const lbl: Record<string, string> = { unit_test: "Unit Test", class_test: "Class Test", homework: "Homework", half_yearly: "Half Yearly", annual: "Annual Exam", quiz: "Quiz", assignment: "Assignment" };
-                              return <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 10, background: `${clr[exam.category] || "#6c47d8"}18`, color: clr[exam.category] || "#6c47d8", fontWeight: 700, border: `1px solid ${clr[exam.category] || "#6c47d8"}30` }}>{lbl[exam.category] || exam.category}</span>;
-                            })()}
-                          </div>
-                          <div className="sf-exam-meta">{new Date(exam.createdAt || Date.now()).toDateString()} · {exam.totalMarks} marks · {exam.sheetsEvaluated || 0} evaluated</div>
-                        </div>
-                        <span className={`sf-exam-status ${evaluated ? "sf-es-done" : "sf-es-draft"}`}>{evaluated ? "Evaluated" : "Pending"}</span>
-                        <div className="sf-exam-score">
-                          {evaluated ? `${exam.avgScore || "—"}%` : "—"}
-                          <span>{evaluated ? "class avg" : "pending"}</span>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="sf-empty"><div className="sf-empty-icon">📋</div>No exams created yet. Create your first exam above.</div>
-                )}
-              </div>
-
-              {/* AI Class Insights */}
-              <div className="sf-card">
-                <div className="sf-card-title">AI Class Insights</div>
-                <div className="sf-card-sub">Auto-generated from evaluated exams</div>
-                {(analytics?.chapterWeakness || []).length > 0 ? (
-                  (analytics?.chapterWeakness || []).slice(0, 3).map((cw, i) => {
-                    const cls = cw.avgScore < 40 ? "sf-ins-r" : cw.avgScore < 60 ? "sf-ins-a" : "sf-ins-g";
-                    const icon = cw.avgScore < 40 ? "🔴" : cw.avgScore < 60 ? "🟡" : "🟢";
-                    const sev = cw.avgScore < 40 ? "Class-wide gap" : cw.avgScore < 60 ? "Needs attention" : "Strong area";
-                    return (
-                      <div key={i} className={`sf-insight-item ${cls}`}>
-                        <div className="sf-ins-label">{icon} {cw.chapter}</div>
-                        <div className="sf-ins-text">{sev} in {cw.subject} — avg {Math.round(cw.avgScore)}% across {cw.studentsAffected} student{cw.studentsAffected !== 1 ? "s" : ""}.</div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <>
-                    <div className="sf-insight-item sf-ins-r">
-                      <div className="sf-ins-label">🔴 Class-wide gap</div>
-                      <div className="sf-ins-text">Evaluate answer sheets to see AI-generated class insights here.</div>
-                    </div>
-                    <div className="sf-insight-item sf-ins-a">
-                      <div className="sf-ins-label">🟡 Chemistry Q2</div>
-                      <div className="sf-ins-text">Most students missed the balanced chemical equation. Add a worked example in the next class.</div>
-                    </div>
-                    <div className="sf-insight-item sf-ins-g">
-                      <div className="sf-ins-label">🟢 Strong area</div>
-                      <div className="sf-ins-text">Logical reasoning and problem-solving were answered well. Continue reinforcing this strength.</div>
-                    </div>
-                  </>
-                )}
               </div>
             </div>
 
@@ -3070,7 +2997,7 @@ export default function TeacherDashboard() {
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                         <div>
-                          <label className="sf-fld-lbl">Class *</label>
+                          <label className="sf-fld-lbl">Class <span style={{ fontSize: 10, color: "var(--mid)" }}>*</span></label>
                           <select className="sf-fsel" style={{ width: "100%", marginTop: 4 }} value={hwClass}
                             onChange={e => { setHwClass(e.target.value); setHwSection(""); setHwSubject(""); }}
                             data-testid="select-hw-class">
@@ -3079,7 +3006,7 @@ export default function TeacherDashboard() {
                           </select>
                         </div>
                         <div>
-                          <label className="sf-fld-lbl">Section *</label>
+                          <label className="sf-fld-lbl">Section <span style={{ fontSize: 10, color: "var(--mid)" }}>*</span></label>
                           <select className="sf-fsel" style={{ width: "100%", marginTop: 4 }} value={hwSection}
                             onChange={e => { setHwSection(e.target.value); setHwSubject(""); }}
                             disabled={!hwClass}
@@ -3089,7 +3016,7 @@ export default function TeacherDashboard() {
                           </select>
                         </div>
                         <div>
-                          <label className="sf-fld-lbl">Subject *</label>
+                          <label className="sf-fld-lbl">Subject <span style={{ fontSize: 10, color: "var(--mid)" }}>*</span></label>
                           <select className="sf-fsel" style={{ width: "100%", marginTop: 4 }} value={hwSubject}
                             onChange={e => setHwSubject(e.target.value)}
                             disabled={!hwClass || !hwSection}
@@ -3102,7 +3029,7 @@ export default function TeacherDashboard() {
                           )}
                         </div>
                         <div>
-                          <label className="sf-fld-lbl">Due Date *</label>
+                          <label className="sf-fld-lbl">Due Date <span style={{ fontSize: 10, color: "var(--mid)" }}>*</span></label>
                           <Input
                             type="date"
                             value={hwDueDate}
@@ -3114,37 +3041,17 @@ export default function TeacherDashboard() {
                             data-testid="input-hw-due"
                             style={{ marginTop: 4 }}
                           />
-                          <div style={{ fontSize: 10, color: "var(--mid)", marginTop: 3 }}>Today or future dates only</div>
                         </div>
                       </div>
                     </div>
 
-                    {/* ── Step 2: Content tabs ── */}
-                    {(() => {
-                      const descMissing  = !hwDescription || hwDescription === "<br>" || hwDescription === "<p><br></p>";
-                      const questMissing = !hwQuestionsText || hwQuestionsText === "<br>" || hwQuestionsText === "<p><br></p>";
-                      const tabHasError  = (tab: string) =>
-                        (tab === "description" && descMissing) ||
-                        (tab === "questions"   && questMissing);
-
-                      return (
-                        <div style={{ background: "#fafaf8", borderRadius: 12, padding: "14px 16px", border: `1px solid ${(descMissing || questMissing) && isCreatingHw ? "#f87171" : "var(--border)"}` }}>
+	                    {/* ── Step 2: Content tabs ── */}
+	                    {(() => {
+	                      return (
+	                        <div style={{ background: "#fafaf8", borderRadius: 12, padding: "14px 16px", border: "1px solid var(--border)" }}>
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                             <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mid)" }}>
                               Step 2 — Content &amp; questions
-                            </div>
-                            <div style={{ display: "flex", gap: 5 }}>
-                              {["description", "questions"].map(t => (
-                                tabHasError(t) ? (
-                                  <span key={t} style={{ fontSize: 10, padding: "1px 7px", borderRadius: 4, background: "#fee2e2", color: "#dc2626", fontWeight: 700, border: "1px solid #fca5a5" }}>
-                                    {t === "description" ? "Description required" : "Questions required"}
-                                  </span>
-                                ) : (
-                                  <span key={t} style={{ fontSize: 10, padding: "1px 7px", borderRadius: 4, background: "#dcfce7", color: "#166534", fontWeight: 700, border: "1px solid #86efac" }}>
-                                    ✓ {t === "description" ? "Description" : "Questions"}
-                                  </span>
-                                )
-                              ))}
                             </div>
                           </div>
                           <HwFormBody
@@ -3157,27 +3064,11 @@ export default function TeacherDashboard() {
                             useNcert={hwUseNcert} onUseNcert={setHwUseNcert}
                             hwClass={hwClass} hwSubject={hwSubject}
                             readFileAsDataUrl={readFileAsDataUrl}
-                            requiredTabs={["description", "questions"]}
+                            requiredTabs={[]}
                           />
                         </div>
                       );
                     })()}
-
-                    {/* Validation summary — only shown after first submit attempt */}
-                    {isCreatingHw === false && hwSubject && hwClass && hwSection && hwDueDate && (!hwDescription || !hwQuestionsText) && (
-                      <div style={{
-                        padding: "10px 14px", borderRadius: 10, background: "#fef2f2",
-                        border: "1.5px solid #fca5a5", fontSize: 12, color: "#dc2626",
-                        display: "flex", alignItems: "flex-start", gap: 8
-                      }}>
-                        <span style={{ fontSize: 15, flexShrink: 0 }}>⚠️</span>
-                        <div>
-                          <div style={{ fontWeight: 700, marginBottom: 2 }}>Required fields missing:</div>
-                          {!hwDescription && <div>• Description (in the Description tab)</div>}
-                          {!hwQuestionsText && <div>• Questions (in the Questions tab)</div>}
-                        </div>
-                      </div>
-                    )}
 
                     <Button
                       disabled={isCreatingHw || !hwSubject || !hwClass || !hwSection || !hwDescription || !hwQuestionsText || !hwDueDate}
@@ -3938,6 +3829,13 @@ export default function TeacherDashboard() {
           </div>
         )}
 
+        {/* ── AI INSIGHTS TAB ── */}
+        {activeSection === "ai-insights" && (
+          <div className="sf-panel">
+            <CustomInsights role="teacher" />
+          </div>
+        )}
+
         <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
 
@@ -4083,7 +3981,12 @@ export default function TeacherDashboard() {
                 <Input
                   type="date"
                   value={examDate}
-                  onChange={e => setExamDate(e.target.value)}
+                  min={new Date().toISOString().split("T")[0]}
+                  onChange={e => {
+                    const today = new Date().toISOString().split("T")[0];
+                    if (e.target.value && e.target.value < today) return;
+                    setExamDate(e.target.value);
+                  }}
                   className="rounded-xl"
                   data-testid="input-exam-date"
                 />
@@ -4318,14 +4221,6 @@ export default function TeacherDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Floating chat button */}
-      {!isChatOpen && (
-        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} style={{ position: "fixed", bottom: 24, right: 24, zIndex: 40 }}>
-          <button onClick={() => setIsChatOpen(true)} style={{ width: 56, height: 56, borderRadius: "50%", background: "#1a1a2e", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 30px rgba(26,26,46,0.3)", transition: "transform 0.2s" }}>
-            <MessageSquare style={{ width: 22, height: 22, color: "white" }} />
-          </button>
-        </motion.div>
-      )}
     </div>
   );
 }
