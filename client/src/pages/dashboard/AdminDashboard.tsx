@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, X, MessageSquare, TrendingUp, Send, Plus, ChevronDown, ChevronUp, Pencil, Trash2, BookOpen, School, BarChart2, GraduationCap, BookMarked, Layers } from "lucide-react";
+import { Loader2, TrendingUp, Plus, ChevronDown, BarChart2, GraduationCap, BookMarked, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
@@ -129,6 +129,30 @@ function validateExcelRows(rows: any[], type: string): string[] {
     });
   });
   return errors;
+}
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === "," && !inQuotes) {
+      out.push(cur.trim());
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur.trim());
+  return out.map(v => v.replace(/^"|"$/g, ""));
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -358,11 +382,43 @@ export default function AdminDashboard() {
   const updateClassSectionMut = useMutation({ mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/class-sections/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setEditingClassSection(null); setShowAddClassSection(false); setClassSectionForm({ className: "", section: "", subjects: [] }); } });
   const deleteClassSectionMut = useMutation({ mutationFn: ({ id, password, deleteSubject }: any) => fetchWithAuth(`/api/admin/class-sections/${id}`, { method: "DELETE", body: JSON.stringify({ password, deleteSubject }) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setDeleteConfirm(null); setDeletePassword(""); }, onError: () => { setDeleteError("Incorrect password or operation failed"); } });
   const bulkUploadClassSectionsMut = useMutation({ mutationFn: (records: any[]) => fetchWithAuth("/api/admin/class-sections/bulk-upload", { method: "POST", body: JSON.stringify({ records }) }).then(r => r.json()), onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ["/api/admin/class-sections"] }); setBulkUploadResult(data); setBulkUploadErrors([]); } });
-  const addMgdStudentMut = useMutation({ mutationFn: (data: any) => fetchWithAuth("/api/admin/managed-students", { method: "POST", body: JSON.stringify(data) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setShowAddMgdStudent(false); setEditingMgdStudent(null); } });
+  const addMgdStudentMut = useMutation({
+    mutationFn: async (data: any) => {
+      const r = await fetchWithAuth("/api/admin/managed-students", { method: "POST", body: JSON.stringify(data) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json?.message || "Failed to create student");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] });
+      setShowAddMgdStudent(false);
+      setEditingMgdStudent(null);
+      setMgdStudentErrors({});
+    },
+    onError: (err: any) => {
+      setMgdStudentErrors((prev: any) => ({ ...prev, _form: err?.message || "Failed to create student" }));
+    }
+  });
   const updateMgdStudentMut = useMutation({ mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/managed-students/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setEditingMgdStudent(null); setShowAddMgdStudent(false); } });
   const deleteMgdStudentMut = useMutation({ mutationFn: ({ id, password }: any) => fetchWithAuth(`/api/admin/managed-students/${id}`, { method: "DELETE", body: JSON.stringify({ password }) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setDeleteConfirm(null); setDeletePassword(""); }, onError: () => { setDeleteError("Incorrect password or operation failed"); } });
   const bulkUploadMgdStudentsMut = useMutation({ mutationFn: (records: any[]) => fetchWithAuth("/api/admin/managed-students/bulk-upload", { method: "POST", body: JSON.stringify({ records }) }).then(r => r.json()), onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-students"] }); setBulkUploadResult(data); setBulkUploadErrors([]); } });
-  const addMgdTeacherMut = useMutation({ mutationFn: (data: any) => fetchWithAuth("/api/admin/managed-teachers", { method: "POST", body: JSON.stringify(data) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setShowAddMgdTeacher(false); setEditingMgdTeacher(null); } });
+  const addMgdTeacherMut = useMutation({
+    mutationFn: async (data: any) => {
+      const r = await fetchWithAuth("/api/admin/managed-teachers", { method: "POST", body: JSON.stringify(data) });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json?.message || "Failed to create teacher");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] });
+      setShowAddMgdTeacher(false);
+      setEditingMgdTeacher(null);
+      setMgdTeacherErrors({});
+    },
+    onError: (err: any) => {
+      setMgdTeacherErrors((prev: any) => ({ ...prev, _form: err?.message || "Failed to create teacher" }));
+    }
+  });
   const updateMgdTeacherMut = useMutation({ mutationFn: ({ id, ...data }: any) => fetchWithAuth(`/api/admin/managed-teachers/${id}`, { method: "PUT", body: JSON.stringify(data) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setEditingMgdTeacher(null); setShowAddMgdTeacher(false); } });
   const deleteMgdTeacherMut = useMutation({ mutationFn: ({ id, password, deleteSubjectOnly, className, section, subject }: any) => fetchWithAuth(`/api/admin/managed-teachers/${id}`, { method: "DELETE", body: JSON.stringify({ password, deleteSubjectOnly, className, section, subject }) }).then(r => r.json()), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setDeleteConfirm(null); setDeletePassword(""); }, onError: () => { setDeleteError("Incorrect password or operation failed"); } });
   const bulkUploadMgdTeachersMut = useMutation({ mutationFn: (records: any[]) => fetchWithAuth("/api/admin/managed-teachers/bulk-upload", { method: "POST", body: JSON.stringify({ records }) }).then(r => r.json()), onSuccess: (data) => { queryClient.invalidateQueries({ queryKey: ["/api/admin/managed-teachers"] }); setBulkUploadResult(data); setBulkUploadErrors([]); } });
@@ -402,16 +458,16 @@ export default function AdminDashboard() {
     return errs;
   };
 
-  // ── FIX #6: Excel-only upload with validation ──────────────────────────────
-  const handleExcelUpload = (file: File, type: string) => {
+  // ── CSV upload with validation ──────────────────────────────────────────────
+  const handleCsvUpload = (file: File, type: string) => {
     setBulkUploadErrors([]);
     setBulkUploadResult(null);
 
     const name = file.name.toLowerCase();
-    if (!name.endsWith(".xlsx") && !name.endsWith(".xls")) {
+    if (!name.endsWith(".csv")) {
       setBulkUploadErrors([
-        `Invalid file type: "${file.name}". Only Excel files (.xlsx or .xls) are accepted.`,
-        "Please download the template, fill it in Excel, and re-upload.",
+        `Invalid file type: "${file.name}". Only CSV files (.csv) are accepted.`,
+        "Please download the CSV template, fill it in, and re-upload.",
       ]);
       return;
     }
@@ -419,7 +475,6 @@ export default function AdminDashboard() {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const win = window as any;
         const parseAndSubmit = (rows: any[]) => {
           if (!rows.length) { setBulkUploadErrors(["The uploaded file is empty. Please fill in at least one data row."]); return; }
           const errs = validateExcelRows(rows, type);
@@ -429,33 +484,25 @@ export default function AdminDashboard() {
           else if (type === "mgdTeacher") bulkUploadMgdTeachersMut.mutate(rows);
         };
 
-        if (win.XLSX) {
-          const wb = win.XLSX.read(new Uint8Array(e.target?.result as ArrayBuffer), { type: "array" });
-          const rows: any[] = win.XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
-          parseAndSubmit(rows);
-        } else {
-          // Fallback text parse
-          const text = new TextDecoder("utf-8").decode(e.target?.result as ArrayBuffer);
-          const lines = text.split("\n").filter(l => l.trim());
-          if (lines.length < 2) { setBulkUploadErrors(["File appears empty. Ensure it has a header row and at least one data row."]); return; }
-          const sep = lines[0].includes("\t") ? "\t" : ",";
-          const headers = lines[0].split(sep).map(h => h.trim().replace(/^"|"$/g, ""));
-          const rows = lines.slice(1).map(line => {
-            const cols = line.split(sep).map(c => c.trim().replace(/^"|"$/g, ""));
-            const obj: any = {};
-            headers.forEach((h, i) => { obj[h] = cols[i] ?? ""; });
-            return obj;
-          });
-          parseAndSubmit(rows);
-        }
+        const text = e.target?.result as string;
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        if (lines.length < 2) { setBulkUploadErrors(["File appears empty. Ensure it has a header row and at least one data row."]); return; }
+        const headers = parseCsvLine(lines[0]).map(h => h.replace(/^\uFEFF/, ""));
+        const rows = lines.slice(1).map(line => {
+          const cols = parseCsvLine(line);
+          const obj: any = {};
+          headers.forEach((h, i) => { obj[h] = cols[i] ?? ""; });
+          return obj;
+        });
+        parseAndSubmit(rows);
       } catch {
-        setBulkUploadErrors(["Could not parse the uploaded file. Ensure you are uploading a valid .xlsx or .xls file."]);
+        setBulkUploadErrors(["Could not parse the uploaded file. Ensure you are uploading a valid CSV file."]);
       }
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsText(file);
   };
 
-  // ── FIX #6: Template downloads as .xlsx (Excel-compatible CSV with BOM) ──
+  // ── Template downloads as CSV ──────────────────────────────────────────────
   const downloadTemplate = (type: string) => {
     const defs: Record<string, { header: string[]; row: string[] }> = {
       classSection: { header: ["class", "section", "subjects"], row: ["5", "A", "English,Maths,Science"] },
@@ -465,11 +512,11 @@ export default function AdminDashboard() {
     const def = defs[type];
     if (!def) return;
     const csv = [def.header, def.row].map(r => r.map(c => `"${c}"`).join(",")).join("\r\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "application/vnd.ms-excel;charset=utf-8" });
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `template_${type}.xlsx`;
+    a.download = `template_${type}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -585,23 +632,11 @@ export default function AdminDashboard() {
             <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
             </svg>
-            Custom Insights
+            AI Insights
           </button>
         </div>
 
         <div className="sf-nav-right">
-          <div className="sf-ic-btn">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-            </svg>
-          </div>
-          <button className="sf-btn-analyst" onClick={() => setIsChatOpen(true)} data-testid="button-ai-analyst">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
-            </svg>
-            AI Analyst
-          </button>
           <div className="sf-ava teacher" ref={avaRef} onClick={() => setShowAvaMenu(v => !v)} data-testid="button-avatar">
             {initials}
             {showAvaMenu && (
@@ -764,8 +799,8 @@ export default function AdminDashboard() {
               <div style={{ display: "flex", gap: 8 }}>
                 <Button variant="outline" onClick={() => downloadTemplate("classSection")} style={{ fontSize: 12 }}>⬇ Download Template</Button>
                 <label style={{ cursor: "pointer" }}>
-                  <span style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", display: "inline-block" }}>⬆ Upload Excel</span>
-                  <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={e => { setBulkUploadResult(null); setBulkUploadErrors([]); if (e.target.files?.[0]) handleExcelUpload(e.target.files[0], "classSection"); e.target.value = ""; }} />
+                  <span style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", display: "inline-block" }}>⬆ Upload CSV</span>
+                  <input type="file" accept=".csv" style={{ display: "none" }} onChange={e => { setBulkUploadResult(null); setBulkUploadErrors([]); if (e.target.files?.[0]) handleCsvUpload(e.target.files[0], "classSection"); e.target.value = ""; }} />
                 </label>
                 <Button onClick={() => { setShowAddClassSection(true); setEditingClassSection(null); setClassSectionForm({ className: "", section: "", subjects: [] }); setClassSectionErrors({}); }}>
                   <Plus size={14} style={{ marginRight: 8 }} /> Add Class
@@ -936,8 +971,8 @@ export default function AdminDashboard() {
               <div style={{ display: "flex", gap: 8 }}>
                 <Button variant="outline" onClick={() => downloadTemplate("mgdStudent")} style={{ fontSize: 12 }}>⬇ Template</Button>
                 <label style={{ cursor: "pointer" }}>
-                  <span style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", display: "inline-block" }}>⬆ Upload Excel</span>
-                  <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={e => { setBulkUploadResult(null); setBulkUploadErrors([]); if (e.target.files?.[0]) handleExcelUpload(e.target.files[0], "mgdStudent"); e.target.value = ""; }} />
+                  <span style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", display: "inline-block" }}>⬆ Upload CSV</span>
+                  <input type="file" accept=".csv" style={{ display: "none" }} onChange={e => { setBulkUploadResult(null); setBulkUploadErrors([]); if (e.target.files?.[0]) handleCsvUpload(e.target.files[0], "mgdStudent"); e.target.value = ""; }} />
                 </label>
                 <Button onClick={() => { setShowAddMgdStudent(true); setEditingMgdStudent(null); setMgdStudentForm({ studentName: "", phoneNumber: "", email: "", admissionNumber: "", class: "", section: "" }); setMgdStudentErrors({}); }}>
                   <Plus size={14} style={{ marginRight: 8 }} /> Add Student
@@ -1001,6 +1036,7 @@ export default function AdminDashboard() {
                   }}>Create</Button>
                   <Button variant="outline" onClick={() => { setShowAddMgdStudent(false); setMgdStudentErrors({}); }}>Cancel</Button>
                 </div>
+                {mgdStudentErrors._form && <div style={{ fontSize: 12, color: "#d94f4f", marginTop: 8 }}>{mgdStudentErrors._form}</div>}
               </div>
             )}
 
@@ -1219,8 +1255,8 @@ export default function AdminDashboard() {
               <div style={{ display: "flex", gap: 8 }}>
                 <Button variant="outline" onClick={() => downloadTemplate("mgdTeacher")} style={{ fontSize: 12 }}>⬇ Template</Button>
                 <label style={{ cursor: "pointer" }}>
-                  <span style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", display: "inline-block" }}>⬆ Upload Excel</span>
-                  <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={e => { setBulkUploadResult(null); setBulkUploadErrors([]); if (e.target.files?.[0]) handleExcelUpload(e.target.files[0], "mgdTeacher"); e.target.value = ""; }} />
+                  <span style={{ fontSize: 12, padding: "8px 14px", borderRadius: 8, border: "1px solid var(--rule)", background: "var(--pane)", display: "inline-block" }}>⬆ Upload CSV</span>
+                  <input type="file" accept=".csv" style={{ display: "none" }} onChange={e => { setBulkUploadResult(null); setBulkUploadErrors([]); if (e.target.files?.[0]) handleCsvUpload(e.target.files[0], "mgdTeacher"); e.target.value = ""; }} />
                 </label>
                 <Button onClick={() => { setShowAddMgdTeacher(true); setEditingMgdTeacher(null); setMgdTeacherForm({ teacherName: "", employeeId: "", email: "", phoneNumber: "", assignments: [], isClassTeacher: false, classTeacherOf: "" }); setMgdTeacherErrors({}); setTeacherAssignClass(""); setTeacherAssignSection(""); setTeacherAssignSubjects([]); }}>
                   <Plus size={14} style={{ marginRight: 8 }} /> Add Teacher
@@ -1351,6 +1387,7 @@ export default function AdminDashboard() {
                     }}>Create</Button>
                     <Button variant="outline" onClick={() => { setShowAddMgdTeacher(false); setMgdTeacherErrors({}); }}>Cancel</Button>
                   </div>
+                  {mgdTeacherErrors._form && <div style={{ fontSize: 12, color: "#d94f4f", marginTop: 8 }}>{mgdTeacherErrors._form}</div>}
                 </div>
               );
             })()}
@@ -1737,13 +1774,6 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {!isChatOpen && (
-        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} style={{ position: "fixed", bottom: 24, right: 24, zIndex: 40 }}>
-          <button onClick={() => setIsChatOpen(true)} data-testid="button-float-chat" style={{ width: 56, height: 56, borderRadius: "50%", background: "#1a1a2e", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 8px 30px rgba(26,26,46,0.3)", transition: "transform 0.2s" }}>
-            <MessageSquare style={{ width: 22, height: 22, color: "white" }} />
-          </button>
-        </motion.div>
-      )}
     </div>
   );
 }
