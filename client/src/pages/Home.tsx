@@ -2,15 +2,15 @@ import { Link } from "wouter";
 import { useState, useRef, useEffect } from "react";
 
 const C = {
-  cream: "#F5F0E8",
-  pinkLight: "#FADADD",
-  pinkMid: "#F7A8B8",
-  pinkHot: "#E8437A",
-  lavender: "#EAE4F7",
-  lavenderMid: "#C4B5E8",
-  purpleDark: "#3D1F6E",
-  textDark: "#1A0A2E",
-  textMid: "#5A4070",
+  cream: "#F5F3EE",
+  pinkLight: "#E8E1F4",
+  pinkMid: "#A995D7",
+  pinkHot: "#7A63B8",
+  lavender: "#D8D0EA",
+  lavenderMid: "#B8A9DB",
+  purpleDark: "#6F57AD",
+  textDark: "#383158",
+  textMid: "#595276",
   white: "#FFFFFF",
 };
 
@@ -181,9 +181,9 @@ export default function Home() {
         .lp-btn-outline { padding: 9px 22px; border: 1.5px solid ${C.purpleDark}; border-radius: 50px; background: transparent; color: ${C.purpleDark}; font-size: 0.875rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.2s; }
         .lp-btn-outline:hover { background: ${C.purpleDark}; color: white; }
         .lp-btn-primary { padding: 10px 24px; border: none; border-radius: 50px; background: ${C.purpleDark}; color: white; font-size: 0.875rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.22s; }
-        .lp-btn-primary:hover { background: ${C.pinkHot}; transform: translateY(-1px); }
+        .lp-btn-primary:hover { background: ${C.lavenderMid}; transform: translateY(-1px); }
         .lp-btn-hero { padding: 14px 32px; border-radius: 50px; background: ${C.purpleDark}; color: white; border: none; font-size: 1rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.22s; box-shadow: 0 8px 30px rgba(61,31,110,0.25); }
-        .lp-btn-hero:hover { background: ${C.pinkHot}; transform: translateY(-2px); box-shadow: 0 12px 40px rgba(232,67,122,0.3); }
+        .lp-btn-hero:hover { background: ${C.lavenderMid}; transform: translateY(-2px); box-shadow: 0 12px 40px rgba(111,87,173,0.26); }
         .lp-btn-hero-sec { padding: 14px 32px; border-radius: 50px; background: transparent; color: ${C.textMid}; border: 1.5px solid rgba(90,64,112,0.3); font-size: 1rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.22s; }
         .lp-btn-hero-sec:hover { border-color: ${C.purpleDark}; color: ${C.purpleDark}; }
         .lp-feature-card { border-radius: 20px; padding: 36px; transition: transform 0.25s, box-shadow 0.25s; cursor: default; }
@@ -198,7 +198,7 @@ export default function Home() {
         @keyframes bounce { 0%,60%,100% { transform:translateY(0); background:#C4B5E8; } 30% { transform:translateY(-4px); background:#5B4FCF; } }
         @keyframes lp-fadeUp { from { opacity:0; transform:translateY(30px); } to { opacity:1; transform:translateY(0); } }
         .lp-hero-content { animation: lp-fadeUp 0.8s ease both; }
-        .lp-cta-btn { padding: 14px 32px; border-radius: 50px; background: ${C.pinkHot}; color: white; border: none; font-size: 1rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.22s; box-shadow: 0 8px 40px rgba(232,67,122,0.3); }
+        .lp-cta-btn { padding: 14px 32px; border-radius: 50px; background: ${C.purpleDark}; color: white; border: none; font-size: 1rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.22s; box-shadow: 0 8px 40px rgba(111,87,173,0.26); }
         .lp-cta-btn:hover { background: ${C.purpleDark}; color: white; transform: translateY(-1px); }
         .lp-sc-eyebrow { display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #5B4FCF; margin-bottom: 18px; }
         .dark-sc .lp-sc-eyebrow { color: #A78BFA; }
@@ -206,9 +206,9 @@ export default function Home() {
       <div className="lp-root">
 
         {/* NAV */}
-        <nav style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 60px", background: "rgba(245,240,232,0.88)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(200,180,220,0.25)" }}>
+        <nav style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 60px", background: "rgba(245,243,238,0.92)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(184,169,219,0.35)" }}>
           <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "1.4rem", color: C.purpleDark, letterSpacing: "-0.02em" }}>
-            Edu<span style={{ color: C.pinkHot }}>Sync</span>
+            scholar<span style={{ color: C.purpleDark }}>ai</span>
           </div>
           <ul style={{ display: "flex", gap: 36, listStyle: "none" }}>
             {["Schools", "Teachers", "Students", "Resources"].map(l => <li key={l}><a href="#" className="lp-nav-link">{l}</a></li>)}
@@ -220,7 +220,7 @@ export default function Home() {
         </nav>
 
         {/* HERO */}
-        <section style={{ minHeight: "100vh", display: "flex", alignItems: "center", padding: "120px 60px 80px", position: "relative", overflow: "hidden" }}>
+        <section style={{ minHeight: "100vh", display: "flex", alignItems: "center", padding: "120px 60px 80px", position: "relative", overflow: "hidden", background: C.lavender }}>
           <div style={{ position: "absolute", top: -100, right: -80, width: 600, height: 600, background: `radial-gradient(ellipse, ${C.pinkLight} 0%, transparent 70%)`, borderRadius: "50%", pointerEvents: "none" }} />
           <div style={{ position: "absolute", bottom: -60, left: "30%", width: 400, height: 400, background: `radial-gradient(ellipse, ${C.lavender} 0%, transparent 70%)`, borderRadius: "50%", pointerEvents: "none" }} />
           <div className="lp-hero-content" style={{ maxWidth: 680, position: "relative", zIndex: 2 }}>
@@ -231,7 +231,7 @@ export default function Home() {
               Where Teachers, Students &amp; Schools <em style={{ fontStyle: "italic", color: C.pinkHot }}>Think Smarter.</em>
             </h1>
             <p style={{ fontSize: "1.15rem", lineHeight: 1.65, color: C.textMid, maxWidth: 520, marginBottom: 40, fontWeight: 300 }}>
-              EduSync is the AI intelligence layer for your entire school — automated answer checking, early risk detection, chapter-level learning gaps, and real-time performance insights in one calm platform.
+              scholarai is the AI intelligence layer for your entire school — automated answer checking, early risk detection, chapter-level learning gaps, and real-time performance insights in one calm platform.
             </p>
             <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
               <Link href="/login"><button className="lp-btn-hero">Get Started Free →</button></Link>
@@ -354,7 +354,7 @@ export default function Home() {
             Ready to transform how your school <em style={{ fontStyle: "italic", color: C.pinkHot }}>thinks?</em>
           </h2>
           <p style={{ fontSize: "1.05rem", color: C.textMid, marginBottom: 40, position: "relative", zIndex: 2, fontWeight: 300 }}>
-            Join hundreds of schools already using EduSync to grade faster, identify struggling students earlier, and improve academic outcomes.
+            Join hundreds of schools already using scholarai to grade faster, identify struggling students earlier, and improve academic outcomes.
           </p>
           <Link href="/login"><button className="lp-cta-btn" style={{ position: "relative", zIndex: 2 }}>Get Started Free →</button></Link>
         </section>
@@ -362,9 +362,9 @@ export default function Home() {
         {/* FOOTER */}
         <footer style={{ padding: "40px 60px", background: C.textDark, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "1.2rem", color: "white" }}>
-            Edu<span style={{ color: C.pinkMid }}>Sync</span>
+            scholar<span style={{ color: C.pinkMid }}>ai</span>
           </div>
-          <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>© 2026 EduSync. Empowering schools through intelligent data.</p>
+          <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>© 2026 scholarai. Empowering schools through intelligent data.</p>
         </footer>
 
       </div>
