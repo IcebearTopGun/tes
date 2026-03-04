@@ -2472,6 +2472,16 @@ ${hwContext}`;
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
     try {
       const teacherRecord = await storage.getTeacherById(req.user.id);
+      const parsedAssignments = (() => {
+        try {
+          const raw = typeof teacherRecord?.assignments === "string"
+            ? JSON.parse(teacherRecord.assignments || "[]")
+            : (teacherRecord as any)?.assignments;
+          return normalizeAssignments(raw);
+        } catch {
+          return [] as Array<{ class: string; section: string; subjects: string[] }>;
+        }
+      })();
 
       // Load assigned subjects from subjects table (admin-assigned)
       const assignedSubjectRows = await storage.getAllSubjects().then(
@@ -2479,12 +2489,25 @@ ${hwContext}`;
       );
 
       // Build structured subject options: { name, code, className, section }
-      const structuredSubjects = assignedSubjectRows.map(s => ({
+      const structuredSubjectsFromSubjects = assignedSubjectRows.map(s => ({
         name: s.name,
         code: s.code || "",
-        className: s.className || "",
-        section: s.section || "",
+        className: String(s.className || "").trim(),
+        section: String(s.section || "").trim().toUpperCase(),
       }));
+      const structuredSubjectsFromAssignments = parsedAssignments.flatMap((a) =>
+        a.subjects.map((subject) => ({
+          name: subject,
+          code: "",
+          className: a.class,
+          section: a.section,
+        }))
+      );
+      const structuredSubjects = [...structuredSubjectsFromSubjects, ...structuredSubjectsFromAssignments]
+        .filter((s) => s.name && s.className && s.section)
+        .filter((s, i, arr) => arr.findIndex((x) =>
+          x.name === s.name && x.className === s.className && x.section === s.section
+        ) === i);
 
       // Also pull from exams/homework for fallback
       const teacherExams = await storage.getExamsByTeacher(req.user.id);
@@ -2494,21 +2517,37 @@ ${hwContext}`;
       const subjectsFromHw = teacherHw.map(h => h.subject);
       const allSubjectNames = [...new Set([
         ...assignedSubjectRows.map(s => s.name),
+        ...parsedAssignments.flatMap((a) => a.subjects),
         ...subjectsFromExams,
         ...subjectsFromHw
       ])].sort();
 
       // Assigned class-section pairs
-      const assignedClassSections = assignedSubjectRows
+      const assignedClassSectionsFromSubjects = assignedSubjectRows
         .filter(s => s.className && s.section)
-        .map(s => ({ className: s.className!, section: s.section! }));
+        .map(s => ({ className: String(s.className!).trim(), section: String(s.section!).trim().toUpperCase() }));
+      const assignedClassSectionsFromAssignments = parsedAssignments.map((a) => ({
+        className: a.class,
+        section: a.section,
+      }));
       
       // Also from classes table (if teacher is class teacher)
       const allClasses = await storage.getAllClasses();
       const classTeacherClasses = allClasses.filter(c => c.classTeacherId === req.user!.id)
-        .map(c => ({ className: c.name, section: c.section }));
+        .map(c => ({ className: String(c.name).trim(), section: String(c.section).trim().toUpperCase() }));
+      const classTeacherFromTeacherRecord = (() => {
+        const value = String((teacherRecord as any)?.classTeacherOf || "").trim().toUpperCase();
+        const match = value.match(/^([0-9]{1,2})-([A-Z])$/);
+        if (!match) return [];
+        return [{ className: match[1], section: match[2] }];
+      })();
 
-      const allClassSections = [...assignedClassSections, ...classTeacherClasses]
+      const allClassSections = [
+        ...assignedClassSectionsFromSubjects,
+        ...assignedClassSectionsFromAssignments,
+        ...classTeacherClasses,
+        ...classTeacherFromTeacherRecord,
+      ]
         .filter((v, i, a) => a.findIndex(x => x.className === v.className && x.section === v.section) === i);
 
       const uniqueClasses = [...new Set(allClassSections.map(c => c.className))].sort();
