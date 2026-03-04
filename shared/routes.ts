@@ -165,7 +165,17 @@ export const api = {
             from: z.string(),
             comment: z.string(),
             date: z.string()
-          }))
+          })),
+          classRank: z.number().nullable().optional(),
+          classTotal: z.number().optional(),
+          classAvg: z.number().optional(),
+          leaderboard: z.array(z.object({
+            rank: z.number(),
+            initials: z.string(),
+            name: z.string(),
+            score: z.number(),
+            me: z.boolean(),
+          })).optional(),
         }),
         401: errorSchemas.unauthorized
       }

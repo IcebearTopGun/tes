@@ -2,7 +2,7 @@ import { useRef, useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 
-type StudentNavTab = "overview" | "homework" | "evaluations";
+type StudentNavTab = "overview" | "homework" | "evaluations" | "ai-insights";
 
 interface StudentTopNavProps {
   activeTab: StudentNavTab;
@@ -57,23 +57,15 @@ export default function StudentTopNav({ activeTab, initials, onProfileClick }: S
           </svg>
           Exam Evaluations
         </button>
+        <button className={`sf-nav-tab${activeTab === "ai-insights" ? " on" : ""}`} onClick={() => setLocation("/student-dashboard?tab=ai-insights")}>
+          <svg className="sf-nav-tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+          </svg>
+          AI Insights
+        </button>
       </div>
 
       <div className="sf-nav-right">
-        <div className="sf-search">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: "var(--dim)", flexShrink: 0 }}>
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
-          <input placeholder="Search…" />
-        </div>
-        <div className="sf-ic-btn">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
-          <span className="sf-notif-dot" />
-        </div>
         <div className="sf-ava" ref={avaRef} onClick={() => setShowAvaMenu(v => !v)}>
           {initials}
           {showAvaMenu && (

@@ -1,27 +1,20 @@
 import "@/dashboard.css";
 import ProfileDrawer from "@/components/ProfileDrawer";
 import StudentTopNav from "@/components/student/StudentTopNav";
+import CustomInsights from "@/components/CustomInsights";
 import { useStudentDashboard } from "@/hooks/use-dashboard";
 import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { useState, useRef, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
-import { Loader2, X, Plus, Send, TrendingUp, MessageSquare, BookOpen } from "lucide-react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { X, BookOpen } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Input } from "@/components/ui/input";
 import { fetchJsonWithAuth } from "@/lib/fetcher";
 import { getInitials } from "@/shared/utils/identity";
-
-const STUDENT_EXAMPLE_QUESTIONS = [
-  "How did I perform overall?",
-  "Which subject do I need to improve in?",
-  "What should I focus on for my next exam?",
-  "What feedback did my teachers give me?",
-];
+import { useLocation } from "wouter";
+import { useStudentHomeworkWorkspace } from "@/features/student/homework/hooks/useStudentHomeworkWorkspace";
+import { useStudentEvaluationsWorkspace } from "@/features/student/evaluations/hooks/useStudentEvaluationsWorkspace";
 
 interface PerformanceProfile {
   strengths: string[];
@@ -47,38 +40,19 @@ function getGreeting() {
   return "Good evening";
 }
 
-function scoreColor(pct: number) {
-  if (pct >= 75) return "var(--green)";
-  if (pct >= 50) return "var(--amber)";
-  return "var(--red)";
-}
-
 const DOT_COLORS = ["var(--ink)", "var(--lavender)", "var(--lav-card)", "var(--blue)", "var(--green)"];
 
 export default function StudentDashboard() {
-  const { data, isLoading, error } = useStudentDashboard();
+  const { data, isLoading } = useStudentDashboard();
   const { user } = useAuth();
-  const { toast } = useToast();
+  const [location] = useLocation();
+  const activeSection = new URLSearchParams(location.split("?")[1] || "").get("tab") === "ai-insights" ? "ai-insights" : "overview";
 
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatMessage, setChatMessage] = useState("");
-  const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const [revisionChapter, setRevisionChapter] = useState<{ chapter: string; subject: string } | null>(null);
   const [expandedQuestion, setExpandedQuestion] = useState<number | null>(null);
   const [isProfilePanelOpen, setIsProfilePanelOpen] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  const { data: conversations } = useQuery<any[]>({
-    queryKey: ["/api/student/chat/conversations"],
-    queryFn: () => fetchJsonWithAuth("/api/student/chat/conversations"),
-    enabled: isChatOpen,
-  });
-
-  const { data: messages, refetch: refetchMessages } = useQuery<any[]>({
-    queryKey: ["/api/student/chat/messages", activeConversationId],
-    queryFn: () => fetchJsonWithAuth(`/api/student/chat/conversations/${activeConversationId}/messages`),
-    enabled: !!activeConversationId,
-  });
+  const { analyticsQuery } = useStudentHomeworkWorkspace();
+  const { evaluationsQuery } = useStudentEvaluationsWorkspace();
 
   const { data: performanceProfile, isLoading: isProfileLoading, refetch: refetchProfile } = useQuery<PerformanceProfile>({
     queryKey: ["/api/student/performance-profile"],
@@ -97,31 +71,6 @@ export default function StudentDashboard() {
     staleTime: 5 * 60 * 1000,
   });
 
-
-  const startConversation = useMutation({
-    mutationFn: () =>
-      fetchJsonWithAuth("/api/student/chat/conversations", {
-        method: "POST",
-        body: JSON.stringify({ title: "Academic Chat" }),
-      }),
-    onSuccess: (d) => { setActiveConversationId(d.id); queryClient.invalidateQueries({ queryKey: ["/api/student/chat/conversations"] }); },
-    onError: () => toast({ title: "Error", description: "Could not start conversation.", variant: "destructive" }),
-  });
-
-  const sendMessage = useMutation({
-    mutationFn: (content: string) =>
-      fetchJsonWithAuth(`/api/student/chat/conversations/${activeConversationId}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ content }),
-      }),
-    onSuccess: () => { setChatMessage(""); refetchMessages(); },
-    onError: () => toast({ title: "Error", description: "Failed to send message.", variant: "destructive" }),
-  });
-
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages]);
-
   if (isLoading) {
     return (
       <div className="sf-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
@@ -138,21 +87,17 @@ export default function StudentDashboard() {
   const improvementAreas = data?.improvementAreas || [];
   const examsCount = data?.assignments || 0;
   const performanceSummary = data?.performanceSummary || "";
+  const evaluations = evaluationsQuery.data || [];
+  const homeworkAnalytics = analyticsQuery.data;
 
   const avgScore = marksOverview.length > 0
     ? Math.round(marksOverview.reduce((sum: number, m: any) => sum + (m.score / m.total) * 100, 0) / marksOverview.length)
     : 0;
 
-  const classRank = 3;
-  const classTotal = 32;
-  const classAvg = 58;
-
-  const leaderboard = [
-    { rank: 1, initials: "PR", name: "Priya Rao", score: 82, me: false },
-    { rank: 2, initials: "RM", name: "Rohan Mehta", score: 76, me: false },
-    { rank: classRank, initials, name: `${firstName} (you)`, score: avgScore || 64, me: true },
-    { rank: 4, initials: "SG", name: "Sara Gupta", score: 58, me: false },
-  ];
+  const classRank = data?.classRank ?? null;
+  const classTotal = data?.classTotal ?? 0;
+  const classAvg = data?.classAvg ?? 0;
+  const leaderboard = data?.leaderboard ?? [];
 
   const scoreBars = marksOverview.length > 0
     ? marksOverview.map((m: any, i: number) => ({
@@ -163,17 +108,13 @@ export default function StudentDashboard() {
         barColor: DOT_COLORS[i % DOT_COLORS.length],
         amber: Math.round((m.score / m.total) * 100) < 75,
       }))
-    : [
-        { name: "Mathematics", pct: 64, label: "7/11", color: "var(--ink)", barColor: "var(--ink)", amber: true },
-        { name: "Biology", pct: 0, label: "— Pending", color: "var(--lavender)", barColor: "var(--lavender)", amber: false },
-        { name: "Chemistry", pct: 0, label: "— Pending", color: "var(--lav-card)", barColor: "var(--lav-card)", amber: false },
-      ];
+    : [];
 
   const hasEvals = examsCount > 0;
 
   const aiInsight = performanceSummary
     ? `🤖 AI Insight: ${performanceSummary}`
-    : `🤖 AI Insight: You completed ${examsCount} exam${examsCount !== 1 ? "s" : ""} with ${avgScore || 64}% average. ${improvementAreas[0] ? `Reviewing ${improvementAreas[0]} could significantly boost your score.` : "Keep up the great work and review your weak areas for next time."}`;
+    : `🤖 AI Insight: You completed ${examsCount} exam${examsCount !== 1 ? "s" : ""} with ${avgScore}% average. ${improvementAreas[0] ? `Reviewing ${improvementAreas[0]} could significantly boost your score.` : "Keep up the momentum with regular revisions."}`;
 
   const focusItems = improvementAreas.length > 0
     ? improvementAreas.slice(0, 3).map((area: string, i: number) => ({
@@ -184,42 +125,53 @@ export default function StudentDashboard() {
         subject: area.includes(":") ? area.split(":")[0] : "General",
         text: area.includes(":") ? area.split(":")[1]?.trim() : area,
       }))
-    : [
-        { icon: "🔴", cls: "sf-fi-r", prio: "High", prioCls: "sf-fp-r", subject: "Biology", text: "Left ventricle needs thicker walls for systemic (not 'systematic') circulation — key terminology mark." },
-        { icon: "🟡", cls: "sf-fi-a", prio: "Medium", prioCls: "sf-fp-a", subject: "Chemistry", text: "Include balanced chemical equation + real-world hydrogen gas usage examples in Q2 answer." },
-        { icon: "🟢", cls: "sf-fi-g", prio: "", prioCls: "", subject: "Mathematics", text: "Review algebraic identities for multi-step word problems — quick 15–20% score boost here." },
-      ];
+    : [];
 
-  const weakChips = performanceProfile?.weak_chapters.slice(0, 2).map(wc => ({ label: `↓ ${wc.chapter}`, cls: "sf-ch-r" })) || [
-    { label: "↓ Terminology", cls: "sf-ch-r" },
-    { label: "↓ Comprehension", cls: "sf-ch-r" },
-  ];
-  const strengthChips = performanceProfile?.strengths.slice(0, 2).map(s => ({ label: `✓ ${s}`, cls: "sf-ch-g" })) || [
-    { label: "✓ Problem Solving", cls: "sf-ch-g" },
-    { label: "✓ Logical Reasoning", cls: "sf-ch-g" },
-  ];
-  const midChips = [
-    { label: `~ Math (${avgScore || 64}%)`, cls: "sf-ch-a" },
-    { label: "~ Memory Recall", cls: "sf-ch-a" },
-  ];
+  const weakChips = performanceProfile?.weak_chapters.slice(0, 3).map(wc => ({ label: `↓ ${wc.chapter}`, cls: "sf-ch-r" })) || [];
+  const strengthChips = performanceProfile?.strengths.slice(0, 3).map(s => ({ label: `✓ ${s}`, cls: "sf-ch-g" })) || [];
+  const midChips = avgScore > 0 ? [{ label: `~ Current Avg (${avgScore}%)`, cls: "sf-ch-a" }] : [];
   const allChips = [...strengthChips, ...midChips, ...weakChips];
 
+  const homeworkPct = homeworkAnalytics?.totalAssigned
+    ? Math.round((homeworkAnalytics.totalSubmitted / homeworkAnalytics.totalAssigned) * 100)
+    : 0;
+
+  const radarLabelsRaw = scoreBars.map((s) => s.name).slice(0, 6);
+  while (radarLabelsRaw.length < 6) radarLabelsRaw.push(`Axis ${radarLabelsRaw.length + 1}`);
+  const radarScores = scoreBars.map((s) => s.pct).slice(0, 6);
+  while (radarScores.length < 6) radarScores.push(avgScore || 0);
+  const radarAngles = [0, 60, 120, 180, 240, 300];
+  const pointAt = (score: number, angle: number, rMax = 56) => {
+    const radius = (Math.max(0, Math.min(100, score)) / 100) * rMax;
+    const rad = (Math.PI / 180) * (angle - 90);
+    const x = 87.5 + radius * Math.cos(rad);
+    const y = 87.5 + radius * Math.sin(rad);
+    return `${x},${y}`;
+  };
+  const radarPolygonPoints = radarScores.map((score, i) => pointAt(score, radarAngles[i])).join(" ");
+  const radarNodes = radarScores.map((score, i) => {
+    const [x, y] = pointAt(score, radarAngles[i]).split(",").map(Number);
+    return { x, y };
+  });
+
   const examFeedback = {
-    avatarLetter: "M",
-    name: "Mid-Term Exam",
+    avatarLetter: marksOverview[0]?.subject?.[0]?.toUpperCase() || "E",
+    name: evaluations[0]?.examName || "Latest Evaluation",
     date: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
     tag: "AI Evaluation",
-    quote: performanceSummary || "Demonstrated basic understanding but missed key details — thicker walls of left ventricle and balanced chemical equation in Q2. Attention to specific terminology would significantly enhance answers.",
+    quote: evaluations[0]?.overallFeedback || performanceSummary || "No detailed feedback available yet.",
     stars: avgScore >= 80 ? 4 : avgScore >= 60 ? 3 : 2,
     scoreText: avgScore >= 80 ? "4/5 · Great work" : avgScore >= 60 ? "3/5 · Good progress" : "2/5 · Keep improving",
   };
 
   return (
     <div className="sf-root">
-      <StudentTopNav activeTab="overview" initials={initials} onProfileClick={() => setIsProfilePanelOpen(true)} />
+      <StudentTopNav activeTab={activeSection} initials={initials} onProfileClick={() => setIsProfilePanelOpen(true)} />
 
       {/* PAGE */}
       <div className="sf-page">
+        {activeSection === "overview" && (
+          <>
         <div className="sf-page-head">
           <div>
             <div className="sf-page-title">{getGreeting()}, {firstName}.</div>
@@ -231,33 +183,33 @@ export default function StudentDashboard() {
         <div className="sf-funnel sf-funnel-5">
           <div className="sf-f-col">
             <div className="sf-f-cat">Avg Score</div>
-            <div className="sf-f-num">{avgScore || 64}%</div>
+            <div className="sf-f-num">{avgScore}%</div>
             <div className="sf-f-delta sf-d-flat">→ Current Performance</div>
-            <div className="sf-f-desc">Average across <b>{examsCount || 1} evaluated exam{examsCount !== 1 ? "s" : ""}</b>.</div>
+            <div className="sf-f-desc">Average across <b>{examsCount} evaluated exam{examsCount !== 1 ? "s" : ""}</b>.</div>
           </div>
           <div className="sf-f-col">
             <div className="sf-f-cat">Class Rank</div>
-            <div className="sf-f-num">#{classRank}</div>
-            <div className="sf-f-delta sf-d-up">↑ +2 places</div>
-            <div className="sf-f-desc">Out of <b>{classTotal} students</b> in Class 10A.</div>
+            <div className="sf-f-num">{classRank ? `#${classRank}` : "—"}</div>
+            <div className="sf-f-delta sf-d-flat">{classRank ? "✓ Live ranking" : "→ Awaiting class data"}</div>
+            <div className="sf-f-desc">Out of <b>{classTotal || 0} students</b> in your class.</div>
           </div>
           <div className="sf-f-col">
             <div className="sf-f-cat">Exams Done</div>
-            <div className="sf-f-num">{examsCount || 1}</div>
+            <div className="sf-f-num">{examsCount}</div>
             <div className="sf-f-delta sf-d-flat">✓ Evaluated</div>
-            <div className="sf-f-desc">{examsCount || 1} exam{examsCount !== 1 ? "s" : ""} graded by AI.</div>
+            <div className="sf-f-desc">{examsCount} exam{examsCount !== 1 ? "s" : ""} graded by AI.</div>
           </div>
           <div className="sf-f-col">
             <div className="sf-f-cat">Homework</div>
-            <div className="sf-f-num">60%</div>
-            <div className="sf-f-delta sf-d-up">↑ 3 of 5 done</div>
-            <div className="sf-f-desc"><b>2 tasks pending</b> — due today and Sunday.</div>
+            <div className="sf-f-num">{homeworkPct}%</div>
+            <div className="sf-f-delta sf-d-flat">✓ {homeworkAnalytics?.totalSubmitted || 0} of {homeworkAnalytics?.totalAssigned || 0} submitted</div>
+            <div className="sf-f-desc"><b>{Math.max((homeworkAnalytics?.totalAssigned || 0) - (homeworkAnalytics?.totalSubmitted || 0), 0)} pending</b> homework items.</div>
           </div>
           <div className="sf-f-col">
             <div className="sf-f-cat">Focus Areas</div>
-            <div className="sf-f-num">{Math.max(improvementAreas.length, 2)}</div>
-            <div className="sf-f-delta sf-d-dn">↓ Needs work</div>
-            <div className="sf-f-desc">Topics flagged by AI tutotr for revision.</div>
+            <div className="sf-f-num">{improvementAreas.length}</div>
+            <div className="sf-f-delta sf-d-dn">{improvementAreas.length > 0 ? "↓ Needs work" : "✓ Stable"}</div>
+            <div className="sf-f-desc">Topics flagged by AI tutor for revision.</div>
           </div>
         </div>
 
@@ -265,13 +217,13 @@ export default function StudentDashboard() {
         <div className="sf-rank-card">
           <span className="sf-rank-trophy">🏆</span>
           <div className="sf-rank-info">
-            <div className="sf-rank-label">Your Class Ranking · Class 10A</div>
-            <div className="sf-rank-num">#{classRank}<sup>{(classRank as number) === 1 ? "st" : (classRank as number) === 2 ? "nd" : "rd"}</sup></div>
-            <div className="sf-rank-sub">Out of {classTotal} students &nbsp;·&nbsp; Top 10% of class</div>
+            <div className="sf-rank-label">Your Class Ranking</div>
+            <div className="sf-rank-num">{classRank ? `#${classRank}` : "—"}</div>
+            <div className="sf-rank-sub">Out of {classTotal || 0} students</div>
           </div>
           <div className="sf-rank-divider" />
           <div className="sf-rank-stat">
-            <div className="sf-rank-stat-num">{avgScore || 64}%</div>
+            <div className="sf-rank-stat-num">{avgScore}%</div>
             <div className="sf-rank-stat-lbl">Your score</div>
           </div>
           <div className="sf-rank-divider" />
@@ -281,7 +233,7 @@ export default function StudentDashboard() {
           </div>
           <div className="sf-rank-divider" />
           <div className="sf-leaderboard">
-            {leaderboard.map((lb, i) => (
+            {(leaderboard || []).map((lb, i) => (
               <div key={i} className={`sf-lb-item${lb.me ? " me" : ""}`}>
                 <div className="sf-lb-rank">{lb.rank}</div>
                 <div className="sf-lb-av" style={lb.me ? { background: "rgba(200,194,232,0.3)" } : undefined}>{lb.initials}</div>
@@ -289,6 +241,7 @@ export default function StudentDashboard() {
                 <div className="sf-lb-score">{lb.score}%</div>
               </div>
             ))}
+            {leaderboard.length === 0 && <div className="sf-empty" style={{ margin: 0, padding: "10px 0" }}>Ranking will appear after class evaluations are available.</div>}
           </div>
         </div>
 
@@ -300,6 +253,7 @@ export default function StudentDashboard() {
             <div className="sf-card-sub">Performance report</div>
             <div className="sf-ai-note" data-testid="text-performance-summary">{aiInsight}</div>
             <div className="sf-sec-lbl">Score Breakdown</div>
+            {scoreBars.length === 0 && <div className="sf-empty" style={{ margin: 0, padding: "10px 0" }}>No evaluated marks available yet.</div>}
             {scoreBars.map((bar, i) => (
               <div key={i} className="sf-sbar">
                 <div className="sf-sbar-top">
@@ -338,19 +292,16 @@ export default function StudentDashboard() {
                   <line x1="87.5" y1="139" x2="87.5" y2="87.5" stroke="var(--cream2)" strokeWidth="1"/>
                   <line x1="39" y1="108" x2="87.5" y2="87.5" stroke="var(--cream2)" strokeWidth="1"/>
                   <line x1="39" y1="47" x2="87.5" y2="87.5" stroke="var(--cream2)" strokeWidth="1"/>
-                  <polygon points="87.5,36 128,60 125,104 87.5,127 48,102 50,55" fill="rgba(200,194,232,0.3)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
-                  <circle cx="87.5" cy="36"  r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
-                  <circle cx="128"  cy="60"  r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
-                  <circle cx="125"  cy="104" r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
-                  <circle cx="87.5" cy="127" r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
-                  <circle cx="48"   cy="102" r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
-                  <circle cx="50"   cy="55"  r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
-                  <text x="87.5" y="9"   textAnchor="middle" fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Math</text>
-                  <text x="148"  y="51"  textAnchor="start"  fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Logic</text>
-                  <text x="148"  y="113" textAnchor="start"  fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Memory</text>
-                  <text x="87.5" y="154" textAnchor="middle" fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Terms</text>
-                  <text x="27"   y="113" textAnchor="end"    fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Recall</text>
-                  <text x="27"   y="51"  textAnchor="end"    fill="var(--mid)" fontSize="10" fontFamily="DM Sans">Solve</text>
+                  <polygon points={radarPolygonPoints} fill="rgba(200,194,232,0.3)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round"/>
+                  {radarNodes.map((n, i) => (
+                    <circle key={i} cx={n.x} cy={n.y} r="3.5" fill="var(--ink)" stroke="var(--white)" strokeWidth="2"/>
+                  ))}
+                  <text x="87.5" y="9"   textAnchor="middle" fill="var(--mid)" fontSize="10" fontFamily="DM Sans">{radarLabelsRaw[0]}</text>
+                  <text x="148"  y="51"  textAnchor="start"  fill="var(--mid)" fontSize="10" fontFamily="DM Sans">{radarLabelsRaw[1]}</text>
+                  <text x="148"  y="113" textAnchor="start"  fill="var(--mid)" fontSize="10" fontFamily="DM Sans">{radarLabelsRaw[2]}</text>
+                  <text x="87.5" y="154" textAnchor="middle" fill="var(--mid)" fontSize="10" fontFamily="DM Sans">{radarLabelsRaw[3]}</text>
+                  <text x="27"   y="113" textAnchor="end"    fill="var(--mid)" fontSize="10" fontFamily="DM Sans">{radarLabelsRaw[4]}</text>
+                  <text x="27"   y="51"  textAnchor="end"    fill="var(--mid)" fontSize="10" fontFamily="DM Sans">{radarLabelsRaw[5]}</text>
                 </svg>
               </div>
             )}
@@ -360,6 +311,7 @@ export default function StudentDashboard() {
                 <span key={i} className={`sf-chip ${chip.cls}`}>{chip.label}</span>
               ))}
             </div>
+            {allChips.length === 0 && <div className="sf-empty" style={{ margin: 0, padding: "10px 0" }}>Profile insights will appear after evaluation analysis.</div>}
             {hasEvals && (
               <div style={{ marginTop: 14 }}>
                 <button
@@ -380,6 +332,7 @@ export default function StudentDashboard() {
           <div className="sf-card">
             <div className="sf-card-title">AI Focus Areas</div>
             <div className="sf-card-sub">Topics to review before your next exam</div>
+            {focusItems.length === 0 && <div className="sf-empty" style={{ margin: 0, padding: "10px 0" }}>No specific focus areas detected from current data.</div>}
             {focusItems.map((item, i) => (
               <div key={i} className="sf-fitem" data-testid={`item-improvement-${i}`}>
                 <div className={`sf-fitem-ico ${item.cls}`}>{item.icon}</div>
@@ -533,73 +486,17 @@ export default function StudentDashboard() {
             </motion.div>
           )}
         </AnimatePresence>
+          </>
+        )}
+
+        {activeSection === "ai-insights" && (
+          <div className="sf-panel">
+            <CustomInsights role="student" />
+          </div>
+        )}
 
         <ProfileDrawer open={isProfilePanelOpen} onClose={() => setIsProfilePanelOpen(false)} />
       </div>
-
-      {/* AI CHAT SIDEBAR */}
-      <AnimatePresence>
-        {isChatOpen && (
-          <>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsChatOpen(false)} className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40" />
-            <motion.div initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }} transition={{ type: "spring", damping: 20 }} className="fixed right-0 top-0 h-screen w-full sm:w-[420px] bg-background border-l z-50 flex flex-col shadow-2xl">
-              <div className="p-4 border-b flex items-center justify-between bg-primary text-primary-foreground shrink-0">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5" />
-                  <div><h2 className="font-bold leading-tight">AI Tutotr</h2><p className="text-xs text-primary-foreground/70">Your personal academic assistant</p></div>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)} className="text-primary-foreground hover:bg-white/10 rounded-xl"><X className="h-5 w-5" /></Button>
-              </div>
-              <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-                {!activeConversationId ? (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-6">
-                    <div className="h-16 w-16 rounded-2xl bg-primary/10 flex items-center justify-center"><TrendingUp className="h-8 w-8 text-primary" /></div>
-                    <div><h3 className="font-bold text-lg">Ask Your AI Tutotr</h3><p className="text-sm text-muted-foreground mt-2 max-w-xs">Get personalized academic guidance based on your performance data.</p></div>
-                    <div className="w-full space-y-2">
-                      <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider text-left">Example questions</p>
-                      {STUDENT_EXAMPLE_QUESTIONS.map(q => (
-                        <button key={q} onClick={() => { startConversation.mutate(undefined, { onSuccess: () => setTimeout(() => setChatMessage(q), 300) }); }} className="w-full text-left text-sm px-3 py-2 rounded-xl bg-muted/50 hover:bg-primary/10 hover:text-primary border border-border/40 hover:border-primary/20 transition-all">{q}</button>
-                      ))}
-                    </div>
-                    <Button onClick={() => startConversation.mutate()} disabled={startConversation.isPending} className="rounded-xl w-full">
-                      {startConversation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />} Start Chat
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
-                      {(!messages || messages.length === 0) && <div className="text-center py-8 text-muted-foreground text-sm"><MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-30" /><p>Ask a question to get started</p></div>}
-                      {messages?.map(msg => (
-                        <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                          {msg.role === "assistant" && <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mr-2 mt-1"><TrendingUp className="h-3 w-3 text-primary" /></div>}
-                          <div className={`max-w-[82%] p-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${msg.role === "user" ? "bg-primary text-primary-foreground rounded-tr-none" : "bg-muted rounded-tl-none"}`}>{msg.content}</div>
-                        </div>
-                      ))}
-                      {sendMessage.isPending && <div className="flex justify-start items-center gap-2"><div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0"><TrendingUp className="h-3 w-3 text-primary" /></div><div className="bg-muted p-3 rounded-2xl rounded-tl-none flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /><span className="text-xs text-muted-foreground">Thinking…</span></div></div>}
-                    </div>
-                    <div className="p-4 border-t bg-muted/30 shrink-0">
-                      <div className="flex items-center gap-2 mb-2"><Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-7 rounded-lg" onClick={() => setActiveConversationId(null)}><Plus className="h-3 w-3 mr-1" /> New</Button></div>
-                      <form onSubmit={e => { e.preventDefault(); if (chatMessage.trim()) sendMessage.mutate(chatMessage); }} className="flex gap-2">
-                        <Input placeholder="Ask your AI tutotr…" value={chatMessage} onChange={e => setChatMessage(e.target.value)} className="rounded-xl bg-background" disabled={sendMessage.isPending} />
-                        <Button type="submit" size="icon" className="rounded-xl shrink-0" disabled={sendMessage.isPending || !chatMessage.trim()}><Send className="h-4 w-4" /></Button>
-                      </form>
-                    </div>
-                  </>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-
-      {/* Floating chat button */}
-      {!isChatOpen && (
-        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="fixed bottom-6 right-6 z-40">
-          <Button onClick={() => setIsChatOpen(true)} className="h-14 w-14 rounded-full shadow-2xl hover:scale-110 transition-transform">
-            <MessageSquare className="h-6 w-6" />
-          </Button>
-        </motion.div>
-      )}
     </div>
   );
 }

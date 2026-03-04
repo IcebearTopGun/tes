@@ -216,19 +216,32 @@ const PRINCIPAL_PROMPTS = [
   "How has overall school performance trended across evaluations?",
 ];
 
+const STUDENT_PROMPTS = [
+  "Show my latest subject-wise performance as a chart",
+  "Which areas should I prioritize this week?",
+  "How consistent are my scores across evaluations?",
+  "Summarize my homework completion and correctness",
+  "What are my strongest and weakest subjects?",
+  "Give me an action plan based on my recent results",
+];
+
 interface Props {
-  role: "admin" | "principal";
+  role: "admin" | "principal" | "student";
 }
 
 export default function CustomInsights({ role }: Props) {
-  const EXAMPLE_PROMPTS = role === "admin" ? ADMIN_PROMPTS : PRINCIPAL_PROMPTS;
+  const EXAMPLE_PROMPTS = role === "admin" ? ADMIN_PROMPTS : role === "principal" ? PRINCIPAL_PROMPTS : STUDENT_PROMPTS;
   const placeholderText = role === "admin"
     ? "e.g. 'Which teacher has the highest evaluation workload this term?'"
-    : "e.g. 'Which class has the lowest average performance? Show as a bar chart'";
+    : role === "principal"
+      ? "e.g. 'Which class has the lowest average performance? Show as a bar chart'"
+      : "e.g. 'Show my weakest subjects and suggest what to focus on this week'";
   const subText = role === "admin"
     ? "Ask any question about teacher workload, student enrolment, or operational data"
-    : "Ask any question about academic outcomes, class performance, or intervention needs";
-  const insightsTitle = role === "principal" ? "AI Insights" : "Custom Insights";
+    : role === "principal"
+      ? "Ask any question about academic outcomes, class performance, or intervention needs"
+      : "Ask questions about your own evaluations, homework progress, and learning gaps";
+  const insightsTitle = role === "admin" ? "Custom Insights" : "AI Insights";
 
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -253,19 +266,34 @@ export default function CustomInsights({ role }: Props) {
 
     try {
       // 1. Fetch data context from the appropriate API endpoints
-      const [statsRes, cpRes, teRes, siRes] = await Promise.allSettled([
-        fetchWithAuth(`/api/${role === "principal" ? "principal" : "admin"}/stats`).then(r => r.json()),
-        fetchWithAuth(`/api/principal/class-performance`).then(r => r.json()),
-        fetchWithAuth(`/api/principal/teacher-effectiveness`).then(r => r.json()),
-        fetchWithAuth(`/api/principal/school-insights`).then(r => r.json()),
-      ]);
-
-      const dataContext = {
-        stats: statsRes.status === "fulfilled" ? statsRes.value : null,
-        classPerformance: cpRes.status === "fulfilled" ? cpRes.value : [],
-        teacherEffectiveness: teRes.status === "fulfilled" ? teRes.value : [],
-        schoolInsights: siRes.status === "fulfilled" ? siRes.value : {},
-      };
+      let dataContext: Record<string, any>;
+      if (role === "student") {
+        const [dashboardRes, homeworkAnalyticsRes, evaluationsRes, profileRes] = await Promise.allSettled([
+          fetchWithAuth("/api/student/dashboard").then(r => r.json()),
+          fetchWithAuth("/api/student/homework/analytics").then(r => r.json()),
+          fetchWithAuth("/api/student/evaluations").then(r => r.json()),
+          fetchWithAuth("/api/student/performance-profile").then(r => r.json()),
+        ]);
+        dataContext = {
+          dashboard: dashboardRes.status === "fulfilled" ? dashboardRes.value : {},
+          homeworkAnalytics: homeworkAnalyticsRes.status === "fulfilled" ? homeworkAnalyticsRes.value : {},
+          evaluations: evaluationsRes.status === "fulfilled" ? evaluationsRes.value : [],
+          performanceProfile: profileRes.status === "fulfilled" ? profileRes.value : {},
+        };
+      } else {
+        const [statsRes, cpRes, teRes, siRes] = await Promise.allSettled([
+          fetchWithAuth(`/api/${role === "principal" ? "principal" : "admin"}/stats`).then(r => r.json()),
+          fetchWithAuth(`/api/principal/class-performance`).then(r => r.json()),
+          fetchWithAuth(`/api/principal/teacher-effectiveness`).then(r => r.json()),
+          fetchWithAuth(`/api/principal/school-insights`).then(r => r.json()),
+        ]);
+        dataContext = {
+          stats: statsRes.status === "fulfilled" ? statsRes.value : null,
+          classPerformance: cpRes.status === "fulfilled" ? cpRes.value : [],
+          teacherEffectiveness: teRes.status === "fulfilled" ? teRes.value : [],
+          schoolInsights: siRes.status === "fulfilled" ? siRes.value : {},
+        };
+      }
 
       // 2. Call Anthropic API to generate chart spec + narrative
       const systemPrompt = `You are a school analytics AI. You have access to real school performance data and generate visualisation specs in JSON.

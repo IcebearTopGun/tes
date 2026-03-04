@@ -666,6 +666,48 @@ export async function registerRoutes(
       ? `You have completed ${evals.length} evaluated exam(s) with an average score of ${avgPct}%.`
       : "No evaluated exams found yet. Submit your answer sheets to see your performance here.";
 
+    // Class ranking and class average (real data from classmates' evaluated records)
+    const classmates = (await storage.getAllStudents()).filter(
+      (s) => String(s.studentClass) === String(student.studentClass) && String(s.section) === String(student.section),
+    );
+
+    const peerStats: Array<{ admissionNumber: string; name: string; avgPct: number }> = [];
+    for (const peer of classmates) {
+      const peerEvals = await storage.getEvaluationsByStudent(peer.admissionNumber);
+      if (!peerEvals.length) continue;
+      const peerAvg = Math.round(
+        peerEvals.reduce((acc, e) => acc + (e.totalMarks / e.maxMarks) * 100, 0) / peerEvals.length,
+      );
+      peerStats.push({ admissionNumber: peer.admissionNumber, name: peer.name, avgPct: peerAvg });
+    }
+    peerStats.sort((a, b) => b.avgPct - a.avgPct);
+
+    const classTotal = classmates.length;
+    const classAvg = peerStats.length
+      ? Math.round(peerStats.reduce((sum, p) => sum + p.avgPct, 0) / peerStats.length)
+      : 0;
+    const classRankIdx = peerStats.findIndex((p) => p.admissionNumber === student.admissionNumber);
+    const classRank = classRankIdx >= 0 ? classRankIdx + 1 : null;
+    const initialsOf = (name: string) => name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
+
+    const leaderboard = peerStats.slice(0, 5).map((p, idx) => ({
+      rank: idx + 1,
+      initials: initialsOf(p.name || p.admissionNumber),
+      name: p.admissionNumber === student.admissionNumber ? `${(student.name || "You").split(" ")[0]} (you)` : p.name,
+      score: p.avgPct,
+      me: p.admissionNumber === student.admissionNumber,
+    }));
+    if (classRank && classRank > leaderboard.length) {
+      const me = peerStats[classRank - 1];
+      leaderboard.push({
+        rank: classRank,
+        initials: initialsOf(student.name || student.admissionNumber),
+        name: `${(student.name || "You").split(" ")[0]} (you)`,
+        score: me.avgPct,
+        me: true,
+      });
+    }
+
     res.json({
       assignments: evals.length,
       attendance: 95,
@@ -673,6 +715,10 @@ export async function registerRoutes(
       marksOverview,
       improvementAreas: improvementAreas.length ? improvementAreas : ["No improvement areas recorded yet."],
       feedback: feedback.length ? feedback : [{ from: "System", comment: "No evaluated exams yet.", date: new Date().toISOString().split("T")[0] }],
+      classRank,
+      classTotal,
+      classAvg,
+      leaderboard,
     });
   });
 
