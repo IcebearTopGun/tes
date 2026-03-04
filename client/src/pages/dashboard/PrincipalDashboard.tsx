@@ -194,19 +194,21 @@ export default function PrincipalDashboard() {
         </div>
 
         {/* ── PRINCIPAL KPIs ── */}
-        <div className="sf-funnel" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-          {overviewColumns.map((column, idx) => (
-            <div key={`principal-overview-col-${idx}`} className="sf-f-col" style={{ paddingLeft: idx === 0 ? 0 : undefined, borderRight: idx === 2 ? "none" : undefined }}>
-              {column.map((kpi, blockIdx) => (
-                <div key={kpi.label} style={{ marginTop: blockIdx === 0 ? 0 : 4 }}>
-                  <div className="sf-f-cat">{kpi.label}</div>
-                  <div className="sf-f-num" style={{ color: kpi.color }}>{kpi.value}</div>
-                  <div className="sf-f-desc">Live school metric.</div>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
+        {activeSection === "school-insights" && (
+          <div className="sf-funnel" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+            {overviewColumns.map((column, idx) => (
+              <div key={`principal-overview-col-${idx}`} className="sf-f-col" style={{ paddingLeft: idx === 0 ? 0 : undefined, borderRight: idx === 2 ? "none" : undefined }}>
+                {column.map((kpi, blockIdx) => (
+                  <div key={kpi.label} style={{ marginTop: blockIdx === 0 ? 0 : 4 }}>
+                    <div className="sf-f-cat">{kpi.label}</div>
+                    <div className="sf-f-num" style={{ color: kpi.color }}>{kpi.value}</div>
+                    <div className="sf-f-desc">Live school metric.</div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* ── CLASS PERFORMANCE TAB ── */}
         {activeSection === "class-performance" && (
