@@ -174,7 +174,7 @@ function parseCsvLine(line: string): string[] {
     }
   }
   out.push(cur.trim());
-  return out.map(v => v.replace(/^"|"$/g, ""));
+  return out.map(v => v.replace(/^"|"$/g, "").replace(/""/g, '"'));
 }
 
 // ─── InlineDropdown — absolute positioned, attached to scroll flow ────────────
@@ -553,7 +553,9 @@ export default function AdminDashboard() {
         }
 
         const splitRow = (line: string) =>
-          delimiter === "," ? parseCsvLine(line) : line.split(delimiter).map(c => c.trim().replace(/^"|"$/g, ""));
+          delimiter === ","
+            ? parseCsvLine(line)
+            : line.split(delimiter).map(c => c.trim().replace(/^"|"$/g, "").replace(/""/g, '"'));
 
         if (lines.length - startIdx < 2) { setBulkUploadErrors(["File appears empty. Ensure it has a header row and at least one data row."]); return; }
         const headers = splitRow(lines[startIdx]).map(h => h.replace(/^\uFEFF/, ""));
@@ -979,7 +981,7 @@ export default function AdminDashboard() {
                     const classKey = `cls-${cls}`;
                     const sections = byClass[cls].sort((a: any, b: any) => a.section.localeCompare(b.section));
                     return (
-                      <div key={cls} style={{ border: "1.5px solid rgba(26,26,46,0.10)", borderRadius: 12, background: "white" }}>
+                      <div key={cls} style={{ border: "1.5px solid var(--rule)", borderRadius: 12 }}>
                         {/* Class header */}
                         <button
                           onClick={() => setExpandedClass(prev => { const next = new Set(prev); next.has(classKey) ? next.delete(classKey) : next.add(classKey); return next; })}
@@ -1281,10 +1283,10 @@ export default function AdminDashboard() {
                     });
 
                     return (
-                      <div key={cls} style={{ border: "1.5px solid rgba(26,26,46,0.10)", borderRadius: 12, background: "white" }}>
+                      <div key={cls} style={{ border: "1.5px solid var(--rule)", borderRadius: 12 }}>
                         <button
                           onClick={() => setExpandedStudentClass(prev => { const next = new Set(prev); next.has(classKey) ? next.delete(classKey) : next.add(classKey); return next; })}
-                          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 18px", background: "white", border: "none", borderRadius: expandedStudentClass.has(classKey) ? "10px 10px 0 0" : 10, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 18px", background: "#f4f6f8", border: "none", borderRadius: expandedStudentClass.has(classKey) ? "10px 10px 0 0" : 10, cursor: "pointer", fontFamily: "inherit" }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <span style={{ fontSize: 18 }}>🏫</span>
@@ -1295,14 +1297,14 @@ export default function AdminDashboard() {
                         </button>
 
                         {expandedStudentClass.has(classKey) && (
-                          <div style={{ padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid rgba(26,26,46,0.10)" }}>
+                          <div style={{ padding: "8px 12px 12px", display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--rule)" }}>
                             {Object.keys(bySection).sort().map(sec => {
                               const secKey = `${classKey}-${sec}`;
                               return (
-                                <div key={sec} style={{ border: "1.5px solid rgba(26,26,46,0.10)", borderRadius: 10, background: "white" }}>
+                                <div key={sec} style={{ border: "1px solid rgba(26,26,46,0.07)", borderRadius: 8 }}>
                                   <button
                                     onClick={() => setExpandedStudentSection(prev => { const next = new Set(prev); next.has(secKey) ? next.delete(secKey) : next.add(secKey); return next; })}
-                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", background: "white", border: "none", borderRadius: expandedStudentSection.has(secKey) ? "8px 8px 0 0" : 8, cursor: "pointer", fontFamily: "inherit" }}
+                                    style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "rgba(26,26,46,0.02)", border: "none", borderRadius: expandedStudentSection.has(secKey) ? "6px 6px 0 0" : 6, cursor: "pointer", fontFamily: "inherit" }}
                                   >
                                     <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                                       <span style={{ fontSize: 13 }}>📋</span>
@@ -1313,13 +1315,13 @@ export default function AdminDashboard() {
                                   </button>
 
                                   {expandedStudentSection.has(secKey) && (
-                                    <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: "1px solid rgba(26,26,46,0.10)", padding: "8px 10px 10px" }}>
-                                      {bySection[sec].map((s: any) => {
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 0, borderTop: "1px solid rgba(26,26,46,0.05)" }}>
+                                      {bySection[sec].map((s: any, idx: number) => {
                                         const menuId = s.id + 10000;
                                         const isEditingThis = editingMgdStudent?.id === s.id;
                                         return (
                                           <div key={s.id} style={{ display: "flex", flexDirection: "column" }}>
-                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: isEditingThis ? "#f0effe" : "white", border: `1.5px solid ${isEditingThis ? "#b3a6f0" : "rgba(26,26,46,0.10)"}`, borderRadius: isEditingThis ? "10px 10px 0 0" : 10 }}>
+                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderTop: idx > 0 ? "1px solid rgba(26,26,46,0.05)" : undefined, background: isEditingThis ? "#f0effe" : "white" }}>
                                               <div>
                                                 <div style={{ fontWeight: 600, fontSize: 13, color: "var(--ink)" }}>{s.studentName}</div>
                                                 <div style={{ fontSize: 12, color: "var(--mid)" }}>Admission: {s.admissionNumber}{s.email ? ` · ${s.email}` : ""}</div>
