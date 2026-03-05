@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { BookOpen, Loader2, Phone, KeyRound } from "lucide-react";
+import { BookOpen, Loader2, Phone, KeyRound, UserPlus } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+const schoolLoginSchema = z.object({
+  employeeId: z.string().min(1, "Employee ID required"),
+  password: z.string().min(1, "Password required"),
+});
+
+const schoolSignupSchema = z.object({
+  role: z.enum(["ADMIN", "PRINCIPAL"]),
+  employeeId: z.string().min(1, "Employee ID required"),
+  name: z.string().min(1, "Name required"),
+  email: z.string().email("Valid email required"),
+  phoneNumber: z.string().optional(),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+});
+
 export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
   // "student" | "teacher" | "school"  (school covers both admin + principal)
   const [role, setRole] = useState<"teacher" | "student" | "school">("student");
@@ -20,27 +34,38 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
   const [otpPhone, setOtpPhone] = useState("");
   const [otpIdentifier, setOtpIdentifier] = useState("");
   const [otpCode, setOtpCode] = useState("");
-  const { adminUserLogin, requestOtp, verifyOtp } = useAuth();
+  const [schoolAuthMode, setSchoolAuthMode] = useState<"login" | "signup">("login");
+
+  const { adminUserLogin, adminUserSignup, requestOtp, verifyOtp } = useAuth();
 
   const isPending =
     adminUserLogin.isPending ||
-    requestOtp.isPending || verifyOtp.isPending;
+    adminUserSignup.isPending ||
+    requestOtp.isPending ||
+    verifyOtp.isPending;
 
-  const schoolLoginSchema = z.object({
-    employeeId: z.string().min(1, "Employee ID required"),
-    password: z.string().min(1, "Password required"),
-  });
-
-  const form = useForm({
+  const loginForm = useForm<z.infer<typeof schoolLoginSchema>>({
     resolver: zodResolver(schoolLoginSchema),
     defaultValues: { employeeId: "", password: "" },
+  });
+
+  const signupForm = useForm<z.infer<typeof schoolSignupSchema>>({
+    resolver: zodResolver(schoolSignupSchema),
+    defaultValues: {
+      role: "ADMIN",
+      employeeId: "",
+      name: "",
+      email: "",
+      phoneNumber: "",
+      password: "",
+    },
   });
 
   const handleOtpRequest = () => {
     if (!otpIdentifier || !otpPhone) return;
     requestOtp.mutate(
       { phone: otpPhone, role: role as "teacher" | "student", identifier: otpIdentifier },
-      { onSuccess: () => setOtpStep("verify") }
+      { onSuccess: () => setOtpStep("verify") },
     );
   };
 
@@ -54,15 +79,26 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
     });
   };
 
-  // "School" tab — single login that server resolves to admin or principal
-  const onSubmit = (data: Record<string, unknown>) => {
-    const d = data as Record<string, string>;
-    adminUserLogin.mutate({ employeeId: d.employeeId, password: d.password });
+  const onSchoolLoginSubmit = (data: z.infer<typeof schoolLoginSchema>) => {
+    adminUserLogin.mutate({ employeeId: data.employeeId, password: data.password });
+  };
+
+  const onSchoolSignupSubmit = (data: z.infer<typeof schoolSignupSchema>) => {
+    adminUserSignup.mutate({
+      role: data.role,
+      employeeId: data.employeeId,
+      name: data.name,
+      email: data.email,
+      phoneNumber: data.phoneNumber?.trim() ? data.phoneNumber.trim() : undefined,
+      password: data.password,
+    });
   };
 
   const handleRoleChange = (v: string) => {
     setRole(v as "teacher" | "student" | "school");
-    form.reset();
+    setSchoolAuthMode("login");
+    loginForm.reset();
+    signupForm.reset();
     setOtpStep("phone");
     setOtpCode("");
     setOtpPhone("");
@@ -123,46 +159,46 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
                     className="space-y-4"
                   >
                     {otpStep === "phone" ? (
-                        <>
-                          <div className="space-y-2">
-                            <Label>{role === "teacher" ? "Employee ID" : "Admission Number"}</Label>
-                            <Input
-                              value={otpIdentifier}
-                              onChange={e => setOtpIdentifier(e.target.value)}
-                              className="bg-background/50 h-11 rounded-xl"
-                              placeholder={role === "teacher" ? "T001" : "S001"}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Phone Number</Label>
-                            <Input
-                              value={otpPhone}
-                              onChange={e => setOtpPhone(e.target.value)}
-                              className="bg-background/50 h-11 rounded-xl"
-                              placeholder="9876543210"
-                            />
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-xl text-xs text-green-700 dark:text-green-300">
-                            OTP sent to {otpPhone}. Check your phone (or server console for demo).
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Enter OTP</Label>
-                            <Input
-                              value={otpCode}
-                              onChange={e => setOtpCode(e.target.value)}
-                              className="bg-background/50 h-11 rounded-xl text-center text-lg tracking-widest"
-                              placeholder="000000"
-                              maxLength={6}
-                            />
-                          </div>
-                          <button type="button" className="text-xs text-primary hover:underline" onClick={() => setOtpStep("phone")}>
-                            Change phone number
-                          </button>
-                        </>
-                      )}
+                      <>
+                        <div className="space-y-2">
+                          <Label>{role === "teacher" ? "Employee ID" : "Admission Number"}</Label>
+                          <Input
+                            value={otpIdentifier}
+                            onChange={(e) => setOtpIdentifier(e.target.value)}
+                            className="bg-background/50 h-11 rounded-xl"
+                            placeholder={role === "teacher" ? "T001" : "S001"}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Phone Number</Label>
+                          <Input
+                            value={otpPhone}
+                            onChange={(e) => setOtpPhone(e.target.value)}
+                            className="bg-background/50 h-11 rounded-xl"
+                            placeholder="9876543210"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-xl text-xs text-green-700 dark:text-green-300">
+                          OTP sent to {otpPhone}. Check your phone for the code.
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Enter OTP</Label>
+                          <Input
+                            value={otpCode}
+                            onChange={(e) => setOtpCode(e.target.value)}
+                            className="bg-background/50 h-11 rounded-xl text-center text-lg tracking-widest"
+                            placeholder="000000"
+                            maxLength={6}
+                          />
+                        </div>
+                        <button type="button" className="text-xs text-primary hover:underline" onClick={() => setOtpStep("phone")}>
+                          Change phone number
+                        </button>
+                      </>
+                    )}
                   </motion.div>
                 </AnimatePresence>
 
@@ -179,59 +215,156 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
               </div>
             )}
 
-            {/* School tab — single password login; server resolves to admin or principal */}
+            {/* School tab — login and signup for admin/principal */}
             {role === "school" && (
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
-                <AnimatePresence mode="popLayout">
-                  <motion.div
-                    key="school-login"
-                    initial={{ opacity: 0, x: 20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
-                    transition={{ duration: 0.2 }}
-                    className="space-y-4"
-                  >
-                    <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl">
-                      <KeyRound size={14} className="text-amber-600 dark:text-amber-400 shrink-0" />
-                      <span className="text-xs text-amber-700 dark:text-amber-300">
-                        School accounts use password authentication. You'll be redirected based on your role.
+              <div className="space-y-5">
+                <Tabs value={schoolAuthMode} onValueChange={(v) => setSchoolAuthMode(v as "login" | "signup")} className="w-full">
+                  <TabsList className="grid w-full p-1 bg-muted/50 rounded-xl grid-cols-2">
+                    <TabsTrigger value="login" className="rounded-lg font-medium data-[state=active]:shadow-sm">Sign In</TabsTrigger>
+                    <TabsTrigger value="signup" className="rounded-lg font-medium data-[state=active]:shadow-sm">Sign Up</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                {schoolAuthMode === "login" ? (
+                  <form onSubmit={loginForm.handleSubmit(onSchoolLoginSubmit)} className="space-y-5">
+                    <AnimatePresence mode="popLayout">
+                      <motion.div
+                        key="school-login"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -20 }}
+                        transition={{ duration: 0.2 }}
+                        className="space-y-4"
+                      >
+                        <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl">
+                          <KeyRound size={14} className="text-amber-600 dark:text-amber-400 shrink-0" />
+                          <span className="text-xs text-amber-700 dark:text-amber-300">
+                            School accounts use password authentication. You'll be redirected based on your role.
+                          </span>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="employeeId">Employee ID</Label>
+                          <Input
+                            id="employeeId"
+                            {...loginForm.register("employeeId")}
+                            className="bg-background/50 h-11 rounded-xl"
+                            placeholder="ADMIN001 or PRIN001"
+                            data-testid="input-admin-id"
+                          />
+                          {loginForm.formState.errors.employeeId && <p className="text-xs text-destructive">{loginForm.formState.errors.employeeId.message as string}</p>}
+                        </div>
+                        <div className="space-y-2 pb-2">
+                          <Label htmlFor="password">Password</Label>
+                          <Input
+                            id="password"
+                            type="password"
+                            {...loginForm.register("password")}
+                            className="bg-background/50 h-11 rounded-xl"
+                            placeholder="••••••••"
+                            data-testid="input-admin-password"
+                          />
+                          {loginForm.formState.errors.password && <p className="text-xs text-destructive">{loginForm.formState.errors.password.message as string}</p>}
+                        </div>
+                      </motion.div>
+                    </AnimatePresence>
+
+                    <Button
+                      type="submit"
+                      disabled={isPending}
+                      className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all"
+                      data-testid="button-login"
+                    >
+                      {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign In"}
+                    </Button>
+                  </form>
+                ) : (
+                  <form onSubmit={signupForm.handleSubmit(onSchoolSignupSubmit)} className="space-y-4">
+                    <div className="flex items-center gap-2 p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl">
+                      <UserPlus size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span className="text-xs text-emerald-700 dark:text-emerald-300">
+                        Create a new School Admin or Principal account.
                       </span>
                     </div>
+
                     <div className="space-y-2">
-                      <Label htmlFor="employeeId">Employee ID</Label>
-                      <Input
-                        id="employeeId"
-                        {...form.register("employeeId")}
-                        className="bg-background/50 h-11 rounded-xl"
-                        placeholder="ADMIN001 or PRIN001"
-                        data-testid="input-admin-id"
-                      />
-                      {form.formState.errors.employeeId && <p className="text-xs text-destructive">{form.formState.errors.employeeId.message as string}</p>}
+                      <Label htmlFor="role">Role</Label>
+                      <select
+                        id="role"
+                        {...signupForm.register("role")}
+                        className="w-full bg-background/50 h-11 rounded-xl border border-input px-3 text-sm"
+                      >
+                        <option value="ADMIN">Admin</option>
+                        <option value="PRINCIPAL">Principal</option>
+                      </select>
+                      {signupForm.formState.errors.role && <p className="text-xs text-destructive">{signupForm.formState.errors.role.message as string}</p>}
                     </div>
-                    <div className="space-y-2 pb-2">
-                      <Label htmlFor="password">Password</Label>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="signupEmployeeId">Employee ID</Label>
                       <Input
-                        id="password"
+                        id="signupEmployeeId"
+                        {...signupForm.register("employeeId")}
+                        className="bg-background/50 h-11 rounded-xl"
+                        placeholder="ADM123"
+                      />
+                      {signupForm.formState.errors.employeeId && <p className="text-xs text-destructive">{signupForm.formState.errors.employeeId.message as string}</p>}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="signupName">Full Name</Label>
+                      <Input
+                        id="signupName"
+                        {...signupForm.register("name")}
+                        className="bg-background/50 h-11 rounded-xl"
+                        placeholder="Full name"
+                      />
+                      {signupForm.formState.errors.name && <p className="text-xs text-destructive">{signupForm.formState.errors.name.message as string}</p>}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="signupEmail">Email</Label>
+                      <Input
+                        id="signupEmail"
+                        type="email"
+                        {...signupForm.register("email")}
+                        className="bg-background/50 h-11 rounded-xl"
+                        placeholder="name@school.edu"
+                      />
+                      {signupForm.formState.errors.email && <p className="text-xs text-destructive">{signupForm.formState.errors.email.message as string}</p>}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="signupPhone">Phone Number (optional)</Label>
+                      <Input
+                        id="signupPhone"
+                        {...signupForm.register("phoneNumber")}
+                        className="bg-background/50 h-11 rounded-xl"
+                        placeholder="9876543210"
+                      />
+                    </div>
+
+                    <div className="space-y-2 pb-2">
+                      <Label htmlFor="signupPassword">Password</Label>
+                      <Input
+                        id="signupPassword"
                         type="password"
-                        {...form.register("password")}
+                        {...signupForm.register("password")}
                         className="bg-background/50 h-11 rounded-xl"
                         placeholder="••••••••"
-                        data-testid="input-admin-password"
                       />
-                      {form.formState.errors.password && <p className="text-xs text-destructive">{form.formState.errors.password.message as string}</p>}
+                      {signupForm.formState.errors.password && <p className="text-xs text-destructive">{signupForm.formState.errors.password.message as string}</p>}
                     </div>
-                  </motion.div>
-                </AnimatePresence>
 
-                <Button
-                  type="submit"
-                  disabled={isPending}
-                  className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all"
-                  data-testid="button-login"
-                >
-                  {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : "Sign In"}
-                </Button>
-              </form>
+                    <Button
+                      type="submit"
+                      disabled={isPending}
+                      className="w-full h-12 rounded-xl text-base font-semibold shadow-lg shadow-primary/20 hover:shadow-xl transition-all"
+                    >
+                      {isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : "Create Account"}
+                    </Button>
+                  </form>
+                )}
+              </div>
             )}
 
             {role !== "school" && (

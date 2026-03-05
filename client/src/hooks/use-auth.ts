@@ -121,6 +121,27 @@ export function useAuth() {
     onError: handleAuthError,
   });
 
+  const adminUserSignup = useMutation({
+    mutationFn: async (payload: {
+      employeeId: string;
+      name: string;
+      email: string;
+      phoneNumber?: string;
+      password: string;
+      role: "ADMIN" | "PRINCIPAL";
+    }) => {
+      const res = await fetchWithAuth("/api/auth/adminuser/signup", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || "Signup failed");
+      return json as AuthResponse;
+    },
+    onSuccess: handleAuthSuccess,
+    onError: handleAuthError,
+  });
+
   const requestOtp = useMutation({
     mutationFn: async (data: { phone: string; role: "teacher" | "student"; identifier: string }) => {
       const res = await fetchWithAuth(api.auth.otpSend.path, {
@@ -166,6 +187,7 @@ export function useAuth() {
     studentLogin,
     adminLogin,
     adminUserLogin,
+    adminUserSignup,
     teacherSignup,
     studentSignup,
     requestOtp,

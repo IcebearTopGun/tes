@@ -10,6 +10,7 @@ import { z } from "zod";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import OpenAI from "openai";
+import { sendOtpSms } from "./services/sms";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "super-secret-key";
 const isIntegrationTestMode = process.env.INTEGRATION_TEST_MODE === "1" || process.env.NODE_ENV === "test";
@@ -3568,9 +3569,11 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes
 
-      await storage.createOtp(phone, code, role, identifier, expiresAt);
+      if (!isIntegrationTestMode) {
+        await sendOtpSms(String(phone).trim(), code, 300);
+      }
 
-      // In production, send SMS here. For now, log the OTP.
+      await storage.createOtp(phone, code, role, identifier, expiresAt);
       console.log(`[OTP] Code ${code} sent to ${phone} for ${role} ${identifier}`);
 
       if (isIntegrationTestMode) {
@@ -3658,6 +3661,53 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     } catch (err) {
       console.error("[adminuser-login]", err);
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.post("/api/auth/adminuser/signup", async (req, res) => {
+    try {
+      const parsed = z.object({
+        employeeId: z.string().min(1),
+        name: z.string().min(1),
+        email: z.string().email(),
+        phoneNumber: z.string().optional(),
+        password: z.string().min(6),
+        role: z.enum(["ADMIN", "PRINCIPAL"]),
+      }).safeParse(req.body);
+
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Invalid signup payload" });
+      }
+
+      const employeeId = parsed.data.employeeId.trim();
+      const name = parsed.data.name.trim();
+      const email = parsed.data.email.trim().toLowerCase();
+      const phoneNumber = parsed.data.phoneNumber ? parsed.data.phoneNumber.trim() : null;
+      const role = parsed.data.role;
+      const passwordHash = await bcrypt.hash(parsed.data.password, 10);
+
+      const byEmployeeId = await storage.getAdminUserByEmployeeId(employeeId);
+      if (byEmployeeId) return res.status(409).json({ message: "Employee ID already exists" });
+
+      const byEmail = await storage.getAdminUserByEmail(email);
+      if (byEmail) return res.status(409).json({ message: "Email already exists" });
+
+      const created = await storage.createAdminUser({
+        employeeId,
+        name,
+        email,
+        passwordHash,
+        phoneNumber,
+        role,
+      });
+
+      const jwtRole = created.role === "PRINCIPAL" ? "principal" : "admin";
+      const token = jwt.sign({ id: created.id, role: jwtRole }, JWT_SECRET, { expiresIn: "1d" });
+      const { passwordHash: _, ...userWithoutPwd } = created;
+      return res.status(201).json({ token, role: jwtRole, user: userWithoutPwd });
+    } catch (err) {
+      console.error("[adminuser-signup]", err);
+      return res.status(500).json({ message: "Internal server error" });
     }
   });
 
