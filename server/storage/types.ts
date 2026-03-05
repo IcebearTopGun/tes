@@ -1,6 +1,6 @@
 import {
-  type Teacher, type Student, type Exam, type Admin, type Class, type Subject, type OtpCode,
-  type InsertTeacher, type InsertStudent, type InsertExam, type InsertAdmin,
+  type Teacher, type Student, type Exam, type Class, type Subject, type OtpCode,
+  type InsertTeacher, type InsertStudent, type InsertExam,
   type InsertClass, type InsertSubject,
   type NcertChapter, type InsertNcertChapter,
   type Homework, type InsertHomework, type HomeworkSubmission, type InsertHomeworkSubmission,
@@ -81,9 +81,6 @@ export interface IStorage {
   getHomeworkEvaluationsByHomework(homeworkId: number): Promise<any[]>;
 
   // Admin
-  createAdmin(admin: InsertAdmin): Promise<Admin>;
-  getAdmin(id: number): Promise<Admin | undefined>;
-  getAdminByEmployeeId(employeeId: string): Promise<Admin | undefined>;
   getSchoolStats(): Promise<{ totalStudents: number; totalTeachers: number; totalExams: number; totalEvaluations: number }>;
   getSchoolAnalytics(): Promise<{
     classPerformance: { className: string; avgPct: number; examCount: number }[];

@@ -3,16 +3,6 @@ import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-export const admins = pgTable("admins", {
-  id: serial("id").primaryKey(),
-  employeeId: text("employee_id").notNull().unique(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  password: text("password").notNull(),
-  phone: text("phone"),
-  profilePhotoUrl: text("profile_photo_url"),
-});
-
 // Single source-of-truth teacher roster (managed by admin)
 export const teachers = pgTable("managed_teachers", {
   id: serial("id").primaryKey(),
@@ -311,10 +301,6 @@ export const otpCodes = pgTable("otp_codes", {
   verified: integer("verified").notNull().default(0),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
-
-export const insertAdminSchema = createInsertSchema(admins).omit({ id: true });
-export type Admin = typeof admins.$inferSelect;
-export type InsertAdmin = z.infer<typeof insertAdminSchema>;
 
 export const insertClassSchema = createInsertSchema(classes).omit({ id: true });
 export type Class = typeof classes.$inferSelect;

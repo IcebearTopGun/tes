@@ -2,10 +2,10 @@ import { db } from "./db";
 import {
   teachers, students, exams, answerSheets, evaluations, conversations, messages,
   answerSheetPages, mergedAnswerScripts, ncertChapters, deviationLogs, performanceProfiles,
-  homework, homeworkSubmissions, admins, classes, subjects, otpCodes,
+  homework, homeworkSubmissions, classes, subjects, otpCodes,
   adminUsers, classSections, managedStudents, managedTeachers,
-  type Teacher, type Student, type Exam, type Admin, type Class, type Subject, type OtpCode,
-  type InsertTeacher, type InsertStudent, type InsertExam, type InsertAdmin,
+  type Teacher, type Student, type Exam, type Class, type Subject, type OtpCode,
+  type InsertTeacher, type InsertStudent, type InsertExam,
   type InsertClass, type InsertSubject,
   type NcertChapter, type InsertNcertChapter,
   type Homework, type InsertHomework, type HomeworkSubmission, type InsertHomeworkSubmission,
@@ -87,10 +87,6 @@ export interface IStorage {
   getHomeworkEvaluations(homeworkId: number): Promise<any[]>;
 
   // Admin
-  getAdmin(id: number): Promise<Admin | undefined>;
-  getAdminByEmployeeId(employeeId: string): Promise<Admin | undefined>;
-  createAdmin(admin: InsertAdmin): Promise<Admin>;
-  updateAdminPassword(id: number, passwordHash: string): Promise<void>;
   getAdminUserByEmployeeId(employeeId: string): Promise<AdminUser | undefined>;
   getAdminUserByEmail(email: string): Promise<AdminUser | undefined>;
   getAdminUserById(id: number): Promise<AdminUser | undefined>;
@@ -863,27 +859,6 @@ export class DatabaseStorage implements IStorage {
     return { classAverages, studentPerformance, marksDistribution, improvementTrends, chapterWeakness };
   }
 
-  // ─── ADMIN METHODS ──────────────────────────────────────────────────────────
-
-  async getAdmin(id: number): Promise<Admin | undefined> {
-    const [admin] = await db.select().from(admins).where(eq(admins.id, id));
-    return admin;
-  }
-
-  async getAdminByEmployeeId(employeeId: string): Promise<Admin | undefined> {
-    const [admin] = await db.select().from(admins).where(eq(admins.employeeId, employeeId));
-    return admin;
-  }
-
-  async createAdmin(admin: InsertAdmin): Promise<Admin> {
-    const [created] = await db.insert(admins).values(admin).returning();
-    return created;
-  }
-
-  async updateAdminPassword(id: number, passwordHash: string): Promise<void> {
-    await db.update(admins).set({ password: passwordHash }).where(eq(admins.id, id));
-  }
-
   async getAllStudents(): Promise<Student[]> {
     return db.select().from(students).orderBy(students.studentClass, students.section, students.name);
   }
@@ -1267,12 +1242,7 @@ export class DatabaseStorage implements IStorage {
       if (data.name !== undefined) mapped.name = data.name;
       if (data.phone !== undefined) mapped.phoneNumber = data.phone;
       if (data.profilePhotoUrl !== undefined) mapped.profilePhotoUrl = data.profilePhotoUrl;
-      const existingAdminUser = await this.getAdminUserById(id);
-      if (existingAdminUser) {
-        await db.update(adminUsers).set({ ...mapped, updatedAt: new Date().toISOString() }).where(eq(adminUsers.id, id));
-      } else {
-        await db.update(admins).set(data).where(eq(admins.id, id));
-      }
+      await db.update(adminUsers).set({ ...mapped, updatedAt: new Date().toISOString() }).where(eq(adminUsers.id, id));
     }
   }
 

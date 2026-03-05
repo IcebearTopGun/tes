@@ -289,6 +289,12 @@ export default function AdminDashboard() {
   const [bulkUploadErrors, setBulkUploadErrors] = useState<string[]>([]);
   const [bulkDotMenu, setBulkDotMenu] = useState<number | null>(null);
 
+  useEffect(() => {
+    if (!bulkUploadResult) return;
+    const timer = setTimeout(() => setBulkUploadResult(null), 2000);
+    return () => clearTimeout(timer);
+  }, [bulkUploadResult]);
+
   // ── New state for Student tab hierarchy and search ──
   const [studentSearch, setStudentSearch] = useState("");
   const [expandedStudentClass, setExpandedStudentClass] = useState<Set<string>>(new Set());
@@ -611,7 +617,6 @@ export default function AdminDashboard() {
     <div style={{ marginTop: 12, padding: "10px 14px", background: "#f0fdf4", borderRadius: 8, border: "1px solid #86efac", fontSize: 13 }}>
       ✅ Created {bulkUploadResult.created} records.
       {bulkUploadResult.duplicates.length > 0 && ` Duplicates skipped: ${bulkUploadResult.duplicates.join(", ")}`}
-      <button onClick={() => setBulkUploadResult(null)} style={{ marginLeft: 12, fontSize: 11, color: "var(--mid)", background: "none", border: "none", cursor: "pointer" }}>Dismiss</button>
     </div>
   ) : null;
 
@@ -863,7 +868,7 @@ export default function AdminDashboard() {
                   <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 6 }}>Subjects (select multiple)</div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {["English", "Hindi", "Maths", "Science"].map(sub => (
-                      <label key={sub} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${classSectionForm.subjects.includes(sub) ? "var(--ink)" : "var(--rule)"}`, background: classSectionForm.subjects.includes(sub) ? "var(--lav-card)" : "var(--pane)" }}>
+                      <label key={sub} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${classSectionForm.subjects.includes(sub) ? "#4b5563" : "var(--rule)"}`, background: classSectionForm.subjects.includes(sub) ? "#eef2f7" : "var(--pane)" }}>
                         <input type="checkbox" checked={classSectionForm.subjects.includes(sub)} onChange={e => setClassSectionForm(v => ({ ...v, subjects: e.target.checked ? [...v.subjects, sub] : v.subjects.filter(s => s !== sub) }))} style={{ display: "none" }} />{sub}
                       </label>
                     ))}
@@ -914,7 +919,7 @@ export default function AdminDashboard() {
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <span style={{ fontSize: 18 }}>🏫</span>
                             <span style={{ fontWeight: 700, fontSize: 15, color: "#3d2c8d" }}>Class {cls}</span>
-                            <span style={{ fontSize: 12, background: "#3d2c8d", color: "white", borderRadius: 20, padding: "2px 9px", fontWeight: 600 }}>{sections.length} section{sections.length !== 1 ? "s" : ""}</span>
+                            <span style={{ fontSize: 12, color: "var(--mid)", fontWeight: 600 }}>{sections.length} section{sections.length !== 1 ? "s" : ""}</span>
                           </div>
                           <ChevronDown size={16} style={{ color: "#3d2c8d", transform: expandedClass.has(classKey) ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
                         </button>
@@ -935,7 +940,7 @@ export default function AdminDashboard() {
                                       </div>
                                       <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 6, display: "flex", flexWrap: "wrap", gap: 5 }}>
                                         {subjects.length ? subjects.map((sub) => (
-                                          <span key={sub} style={{ display: "inline-block", padding: "2px 10px", background: "var(--lav-card)", borderRadius: 12, fontSize: 11, fontWeight: 600, color: "#3d2c8d" }}>{sub}</span>
+                                          <span key={sub} style={{ display: "inline-block", padding: "2px 10px", background: "#eef2f7", border: "1px solid #d6dde7", borderRadius: 12, fontSize: 11, fontWeight: 600, color: "#334155" }}>{sub}</span>
                                         )) : <span style={{ color: "var(--mid)" }}>No subjects</span>}
                                       </div>
                                     </div>
@@ -960,7 +965,7 @@ export default function AdminDashboard() {
                                         <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 6 }}>Subjects</div>
                                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                           {["English", "Hindi", "Maths", "Science"].map(sub => (
-                                            <label key={sub} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${classSectionForm.subjects.includes(sub) ? "#3d2c8d" : "var(--rule)"}`, background: classSectionForm.subjects.includes(sub) ? "#e8e4fb" : "var(--pane)" }}>
+                                            <label key={sub} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${classSectionForm.subjects.includes(sub) ? "#4b5563" : "var(--rule)"}`, background: classSectionForm.subjects.includes(sub) ? "#eef2f7" : "var(--pane)" }}>
                                               <input type="checkbox" checked={classSectionForm.subjects.includes(sub)} onChange={e => setClassSectionForm(v => ({ ...v, subjects: e.target.checked ? [...v.subjects, sub] : v.subjects.filter(s => s !== sub) }))} style={{ display: "none" }} />{sub}
                                             </label>
                                           ))}

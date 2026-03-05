@@ -204,6 +204,9 @@ async function initAdminUsers() {
     try {
       await db.execute(drizzleSql`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS profile_photo_url TEXT`);
     } catch {}
+    try {
+      await db.execute(drizzleSql`DROP TABLE IF EXISTS admins CASCADE`);
+    } catch {}
 
     // Also create other new tables if they don't exist
     await db.execute(drizzleSql`
@@ -256,17 +259,6 @@ async function initAdminUsers() {
       console.log("[init] Default principal user created: PRIN001");
     }
 
-    // Keep legacy admin login path functional without full seeding.
-    const existingLegacyAdmin = await storage.getAdminByEmployeeId("A001");
-    if (!existingLegacyAdmin) {
-      await storage.createAdmin({
-        employeeId: "A001",
-        name: "Principal Admin",
-        email: "admin@school.edu",
-        password: hp,
-      });
-      console.log("[init] Default legacy admin created: A001");
-    }
   } catch (err) {
     console.error("[initAdminUsers] Error:", err);
   }
@@ -274,76 +266,8 @@ async function initAdminUsers() {
 
 
 async function seedDatabase() {
-  // Skip if already seeded (50 students + admin exist)
-  const allStudents = await storage.getAllStudents();
-  const existingAdmin = await storage.getAdminByEmployeeId("A001");
-  if (allStudents.length >= 50 && existingAdmin) {
-    console.log("[seed] Already seeded — skipping.");
-    return;
-  }
-
-  console.log("[seed] Seeding school data (50 students, 5 teachers, 1 admin)...");
-
-  // Wipe everything in FK-safe order
-  await db.execute(drizzleSql`TRUNCATE TABLE homework_submissions, messages, deviation_logs, performance_profiles, evaluations, merged_answer_scripts, answer_sheet_pages, answer_sheets, ncert_chapters, conversations, homework, exams, admins RESTART IDENTITY CASCADE`);
-
-  const hp = await bcrypt.hash("123", 10);
-
-
-  // ── 1 ADMIN ─────────────────────────────────────────────────────────────────
-  await storage.createAdmin({ employeeId: "A001", name: "Principal Admin", email: "admin@school.edu", password: hp });
-
-  // ── SEED ADMIN USERS (ADMIN + PRINCIPAL) ─────────────────────────────────
-  try {
-    const existingAU = await storage.getAdminUserByEmployeeId("ADMIN001");
-    if (!existingAU) {
-      await storage.createAdminUser({ employeeId: "ADMIN001", name: "School Admin", email: "schooladmin@school.edu", passwordHash: hp, phoneNumber: "9000000001", role: "ADMIN" });
-      await storage.createAdminUser({ employeeId: "PRIN001", name: "School Principal", email: "principal@school.edu", passwordHash: hp, phoneNumber: "9000000002", role: "PRINCIPAL" });
-      console.log("[seed] Admin users seeded: ADMIN001/123 and PRIN001/123");
-    }
-  } catch (err) { console.error("[seed] Admin users seeding error:", err); }
-
-  // ── EXAM DEFINITIONS ─────────────────────────────────────────────────────────
-  const today = new Date();
-  const daysFromNow = (n: number) => new Date(today.getTime() + n * 86400000).toISOString().split("T")[0];
-
-  type ExamDef = {
-    tIdx: number; subject: string; class_: string;
-    name: string; marks: number; cat: string;
-    q: string; ans: string; difficulty: number;
-  };
-  const examDefs: ExamDef[] = [
-    { tIdx: 0, subject: "Mathematics", class_: "9",  name: "Mathematics Unit Test — Class 9",       marks: 50,  cat: "unit_test",  difficulty: 0.7,
-      q: "Q1 (10m): Solve: 3x − 7 = 14.\nQ2 (15m): Find prime factorisation of 1260.\nQ3 (15m): In △ABC, AB=5, BC=12. Find AC.\nQ4 (10m): Evaluate: 4³ + √144.",
-      ans: "Q1: x=7.\nQ2: 2²×3²×5×7.\nQ3: 13.\nQ4: 76." },
-    { tIdx: 0, subject: "Mathematics", class_: "10", name: "Mathematics Unit Test — Class 10",      marks: 50,  cat: "unit_test",  difficulty: 0.72,
-      q: "Q1 (10m): Factorize x²+5x+6.\nQ2 (15m): Solve x²−5x+6=0.\nQ3 (15m): Area of circle with r=7cm.\nQ4 (10m): Simplify (a+b)²−(a−b)².",
-      ans: "Q1: (x+2)(x+3).\nQ2: x=2 or x=3.\nQ3: 154 cm².\nQ4: 4ab." },
-    { tIdx: 1, subject: "Science",      class_: "9",  name: "Science Mid Term — Class 9",          marks: 100, cat: "mid_term",   difficulty: 0.65,
-      q: "Q1 (20m): Define cell and list its parts.\nQ2 (20m): Explain photosynthesis.\nQ3 (20m): State Newton's Laws.\nQ4 (20m): Describe water cycle.\nQ5 (20m): Acids vs Bases.",
-      ans: "Q1: Cell is basic unit of life. Parts: nucleus, cytoplasm, cell membrane.\nQ2: 6CO₂+6H₂O→C₆H₁₂O₆+6O₂.\nQ3: Inertia, F=ma, Action-Reaction.\nQ4: Evaporation→Condensation→Precipitation→Collection.\nQ5: Acids taste sour, turn litmus red; Bases taste bitter, turn litmus blue." },
-    { tIdx: 1, subject: "Science",      class_: "10", name: "Science Mid Term — Class 10",         marks: 100, cat: "mid_term",   difficulty: 0.68,
-      q: "Q1 (20m): Define heredity and variation.\nQ2 (20m): Explain refraction of light.\nQ3 (20m): Electric circuit components.\nQ4 (20m): Human digestive system.\nQ5 (20m): Periodic table trends.",
-      ans: "Q1: Heredity = transmission of traits; Variation = differences in traits.\nQ2: Bending of light at interface due to change in speed.\nQ3: Battery, resistor, switch, ammeter, voltmeter.\nQ4: Mouth→Oesophagus→Stomach→Small intestine→Large intestine.\nQ5: Atomic radius decreases across period; increases down group." },
-    { tIdx: 2, subject: "English",      class_: "9",  name: "English Class Test — Class 9",        marks: 25,  cat: "class_test", difficulty: 0.5,
-      q: "Q1 (10m): Write a paragraph on Environmental Conservation.\nQ2 (10m): Correct the grammar in 5 sentences.\nQ3 (5m): Identify nouns and verbs.",
-      ans: "Q1: Well-structured paragraph on deforestation, pollution, and sustainable practices.\nQ2: Corrected sentences.\nQ3: Correctly identified parts of speech." },
-    { tIdx: 2, subject: "English",      class_: "10", name: "English Class Test — Class 10",       marks: 25,  cat: "class_test", difficulty: 0.52,
-      q: "Q1 (10m): Write a descriptive paragraph on the importance of nature.\nQ2 (10m): Fill in correct verb forms.\nQ3 (5m): Identify parts of speech.",
-      ans: "Q1: Descriptive writing touching ecosystem, biodiversity, sustainability.\nQ2: am, is, are, was, were, has, have, had, will, would.\nQ3: Noun, pronoun, verb, adjective, adverb, preposition, conjunction, interjection." },
-    { tIdx: 3, subject: "Social Studies", class_: "9",  name: "Social Studies Unit Test — Class 9",  marks: 50,  cat: "unit_test", difficulty: 0.55,
-      q: "Q1 (15m): Causes of French Revolution.\nQ2 (15m): Geography of India.\nQ3 (20m): Democracy and its importance.",
-      ans: "Q1: Social inequality, economic crisis, Enlightenment ideas, weak monarchy.\nQ2: Himalayan ranges, Indo-Gangetic plains, Deccan plateau, coastal plains.\nQ3: Democracy ensures equality, liberty, and fraternity through elected representation." },
-    { tIdx: 3, subject: "Social Studies", class_: "10", name: "Social Studies Unit Test — Class 10", marks: 50,  cat: "unit_test", difficulty: 0.57,
-      q: "Q1 (15m): Nationalism in India.\nQ2 (15m): Federalism in India.\nQ3 (20m): Economic sectors and development.",
-      ans: "Q1: Non-cooperation, Civil Disobedience, Quit India movements led by Gandhi.\nQ2: Centre-State division of powers; Concurrent, State and Union Lists.\nQ3: Primary, Secondary, Tertiary sectors contribute to GDP and employment." },
-    { tIdx: 4, subject: "Hindi",        class_: "9",  name: "Hindi Unit Test — Class 9",           marks: 50,  cat: "unit_test", difficulty: 0.45,
-      q: "Q1 (15m): किसी एक कहानी का सारांश लिखिए।\nQ2 (15m): व्याकरण: संधि विच्छेद।\nQ3 (20m): निबंध: पर्यावरण प्रदूषण।",
-      ans: "Q1: कहानी का सारांश सटीक और सरल भाषा में।\nQ2: संधि विच्छेद के उदाहरण।\nQ3: प्रदूषण के कारण, प्रभाव और समाधान पर निबंध।" },
-    { tIdx: 4, subject: "Hindi",        class_: "10", name: "Hindi Unit Test — Class 10",          marks: 50,  cat: "unit_test", difficulty: 0.47,
-      q: "Q1 (15m): कबीर के दोहों की व्याख्या।\nQ2 (15m): व्याकरण: वाक्य-भेद।\nQ3 (20m): निबंध: आधुनिक जीवन में मोबाइल।",
-      ans: "Q1: दोहों का अर्थ और संदर्भ।\nQ2: सरल, मिश्र, संयुक्त वाक्य के उदाहरण।\nQ3: मोबाइल के लाभ-हानि पर संतुलित निबंध।" },
-  ];
+  // No-op by policy: dataset seeding is disabled.
+  return;
 }
 
 // Middleware to extract token from Header
@@ -527,13 +451,14 @@ export async function registerRoutes(
     try {
       const { employeeId, password } = req.body;
       if (!employeeId || !password) return res.status(400).json({ message: "Employee ID and password required" });
-      const admin = await storage.getAdminByEmployeeId(employeeId);
-      if (!admin || !(await bcrypt.compare(password, admin.password))) {
+      const adminUser = await storage.getAdminUserByEmployeeId(employeeId);
+      if (!adminUser || !(await bcrypt.compare(password, adminUser.passwordHash))) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
-      const token = jwt.sign({ id: admin.id, role: "admin" }, JWT_SECRET, { expiresIn: "1d" });
-      const { password: _, ...adminWithoutPassword } = admin;
-      res.json({ token, role: "admin", user: adminWithoutPassword });
+      const jwtRole = adminUser.role === "PRINCIPAL" ? "principal" : "admin";
+      const token = jwt.sign({ id: adminUser.id, role: jwtRole }, JWT_SECRET, { expiresIn: "1d" });
+      const { passwordHash: _, ...userWithoutPassword } = adminUser;
+      res.json({ token, role: jwtRole, user: userWithoutPassword });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
     }
@@ -543,12 +468,8 @@ export async function registerRoutes(
   // ─── Helper: verify admin password for delete operations ───────────────────
   async function verifyAdminPassword(adminId: number, password: string): Promise<boolean> {
     const adminUser = await storage.getAdminUserById(adminId);
-    if (adminUser) return bcrypt.compare(password, adminUser.passwordHash);
-    const admin = await storage.getAdmin(adminId);
-    if (admin) return bcrypt.compare(password, admin.password);
-    const fallbackAdmin = await storage.getAdminByEmployeeId("A001");
-    if (!fallbackAdmin) return false;
-    return bcrypt.compare(password, fallbackAdmin.password);
+    if (!adminUser) return false;
+    return bcrypt.compare(password, adminUser.passwordHash);
   }
 
   async function ensureUniqueClassTeacher(classTeacherOf: string, excludeTeacherId?: number): Promise<boolean> {
@@ -626,12 +547,6 @@ export async function registerRoutes(
         const { passwordHash: _, ...user } = adminUser;
         const authRole = adminUser.role === "PRINCIPAL" ? "principal" : "admin";
         return res.json({ role: authRole, user });
-      }
-      if (role === "admin") {
-        const admin = await storage.getAdmin(id);
-        if (!admin) return res.status(401).json({ message: "User not found" });
-        const { password, ...user } = admin;
-        return res.json({ role, user });
       }
       return res.status(401).json({ message: "User not found" });
     } catch (err) {
@@ -2682,12 +2597,6 @@ ${hwContext}`;
         const { passwordHash: _, role: adminRole, ...u } = adminUser;
         return res.json({ ...u, role: adminRole === "PRINCIPAL" ? "principal" : "admin", phone: adminUser.phoneNumber });
       }
-      if (role === "admin") {
-        const a = await storage.getAdmin(id);
-        if (!a) return res.status(404).json({ message: "Not found" });
-        const { password, ...u } = a;
-        return res.json({ role, ...u });
-      }
       return res.status(404).json({ message: "Not found" });
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
@@ -2733,16 +2642,6 @@ ${hwContext}`;
         if (!valid) return res.status(400).json({ message: "Current password is incorrect" });
         const hash = await bcrypt.hash(newPassword, 10);
         await storage.updateAdminUserPassword(id, hash);
-        return res.json({ message: "Password changed successfully" });
-      }
-
-      if (role === "admin") {
-        const legacy = await storage.getAdmin(id);
-        if (!legacy) return res.status(404).json({ message: "Admin not found" });
-        const valid = await bcrypt.compare(currentPassword, legacy.password);
-        if (!valid) return res.status(400).json({ message: "Current password is incorrect" });
-        const hash = await bcrypt.hash(newPassword, 10);
-        await storage.updateAdminPassword(id, hash);
         return res.json({ message: "Password changed successfully" });
       }
 
@@ -3627,21 +3526,12 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const { employeeId, password } = req.body;
       if (!employeeId || !password) return res.status(400).json({ message: "Employee ID and password required" });
 
-      // 1. Try new admin_users table first
       const adminUser = await storage.getAdminUserByEmployeeId(employeeId);
       if (adminUser && (await bcrypt.compare(password, adminUser.passwordHash))) {
         const jwtRole = adminUser.role === "PRINCIPAL" ? "principal" : "admin";
         const token = jwt.sign({ id: adminUser.id, role: jwtRole }, JWT_SECRET, { expiresIn: "1d" });
         const { passwordHash: _, ...userWithoutPwd } = adminUser;
         return res.json({ token, role: jwtRole, user: userWithoutPwd });
-      }
-
-      // 2. Fall back to legacy admins table (for A001 and any existing admin)
-      const legacyAdmin = await storage.getAdminByEmployeeId(employeeId);
-      if (legacyAdmin && (await bcrypt.compare(password, legacyAdmin.password))) {
-        const token = jwt.sign({ id: legacyAdmin.id, role: "admin" }, JWT_SECRET, { expiresIn: "1d" });
-        const { password: _, ...adminWithoutPassword } = legacyAdmin;
-        return res.json({ token, role: "admin", user: adminWithoutPassword });
       }
 
       return res.status(401).json({ message: "Invalid credentials" });
