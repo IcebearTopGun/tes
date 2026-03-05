@@ -171,7 +171,7 @@ describe("AI Gateway — Registry Integrity", () => {
     const { readdir, readFile } = await import("fs/promises");
     const path = await import("path");
 
-    const EXCLUDED_DIRS = ["node_modules", "dist", "tests", "client", "replit_integrations"];
+    const EXCLUDED_DIRS = ["node_modules", "dist", "tests", "client"];
     async function findTsFiles(dir: string): Promise<string[]> {
       const entries = await readdir(dir, { withFileTypes: true });
       const files: string[] = [];
