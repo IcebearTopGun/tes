@@ -4006,6 +4006,31 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     try {
       const { records } = req.body;
       if (!Array.isArray(records)) return res.status(400).json({ message: "Records array required" });
+      const parseAssignmentsCell = (raw: unknown): Array<{ class: string; section: string; subjects: string[] }> => {
+        const text = String(raw ?? "").trim();
+        if (!text) return [];
+        const slots = text.split(";").map((s) => s.trim()).filter(Boolean);
+        const merged = new Map<string, Set<string>>();
+        for (const slot of slots) {
+          const [classSectionRaw, subjectsRaw = ""] = slot.split(":");
+          const match = String(classSectionRaw).trim().replace(/\s+/g, "").match(/^([0-9]{1,2})-([A-Za-z])$/);
+          if (!match) continue;
+          const className = match[1];
+          const section = match[2].toUpperCase();
+          const key = `${className}-${section}`;
+          const current = merged.get(key) ?? new Set<string>();
+          String(subjectsRaw)
+            .split(/[\|,]/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .forEach((subj) => current.add(subj));
+          if (current.size > 0) merged.set(key, current);
+        }
+        return Array.from(merged.entries()).map(([key, subjectsSet]) => {
+          const [className, section] = key.split("-");
+          return { class: className, section, subjects: Array.from(subjectsSet) };
+        });
+      };
       const allTeachers = await storage.getAllTeachers();
       const byEmployeeId = new Set(allTeachers.map((t) => t.employeeId));
       let created = 0;
@@ -4013,8 +4038,8 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const errors: string[] = [];
 
       for (const r of records) {
-        const assignments = [];
-        if (r.class && r.section && r.subjects) {
+        const assignments = parseAssignmentsCell(r.assignments);
+        if (!assignments.length && r.class && r.section && r.subjects) {
           assignments.push({
             class: String(r.class).trim(),
             section: String(r.section).trim().toUpperCase(),

@@ -81,9 +81,10 @@ const EXCEL_SCHEMAS: Record<string, { col: string; required: boolean; type?: "nu
     { col: "employeeId",  required: true  },
     { col: "email",       required: false },
     { col: "phoneNumber", required: false },
-    { col: "class",       required: true, type: "number" },
-    { col: "section",     required: true, type: "letter" },
-    { col: "subjects",    required: true  },
+    { col: "assignments", required: false },
+    { col: "class",       required: false, type: "number" },
+    { col: "section",     required: false, type: "letter" },
+    { col: "subjects",    required: false  },
     { col: "isClassTeacher", required: false },
     { col: "classTeacherOf", required: false },
     { col: "classTeacherOfClass", required: false },
@@ -122,6 +123,20 @@ function validateExcelRows(rows: any[], type: string): string[] {
         errors.push(`Row ${rowNum}: "${col}" must be a single letter A–Z (got "${val}").`);
       }
     });
+
+    if (type === "mgdTeacher") {
+      const getVal = (name: string) => {
+        const key = presentHeaders.find(h => h.toLowerCase() === name.toLowerCase());
+        return key ? (row[key] ?? "").toString().trim() : "";
+      };
+      const assignments = getVal("assignments");
+      const cls = getVal("class");
+      const sec = getVal("section");
+      const subs = getVal("subjects");
+      if (!assignments && !(cls && sec && subs)) {
+        errors.push(`Row ${rowNum}: provide either "assignments" or "class"+"section"+"subjects".`);
+      }
+    }
   });
   return errors;
 }
@@ -484,6 +499,7 @@ export default function AdminDashboard() {
 
   // ── CSV upload with validation ──────────────────────────────────────────────
   const handleCsvUpload = (file: File, type: string) => {
+    setBulkUploadType(type);
     setBulkUploadErrors([]);
     setBulkUploadResult(null);
 
@@ -545,14 +561,26 @@ export default function AdminDashboard() {
 
   // ── Template downloads as CSV ──────────────────────────────────────────────
   const downloadTemplate = (type: string) => {
-    const defs: Record<string, { header: string[]; row: string[] }> = {
-      classSection: { header: ["class", "section", "subjects"], row: ["5", "A", "English,Maths,Science"] },
-      mgdStudent: { header: ["studentName", "phoneNumber", "email", "admissionNumber", "class", "section"], row: ["Rahul Sharma", "9876543210", "rahul@school.edu", "2024001", "5", "A"] },
-      mgdTeacher: { header: ["teacherName", "employeeId", "email", "phoneNumber", "class", "section", "subjects", "isClassTeacher", "classTeacherOfClass", "classTeacherOfSection"], row: ["Ramesh Singh", "T100", "ramesh@school.edu", "9876543210", "5", "A", "English,Maths", "true", "5", "A"] },
+    const defs: Record<string, { header: string[]; rows: string[][] }> = {
+      classSection: {
+        header: ["class", "section", "subjects"],
+        rows: [["5", "A", "English,Maths,Science"]],
+      },
+      mgdStudent: {
+        header: ["studentName", "phoneNumber", "email", "admissionNumber", "class", "section"],
+        rows: [["Rahul Sharma", "9876543210", "rahul@school.edu", "2024001", "5", "A"]],
+      },
+      mgdTeacher: {
+        header: ["teacherName", "employeeId", "email", "phoneNumber", "assignments", "isClassTeacher", "classTeacherOfClass", "classTeacherOfSection"],
+        rows: [
+          ["Ramesh Singh", "T100", "ramesh@school.edu", "9876543210", "5-A:English|Maths;6-B:Science", "true", "5", "A"],
+          ["Neha Iyer", "T101", "neha@school.edu", "9876501111", "7-A:Maths;8-A:Physics|Maths", "false", "", ""],
+        ],
+      },
     };
     const def = defs[type];
     if (!def) return;
-    const csv = [def.header, def.row].map(r => r.map(c => `"${c}"`).join(",")).join("\r\n");
+    const csv = [def.header, ...def.rows].map(r => r.map(c => `"${c}"`).join(",")).join("\r\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -616,17 +644,39 @@ export default function AdminDashboard() {
   const UploadSuccessBanner = () => bulkUploadResult ? (
     <div style={{ marginTop: 12, padding: "10px 14px", background: "#f0fdf4", borderRadius: 8, border: "1px solid #86efac", fontSize: 13 }}>
       ✅ Created {bulkUploadResult.created} records.
-      {bulkUploadResult.duplicates.length > 0 && ` Duplicates skipped: ${bulkUploadResult.duplicates.join(", ")}`}
     </div>
   ) : null;
 
-  const UploadErrorBanner = () => bulkUploadErrors.length > 0 ? (
+  const duplicateReason = (id: string): string => {
+    if (bulkUploadType === "mgdStudent") return `${id}: Admission number already exists`;
+    if (bulkUploadType === "mgdTeacher") return `${id}: Employee ID already exists`;
+    if (bulkUploadType === "classSection") return `${id}: Class-section already exists`;
+    return `${id}: Duplicate record`;
+  };
+  const uploadFailureDetails = [
+    ...bulkUploadErrors,
+    ...((bulkUploadResult?.duplicates || []).map((d: string) => duplicateReason(d))),
+  ];
+  const isPartialFailure = !!bulkUploadResult && (
+    (bulkUploadResult.created ?? 0) > 0 ||
+    (bulkUploadResult.duplicates?.length ?? 0) > 0 ||
+    bulkUploadErrors.length > 0
+  );
+
+  const UploadErrorBanner = () => uploadFailureDetails.length > 0 ? (
     <div style={{ marginTop: 12, padding: "12px 16px", background: "#fff5f5", borderRadius: 8, border: "1px solid #fecaca", fontSize: 13 }}>
-      <div style={{ fontWeight: 700, color: "#c93c3c", marginBottom: 6 }}>⚠️ Upload failed — please fix the following issues:</div>
+      <div style={{ fontWeight: 700, color: "#c93c3c", marginBottom: 6 }}>
+        {isPartialFailure ? "⚠️ Upload partially failed — some rows were skipped:" : "⚠️ Upload failed — please fix the following issues:"}
+      </div>
       <ul style={{ margin: 0, paddingLeft: 18, color: "#c93c3c", lineHeight: 1.75 }}>
-        {bulkUploadErrors.map((e, i) => <li key={i}>{e}</li>)}
+        {uploadFailureDetails.map((e, i) => <li key={i}>{e}</li>)}
       </ul>
-      <button onClick={() => setBulkUploadErrors([])} style={{ marginTop: 8, fontSize: 11, color: "var(--mid)", background: "none", border: "none", cursor: "pointer" }}>Dismiss</button>
+      <button
+        onClick={() => { setBulkUploadErrors([]); setBulkUploadResult(null); }}
+        style={{ marginTop: 8, fontSize: 11, color: "var(--mid)", background: "none", border: "none", cursor: "pointer" }}
+      >
+        Dismiss
+      </button>
     </div>
   ) : null;
 
@@ -1215,14 +1265,14 @@ export default function AdminDashboard() {
                       <div key={cls} style={{ border: "1.5px solid var(--rule)", borderRadius: 12 }}>
                         <button
                           onClick={() => setExpandedStudentClass(prev => { const next = new Set(prev); next.has(classKey) ? next.delete(classKey) : next.add(classKey); return next; })}
-                          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 18px", background: "#f0effe", border: "none", borderRadius: expandedStudentClass.has(classKey) ? "10px 10px 0 0" : 10, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 18px", background: "#f4f6f8", border: "none", borderRadius: expandedStudentClass.has(classKey) ? "10px 10px 0 0" : 10, cursor: "pointer", fontFamily: "inherit" }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <span style={{ fontSize: 18 }}>🏫</span>
-                            <span style={{ fontWeight: 700, fontSize: 15, color: "#3d2c8d" }}>{cls}</span>
-                            <span style={{ fontSize: 12, background: "#3d2c8d", color: "white", borderRadius: 20, padding: "2px 9px", fontWeight: 600 }}>{byClass[cls].length} student{byClass[cls].length !== 1 ? "s" : ""}</span>
+                            <span style={{ fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>{cls}</span>
+                            <span style={{ fontSize: 12, color: "var(--mid)", fontWeight: 600 }}>{byClass[cls].length} student{byClass[cls].length !== 1 ? "s" : ""}</span>
                           </div>
-                          <ChevronDown size={16} style={{ color: "#3d2c8d", transform: expandedStudentClass.has(classKey) ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+                          <ChevronDown size={16} style={{ color: "var(--mid)", transform: expandedStudentClass.has(classKey) ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
                         </button>
 
                         {expandedStudentClass.has(classKey) && (
@@ -1238,7 +1288,7 @@ export default function AdminDashboard() {
                                     <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                                       <span style={{ fontSize: 13 }}>📋</span>
                                       <span style={{ fontWeight: 600, fontSize: 12, color: "var(--ink)" }}>{sec}</span>
-                                      <span style={{ fontSize: 11, background: "#e8f5e9", color: "#2e7d32", borderRadius: 20, padding: "1px 7px", fontWeight: 600 }}>{bySection[sec].length}</span>
+                                      <span style={{ fontSize: 11, color: "var(--mid)", fontWeight: 600 }}>{bySection[sec].length}</span>
                                     </div>
                                     <ChevronDown size={13} style={{ color: "var(--mid)", transform: expandedStudentSection.has(secKey) ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
                                   </button>
