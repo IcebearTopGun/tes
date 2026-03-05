@@ -10,7 +10,7 @@ import { z } from "zod";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import OpenAI from "openai";
-import { sendOtpSms } from "./services/sms";
+// import { sendOtpSms } from "./services/sms";
 import {
   assertConversationAccess,
   buildStudentScopedChatContext,
@@ -3555,12 +3555,13 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes
 
-      if (!isIntegrationTestMode) {
-        await sendOtpSms(String(phone).trim(), code, 300);
-      }
+      // Temporarily keep SMS logic disabled for local testing.
+      // if (!isIntegrationTestMode) {
+      //   await sendOtpSms(String(phone).trim(), code, 300);
+      // }
 
       await storage.createOtp(phone, code, role, identifier, expiresAt);
-      console.log(`[OTP] Code ${code} sent to ${phone} for ${role} ${identifier}`);
+      console.log(`[OTP][LOCAL] Code ${code} generated for ${phone} (${role}:${identifier})`);
 
       if (isIntegrationTestMode) {
         return res.json({ message: "OTP sent successfully", expiresIn: 300, code });
