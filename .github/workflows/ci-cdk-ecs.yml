@@ -11,6 +11,11 @@ env:
   AWS_REGION: us-east-1
   ENV_NAME: prod
   ECR_REPOSITORY: tes-app
+  APP_SECRET_NAME: tes/app/prod
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-and-build:
@@ -84,20 +89,24 @@ jobs:
       - name: Install infra dependencies
         run: npm --prefix infra ci
 
-      - name: CDK bootstrap
-        run: npm --prefix infra run cdk -- bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ env.AWS_REGION }}
+      - name: Resolve AWS account
+        run: echo "CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)" >> "$GITHUB_ENV"
 
-      - name: First deploy (create infrastructure + ECR)
+      - name: Verify app secret exists
         run: >-
-          npm --prefix infra run cdk -- deploy TesEcsStack-${{ env.ENV_NAME }}
-          --require-approval never
-          -c account=${{ secrets.AWS_ACCOUNT_ID }}
-          -c region=${{ env.AWS_REGION }}
-          -c envName=${{ env.ENV_NAME }}
-          -c ecrRepoName=${{ env.ECR_REPOSITORY }}
-          -c appSecretArn=${{ secrets.APP_SECRET_ARN }}
-          -c desiredCount=0
-          -c imageTag=bootstrap
+          aws secretsmanager describe-secret
+          --secret-id ${{ env.APP_SECRET_NAME }}
+          --region ${{ env.AWS_REGION }}
+
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories \
+            --repository-names "${ECR_REPOSITORY}" \
+            --region "${AWS_REGION}" >/dev/null 2>&1 || \
+          aws ecr create-repository \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-scanning-configuration scanOnPush=true \
+            --region "${AWS_REGION}" >/dev/null
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -112,14 +121,12 @@ jobs:
           docker build -t "$IMAGE_URI" .
           docker push "$IMAGE_URI"
 
-      - name: Deploy app image with desired count
+      - name: Deploy app image
         run: >-
           npm --prefix infra run cdk -- deploy TesEcsStack-${{ env.ENV_NAME }}
           --require-approval never
-          -c account=${{ secrets.AWS_ACCOUNT_ID }}
           -c region=${{ env.AWS_REGION }}
           -c envName=${{ env.ENV_NAME }}
           -c ecrRepoName=${{ env.ECR_REPOSITORY }}
-          -c appSecretArn=${{ secrets.APP_SECRET_ARN }}
-          -c desiredCount=1
+          -c appSecretId=${{ env.APP_SECRET_NAME }}
           -c imageTag=${{ github.sha }}

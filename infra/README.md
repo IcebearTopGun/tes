@@ -16,7 +16,7 @@ Design references:
 
 ## Required secret
 
-Create one AWS Secrets Manager secret and pass its ARN (or secret name in LocalStack mode) as `appSecretArn`.
+Create one AWS Secrets Manager secret and use its name (or ARN) as `appSecretId`.
 Secret JSON must include:
 
 ```json
@@ -35,19 +35,18 @@ npm ci
 npm run cdk -- bootstrap aws://<AWS_ACCOUNT_ID>/<AWS_REGION>
 npm run cdk -- deploy TesEcsStack-prod \
   --require-approval never \
-  -c account=<AWS_ACCOUNT_ID> \
   -c region=<AWS_REGION> \
   -c envName=prod \
   -c ecrRepoName=tes-app \
-  -c appSecretArn=<APP_SECRET_ARN> \
+  -c appSecretId=tes/app/prod \
   -c imageTag=<IMAGE_TAG>
 ```
 
 ## Main context values
 
-- `account` (required)
-- `region` (required)
-- `appSecretArn` (required)
+- `account` (optional; defaults to `CDK_DEFAULT_ACCOUNT`)
+- `region` (optional; defaults to `CDK_DEFAULT_REGION` or `us-east-1`)
+- `appSecretId` (default: `tes/app/<envName>`)
 - `envName` (default: `prod`)
 - `ecrRepoName` (default: `tes-app`)
 - `imageTag` (default: `latest`)
