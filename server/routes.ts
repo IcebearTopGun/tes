@@ -3822,11 +3822,8 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
         if (errs.length) { errors.push(`${normalized.admissionNumber || candidate.admissionNumber || "row"}: ${errs[0]}`); continue; }
         const existingClassSection = await storage.getClassSectionByClassAndSection(parseInt(normalized.studentClass, 10), normalized.section);
         if (!existingClassSection) {
-          await storage.createClassSection({
-            className: parseInt(normalized.studentClass, 10),
-            section: normalized.section,
-            subjects: JSON.stringify([]),
-          });
+          errors.push(`${normalized.admissionNumber || candidate.admissionNumber || "row"}: Class ${normalized.studentClass}-${normalized.section} does not exist`);
+          continue;
         }
         if (byAdmission.has(normalized.admissionNumber)) {
           duplicates.push(normalized.admissionNumber);
@@ -4091,25 +4088,6 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
           if (errs.length) errors.push(`${normalized.employeeId || String(r.employeeId || "row")}: ${errs[0]}`);
           else duplicates.push(normalized.employeeId || String(r.employeeId || "invalid-row"));
           continue;
-        }
-        for (const assignment of normalized.assignments) {
-          const classNum = parseInt(assignment.class, 10);
-          const section = assignment.section;
-          const existingClassSection = await storage.getClassSectionByClassAndSection(classNum, section);
-          if (!existingClassSection) {
-            await storage.createClassSection({
-              className: classNum,
-              section,
-              subjects: JSON.stringify(assignment.subjects),
-            });
-            continue;
-          }
-          let currentSubjects: string[] = [];
-          try { currentSubjects = JSON.parse(existingClassSection.subjects || "[]"); } catch {}
-          const mergedSubjects = Array.from(new Set([...(currentSubjects || []), ...assignment.subjects]));
-          if (mergedSubjects.length !== currentSubjects.length) {
-            await storage.updateClassSection(existingClassSection.id, { subjects: JSON.stringify(mergedSubjects) });
-          }
         }
         const assignmentError = await validateTeacherAssignments(normalized.assignments);
         if (assignmentError) { errors.push(`${normalized.employeeId}: ${assignmentError}`); continue; }
