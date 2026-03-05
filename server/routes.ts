@@ -11,6 +11,12 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import OpenAI from "openai";
 import { sendOtpSms } from "./services/sms";
+import {
+  assertConversationAccess,
+  buildStudentScopedChatContext,
+  buildTeacherScopedChatContext,
+  ScopedAccessError,
+} from "./services/aiContextSegregation";
 
 const JWT_SECRET = process.env.SESSION_SECRET || "super-secret-key";
 const isIntegrationTestMode = process.env.INTEGRATION_TEST_MODE === "1" || process.env.NODE_ENV === "test";
@@ -1309,8 +1315,15 @@ Return ONLY valid JSON with this exact structure:
 
   app.get("/api/chat/conversations/:id/messages", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
-    const msgs = await storage.getMessagesByConversation(parseInt(req.params.id));
-    res.json(msgs);
+    try {
+      const conversationId = parseInt(req.params.id, 10);
+      await assertConversationAccess({ conversationId, role: "teacher", userId: req.user.id });
+      const msgs = await storage.getMessagesByConversation(conversationId);
+      res.json(msgs);
+    } catch (err) {
+      if (err instanceof ScopedAccessError) return res.status(err.status).json({ message: err.message });
+      res.status(500).json({ message: "Failed to load messages" });
+    }
   });
 
   app.post("/api/chat/conversations/:id/messages", authMiddleware, async (req: AuthRequest, res) => {
@@ -1320,21 +1333,8 @@ Return ONLY valid JSON with this exact structure:
     const { content, viewMode } = req.body;
 
     try {
-      // Build scope-aware context
-      let dataContext: string;
-      if (viewMode === "class") {
-        const { getTeacherScope, buildClassAIContext } = await import("./services/teacherDataScope");
-        const scope = await getTeacherScope(req.user.id);
-        if (scope.isClassTeacher && scope.classTeacherOf) {
-          dataContext = await buildClassAIContext(scope.classTeacherOf, req.user.id);
-        } else {
-          const { buildSubjectAIContext } = await import("./services/teacherDataScope");
-          dataContext = await buildSubjectAIContext(req.user.id);
-        }
-      } else {
-        const { buildSubjectAIContext } = await import("./services/teacherDataScope");
-        dataContext = await buildSubjectAIContext(req.user.id);
-      }
+      await assertConversationAccess({ conversationId, role: "teacher", userId: req.user.id });
+      const dataContext = await buildTeacherScopedChatContext(req.user.id, viewMode);
 
       // Save user message
       await storage.createMessage({ conversationId, role: "user", content });
@@ -1358,6 +1358,7 @@ Return ONLY valid JSON with this exact structure:
       
       res.json(msg);
     } catch (err) {
+      if (err instanceof ScopedAccessError) return res.status(err.status).json({ message: err.message });
       console.error("Chat Error:", err);
       res.status(500).json({ message: "Analysis failed" });
     }
@@ -2148,8 +2149,15 @@ Answer the question with actionable study guidance.`;
 
   app.get("/api/student/chat/conversations/:id/messages", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "student") return res.status(401).json({ message: "Unauthorized" });
-    const msgs = await storage.getMessagesByConversation(parseInt(req.params.id));
-    res.json(msgs);
+    try {
+      const conversationId = parseInt(req.params.id, 10);
+      await assertConversationAccess({ conversationId, role: "student", userId: req.user.id });
+      const msgs = await storage.getMessagesByConversation(conversationId);
+      res.json(msgs);
+    } catch (err) {
+      if (err instanceof ScopedAccessError) return res.status(err.status).json({ message: err.message });
+      res.status(500).json({ message: "Failed to load messages" });
+    }
   });
 
   app.post("/api/student/chat/conversations/:id/messages", authMiddleware, async (req: AuthRequest, res) => {
@@ -2159,32 +2167,8 @@ Answer the question with actionable study guidance.`;
     const { content } = req.body;
 
     try {
-      const student = await storage.getStudent(req.user.id);
-      if (!student) return res.status(404).json({ message: "Student not found" });
-
-      const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
-      const evalContext = evals.length
-        ? JSON.stringify(evals.map(e => ({
-            subject: e.subject,
-            exam: e.examName,
-            score: e.totalMarks,
-            maxScore: e.maxMarks,
-            feedback: e.overallFeedback,
-          })))
-        : "No evaluation data available yet.";
-
-      // Include homework analytics in AI context
-      const hwSubmissions = await storage.getHomeworkSubmissionsByStudent(req.user.id);
-      const hwContext = hwSubmissions.length > 0
-        ? JSON.stringify(hwSubmissions.map(s => ({
-            subject: s.subject,
-            homework: s.description,
-            status: s.status,
-            correctness: s.correctnessScore,
-            onTime: s.isOnTime === 1,
-            submittedAt: s.submittedAt,
-          })))
-        : "No homework submissions yet.";
+      await assertConversationAccess({ conversationId, role: "student", userId: req.user.id });
+      const dataContext = await buildStudentScopedChatContext(req.user.id);
 
       await storage.createMessage({ conversationId, role: "user", content });
 
@@ -2196,10 +2180,11 @@ Answer the question with actionable study guidance.`;
         messages: [
           {
             role: "system",
-            content: `You are a personal academic coach for a student. Use the student's evaluation data and homework submission history to give personalised, encouraging advice.
+            content: `You are a personal academic coach for a student. Use only the scoped student data provided below.
 Be concise, supportive, and specific. Reference their actual scores, subjects, and homework patterns when relevant.
-Student's evaluation data: ${evalContext}
-Student's homework history: ${hwContext}`,
+If data is unavailable, say so clearly.
+
+${dataContext}`,
           },
           ...chatHistory,
         ],
@@ -2209,6 +2194,7 @@ Student's homework history: ${hwContext}`,
       const msg = await storage.createMessage({ conversationId, role: "assistant", content: aiContent });
       res.json(msg);
     } catch (err) {
+      if (err instanceof ScopedAccessError) return res.status(err.status).json({ message: err.message });
       console.error("Student Chat Error:", err);
       res.status(500).json({ message: "Chat failed" });
     }
