@@ -1,4 +1,5 @@
 import "@/dashboard.css";
+import "@/pages/dashboard/dashboard-modular.css";
 import { useTeacherDashboard } from "@/hooks/use-dashboard";
 import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
@@ -42,75 +43,9 @@ import CustomInsights from "@/components/CustomInsights";
 import { z } from "zod";
 import { motion, AnimatePresence } from "framer-motion";
 import { getInitials } from "@/shared/utils/identity";
-
-interface StructuredSubject {
-  name: string;
-  code: string;
-  className: string;
-  section: string;
-}
-
-interface ClassSection {
-  className: string;
-  section: string;
-}
-
-interface OcrResult {
-  sheetId: number;
-  examId: number;
-  admissionNumber: string;
-  studentName: string;
-  answers: Array<{ question_number: number; answer_text: string }>;
-}
-
-interface AnalyticsData {
-  classAverages: { subject: string; avgMarks: number; totalMarks: number; examCount: number }[];
-  studentPerformance: { studentName: string; totalMarks: number; maxMarks: number; examName: string; subject: string; pct: number }[];
-  marksDistribution: { range: string; count: number }[];
-  improvementTrends: { examName: string; subject: string; avgMarks: number; maxMarks: number; avgPct: number }[];
-  chapterWeakness: { chapter: string; subject: string; avgScore: number; totalQuestions: number; studentsAffected: number }[];
-}
-
-const EXAMPLE_QUESTIONS = [
-  "Which students need improvement?",
-  "Who scored highest in the last exam?",
-  "Give me a class performance summary.",
-  "What are the weakest areas across all students?",
-];
-
-const EXAM_CATEGORIES = [
-  { value: "mid_term", label: "Mid Term" },
-  { value: "unit_test", label: "Unit Test" },
-  { value: "end_sem", label: "End Sem" },
-  { value: "class_test", label: "Class Test" },
-];
-
-const BAR_COLORS = [
-  { bg: "var(--lav-card)", border: "" },
-  { bg: "var(--green-bg)", border: "1.5px solid rgba(42,157,110,.3)" },
-  { bg: "var(--amber-bg)", border: "1.5px solid rgba(196,122,30,.3)" },
-  { bg: "var(--blue-bg)", border: "1.5px solid rgba(37,99,192,.2)" },
-  { bg: "#fce4ef", border: "1.5px solid rgba(212,65,126,.2)" },
-];
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-type ScriptEntry = {
-  admissionNumber: string;
-  studentName: string;
-  pages: number;
-  status: "pending" | "evaluating" | "done" | "error";
-  scriptId?: number;
-  marks?: string;
-  maxMarks?: number;
-};
+import { BAR_COLORS, EXAM_CATEGORIES, EXAMPLE_QUESTIONS } from "./teacher/constants";
+import type { AnalyticsData, ClassSection, OcrResult, ScriptEntry, StructuredSubject } from "./teacher/types";
+import { pctColor, readFileAsDataUrl } from "./teacher/utils";
 
 function BulkUploadZone({
   examId,
@@ -1550,13 +1485,6 @@ function HwEvaluationsModal({ hwId, onClose }: { hwId: number; onClose: () => vo
 }
 
 
-function pctColor(pct: number) {
-  if (pct >= 75) return "var(--green)";
-  if (pct >= 50) return "var(--amber)";
-  return "var(--red)";
-}
-
-
 // ─── ExamAiChat ───────────────────────────────────────────────────────────────
 function ExamAiChat({ exam, onClose }: { exam: any; onClose: () => void }) {
   const [input, setInput] = useState("");
@@ -2453,7 +2381,7 @@ export default function TeacherDashboard() {
 
   if (isLoading) {
     return (
-      <div className="sf-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div className="sf-root sf-fullscreen-center">
         <Spinner size="lg" />
       </div>
     );

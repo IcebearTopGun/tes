@@ -1,0 +1,20 @@
+.sf-fullscreen-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+/*
+File Purpose:
+This stylesheet contains shared page-level styles used by modularized dashboard pages.
+
+Responsibilities:
+
+* Defines reusable layout utility classes used across dashboard entry components
+* Keeps static presentation details outside of page business logic
+
+Notes:
+This file was extracted from a large file during refactoring to improve maintainability.
+No business logic was modified.
+*/

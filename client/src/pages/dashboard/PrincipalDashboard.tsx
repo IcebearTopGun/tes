@@ -1,4 +1,5 @@
 import "@/dashboard.css";
+import "@/pages/dashboard/dashboard-modular.css";
 import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 import { useState, useRef, useEffect } from "react";
@@ -7,28 +8,8 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetcher";
 import ProfileDrawer from "@/components/ProfileDrawer";
 import CustomInsights from "@/components/CustomInsights";
-
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
-function getInitials(name: string) {
-  return name.split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2);
-}
-function kpiColor(score: number) {
-  if (score >= 75) return "var(--green)";
-  if (score >= 50) return "var(--amber)";
-  return "var(--red)";
-}
-const BAR_COLORS = [
-  { bg: "var(--lav-card)", border: "" },
-  { bg: "var(--green-bg)", border: "1.5px solid rgba(42,157,110,.3)" },
-  { bg: "var(--amber-bg)", border: "1.5px solid rgba(196,122,30,.3)" },
-  { bg: "var(--blue-bg)", border: "1.5px solid rgba(37,99,192,.2)" },
-  { bg: "#fce4ef", border: "1.5px solid rgba(212,65,126,.2)" },
-];
+import { BAR_COLORS } from "./principal/constants";
+import { getGreeting, getInitials, kpiColor } from "./principal/utils";
 
 export default function PrincipalDashboard() {
   const { user, logout } = useAuth();
@@ -117,7 +98,7 @@ export default function PrincipalDashboard() {
 
   if (statsLoading && !stats) {
     return (
-      <div className="sf-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div className="sf-root sf-fullscreen-center">
         <Spinner size="lg" />
       </div>
     );

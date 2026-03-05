@@ -1,4 +1,5 @@
 import "@/dashboard.css";
+import "@/pages/dashboard/dashboard-modular.css";
 import { useAuth } from "@/hooks/use-auth";
 import { Spinner } from "@/components/ui/spinner";
 import { useState, useRef, useEffect } from "react";
@@ -11,21 +12,9 @@ import { fetchWithAuth } from "@/lib/fetcher";
 import ProfileDrawer from "@/components/ProfileDrawer";
 import CustomInsights from "@/components/CustomInsights";
 import { getInitials } from "@/shared/utils/identity";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good Morning";
-  if (h < 17) return "Good Afternoon";
-  return "Good Evening";
-}
-
-function kpiColor(score: number) {
-  if (score >= 75) return "var(--green)";
-  if (score >= 50) return "var(--amber)";
-  return "var(--red)";
-}
+import { ADMIN_CHAT_QUESTIONS, BAR_COLORS, CHART_PALETTE } from "./admin/constants";
+import type { ClassRecord, StudentRecord, SubjectRecord, TeacherRecord } from "./admin/types";
+import { getGreeting, kpiColor } from "./admin/utils";
 
 // ─── Dropdown menu item — full-area click + hover ─────────────────────────────
 function DropdownItem({
@@ -160,33 +149,6 @@ function parseCsvLine(line: string): string[] {
   out.push(cur.trim());
   return out.map(v => v.replace(/^"|"$/g, ""));
 }
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-type TeacherRecord = { id: number; employeeId: string; name: string; phone: string; email?: string | null; subjectsAssigned?: string | null; classesAssigned?: string | null; isClassTeacher?: number | null; classTeacherOf?: string | null; };
-type StudentRecord = { id: number; admissionNumber: string; name: string; phone: string; studentClass: string; section: string; };
-type ClassRecord = { id: number; name: string; section: string; description?: string | null; classTeacherId?: number | null; classTeacherName?: string | null; };
-type SubjectRecord = { id: number; name: string; code?: string | null; description?: string | null; className?: string | null; section?: string | null; teacherId?: number | null; teacherName?: string | null; };
-
-const ADMIN_CHAT_QUESTIONS = [
-  "Which class needs academic intervention?",
-  "Who is the most effective teacher this term?",
-  "Which subject shows the weakest school performance?",
-  "How is homework completion trending across classes?",
-  "Which students are at risk of underperformance?",
-];
-
-const BAR_COLORS = [
-  { bg: "var(--lav-card)", border: "" },
-  { bg: "var(--green-bg)", border: "1.5px solid rgba(42,157,110,.3)" },
-  { bg: "var(--amber-bg)", border: "1.5px solid rgba(196,122,30,.3)" },
-  { bg: "var(--blue-bg)", border: "1.5px solid rgba(37,99,192,.2)" },
-  { bg: "#fce4ef", border: "1.5px solid rgba(212,65,126,.2)" },
-];
-
-const CHART_PALETTE = [
-  "#7C6FF7", "#4CAF7D", "#F7A23E", "#E06B8B",
-  "#4DBBE0", "#B67BE0", "#60C5A8", "#F7C948",
-];
 
 // ─── InlineDropdown — absolute positioned, attached to scroll flow ────────────
 function InlineDropdown({ menuId, bulkDotMenu, setBulkDotMenu, children }: {
@@ -638,7 +600,7 @@ export default function AdminDashboard() {
 
   if (kpisLoading && !kpis) {
     return (
-      <div className="sf-root" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <div className="sf-root sf-fullscreen-center">
         <Spinner size="lg" />
       </div>
     );
