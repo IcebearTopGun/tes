@@ -4296,3 +4296,18 @@ export default function TeacherDashboard() {
     </div>
   );
 }
+
+/*
+File Purpose:
+This file is the primary teacher dashboard page entrypoint and integration surface.
+
+Responsibilities:
+
+* Renders teacher-facing dashboard flows for exams, homework, analytics, warnings, and AI interactions
+* Coordinates page-level state, queries, mutations, and dialogs used by teacher workflows
+* Acts as the compatibility entrypoint while modular teacher files are introduced
+
+Notes:
+This file was extracted from a large file during refactoring to improve maintainability.
+No business logic was modified.
+*/

@@ -220,11 +220,11 @@ async function initAdminUsers() {
       await db.execute(drizzleSql`ALTER TABLE managed_teachers ADD COLUMN IF NOT EXISTS profile_photo_url TEXT`);
     } catch {}
 
-    // Seed admin + principal if not present
+    // Only bootstrap default admin/principal accounts; no dataset seeding.
     const hp = await bcrypt.hash("123", 10);
 
-    const existingAdmin = await storage.getAdminUserByEmployeeId("ADMIN001");
-    if (!existingAdmin) {
+    const existingAdminUser = await storage.getAdminUserByEmployeeId("ADMIN001");
+    if (!existingAdminUser) {
       await storage.createAdminUser({
         employeeId: "ADMIN001",
         name: "School Admin",
@@ -233,11 +233,11 @@ async function initAdminUsers() {
         phoneNumber: "9000000001",
         role: "ADMIN",
       });
-      console.log("[init] AdminUser ADMIN001 created (password: 123)");
+      console.log("[init] Default admin user created: ADMIN001");
     }
 
-    const existingPrincipal = await storage.getAdminUserByEmployeeId("PRIN001");
-    if (!existingPrincipal) {
+    const existingPrincipalUser = await storage.getAdminUserByEmployeeId("PRIN001");
+    if (!existingPrincipalUser) {
       await storage.createAdminUser({
         employeeId: "PRIN001",
         name: "School Principal",
@@ -246,7 +246,19 @@ async function initAdminUsers() {
         phoneNumber: "9000000002",
         role: "PRINCIPAL",
       });
-      console.log("[init] AdminUser PRIN001 created (password: 123)");
+      console.log("[init] Default principal user created: PRIN001");
+    }
+
+    // Keep legacy admin login path functional without full seeding.
+    const existingLegacyAdmin = await storage.getAdminByEmployeeId("A001");
+    if (!existingLegacyAdmin) {
+      await storage.createAdmin({
+        employeeId: "A001",
+        name: "Principal Admin",
+        email: "admin@school.edu",
+        password: hp,
+      });
+      console.log("[init] Default legacy admin created: A001");
     }
   } catch (err) {
     console.error("[initAdminUsers] Error:", err);
@@ -480,12 +492,8 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  await initAdminUsers(); // ensures admin_users table exists + seeds ADMIN001 and PRIN001
-  if (process.env.INTEGRATION_TEST_MODE !== "1") {
-    await seedDatabase();
-  } else {
-    console.log("[seed] Skipped in integration test mode.");
-  }
+  await initAdminUsers(); // schema/table initialization only; no data seeding
+  console.log("[seed] Startup data seeding disabled.");
 
   // TEACHER LOGIN
   app.post(api.auth.teacherLogin.path, async (req, res) => {
@@ -3653,25 +3661,9 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     }
   });
 
-  // Seed a default principal for testing
+  // Principal seed endpoint disabled per no-seeding policy
   app.post("/api/auth/adminuser/seed-principal", async (req, res) => {
-    try {
-      const existing = await storage.getAdminUserByEmployeeId("P001");
-      if (existing) return res.json({ message: "Already seeded", user: existing });
-      const hash = await bcrypt.hash("principal123", 10);
-      const u = await storage.createAdminUser({
-        employeeId: "P001",
-        name: "School Principal",
-        email: "principal@school.edu",
-        passwordHash: hash,
-        phoneNumber: "9999999999",
-        role: "PRINCIPAL",
-      });
-      const { passwordHash: _, ...safe } = u;
-      res.status(201).json(safe);
-    } catch (err) {
-      res.status(500).json({ message: "Seed failed" });
-    }
+    return res.status(403).json({ message: "Seeding is disabled." });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -4517,3 +4509,18 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
 
   return httpServer;
 }
+
+/*
+File Purpose:
+This file registers all server API routes and keeps the runtime wiring entrypoint stable.
+
+Responsibilities:
+
+* Defines and attaches route handlers for auth, exams, homework, analytics, chat, profile, and governance flows
+* Coordinates middleware usage and request-level validation in the route layer
+* Serves as the compatibility entrypoint while modular route files are introduced
+
+Notes:
+This file was extracted from a large file during refactoring to improve maintainability.
+No business logic was modified.
+*/

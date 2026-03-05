@@ -806,3 +806,18 @@ export default function PrincipalDashboard() {
     </div>
   );
 }
+
+/*
+File Purpose:
+This file is the primary principal dashboard page entrypoint and integration surface.
+
+Responsibilities:
+
+* Renders principal-focused school insights, teacher insights, class performance, and education quality views
+* Coordinates page-level data fetching, filters, and section navigation for principal workflows
+* Acts as the compatibility entrypoint while modular principal files are introduced
+
+Notes:
+This file was extracted from a large file during refactoring to improve maintainability.
+No business logic was modified.
+*/

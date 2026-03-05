@@ -1492,3 +1492,18 @@ export class DatabaseStorage implements IStorage {
 }
 
 export const storage = new DatabaseStorage();
+
+/*
+File Purpose:
+This file implements the primary database-backed storage service used by server routes.
+
+Responsibilities:
+
+* Provides concrete read/write methods for teachers, students, exams, homework, analytics, and admin features
+* Encapsulates SQL/ORM operations behind a consistent storage API
+* Remains the compatibility entrypoint while modular storage files are introduced
+
+Notes:
+This file was extracted from a large file during refactoring to improve maintainability.
+No business logic was modified.
+*/

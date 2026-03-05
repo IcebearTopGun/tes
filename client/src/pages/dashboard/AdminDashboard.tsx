@@ -1850,3 +1850,18 @@ export default function AdminDashboard() {
     </div>
   );
 }
+
+/*
+File Purpose:
+This file is the primary admin dashboard page entrypoint and integration surface.
+
+Responsibilities:
+
+* Renders admin-facing governance, roster, overview, and insights flows
+* Coordinates page-level state, data fetching, edits, and bulk operations for admin workflows
+* Acts as the compatibility entrypoint while modular admin files are introduced
+
+Notes:
+This file was extracted from a large file during refactoring to improve maintainability.
+No business logic was modified.
+*/
