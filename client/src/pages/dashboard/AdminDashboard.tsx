@@ -985,14 +985,14 @@ export default function AdminDashboard() {
                         {/* Class header */}
                         <button
                           onClick={() => setExpandedClass(prev => { const next = new Set(prev); next.has(classKey) ? next.delete(classKey) : next.add(classKey); return next; })}
-                          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 18px", background: "#f0effe", border: "none", borderRadius: expandedClass.has(classKey) ? "10px 10px 0 0" : 10, cursor: "pointer", fontFamily: "inherit" }}
+                          style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 18px", background: "#f4f6f8", border: "none", borderRadius: expandedClass.has(classKey) ? "10px 10px 0 0" : 10, cursor: "pointer", fontFamily: "inherit" }}
                         >
                           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                             <span style={{ fontSize: 18 }}>🏫</span>
-                            <span style={{ fontWeight: 700, fontSize: 15, color: "#3d2c8d" }}>Class {cls}</span>
+                            <span style={{ fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>Class {cls}</span>
                             <span style={{ fontSize: 12, color: "var(--mid)", fontWeight: 600 }}>{sections.length} section{sections.length !== 1 ? "s" : ""}</span>
                           </div>
-                          <ChevronDown size={16} style={{ color: "#3d2c8d", transform: expandedClass.has(classKey) ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+                          <ChevronDown size={16} style={{ color: "var(--mid)", transform: expandedClass.has(classKey) ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
                         </button>
 
                         {expandedClass.has(classKey) && (
@@ -1004,10 +1004,10 @@ export default function AdminDashboard() {
                               return (
                                 <div key={cs.id} style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                                   {/* Section row */}
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", background: isEditingThis ? "#f0effe" : "white", border: `1px solid ${isEditingThis ? "#b3a6f0" : "rgba(26,26,46,0.08)"}`, borderRadius: isEditingThis ? "10px 10px 0 0" : 10 }}>
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "11px 14px", background: isEditingThis ? "#f4f6f8" : "white", border: `1px solid ${isEditingThis ? "rgba(26,26,46,0.18)" : "rgba(26,26,46,0.08)"}`, borderRadius: isEditingThis ? "10px 10px 0 0" : 10 }}>
                                     <div>
                                       <div style={{ fontWeight: 600, fontSize: 13, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>
-                                        <span style={{ background: "#e8f5e9", color: "#2e7d32", borderRadius: 20, padding: "2px 10px", fontSize: 12 }}>Section {cs.section}</span>
+                                        <span style={{ background: "rgba(26,26,46,0.05)", color: "var(--ink)", borderRadius: 20, padding: "2px 10px", fontSize: 12 }}>Section {cs.section}</span>
                                       </div>
                                       <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 6, display: "flex", flexWrap: "wrap", gap: 5 }}>
                                         {subjects.length ? subjects.map((sub) => (
@@ -1029,8 +1029,8 @@ export default function AdminDashboard() {
                                   </div>
                                   {/* Inline edit form — directly below the row */}
                                   {isEditingThis && (
-                                    <div style={{ background: "#faf9ff", border: "1px solid #b3a6f0", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 14px 16px" }}>
-                                      <div style={{ fontSize: 12, fontWeight: 700, color: "#3d2c8d", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Edit Section {cs.section}</div>
+                                    <div style={{ background: "white", border: "1px solid rgba(26,26,46,0.18)", borderTop: "none", borderRadius: "0 0 10px 10px", padding: "14px 14px 16px" }}>
+                                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>Edit Section {cs.section}</div>
                                       <div style={{ fontSize: 12, color: "var(--mid)", marginBottom: 10 }}>Class and section are locked. Only subjects can be edited.</div>
                                       <div style={{ marginBottom: 12 }}>
                                         <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 6 }}>Subjects</div>
@@ -1545,15 +1545,15 @@ export default function AdminDashboard() {
                         <div style={{
                           display: "flex", alignItems: "flex-start", justifyContent: "space-between",
                           padding: "13px 16px",
-                          background: isEditingThis ? "#f0effe" : "white",
-                          border: `1.5px solid ${isEditingThis ? "#b3a6f0" : "rgba(26,26,46,0.10)"}`,
+                          background: isEditingThis ? "#f4f6f8" : "white",
+                          border: `1.5px solid ${isEditingThis ? "rgba(26,26,46,0.18)" : "rgba(26,26,46,0.10)"}`,
                           borderRadius: isEditingThis ? "12px 12px 0 0" : 12,
                           transition: "border-color 0.15s, background 0.15s",
                         }}>
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
                               <span style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>{t.teacherName}</span>
-                              <span style={{ fontSize: 11, background: "var(--lav-card)", color: "#3d2c8d", borderRadius: 20, padding: "2px 9px", fontWeight: 600 }}>{t.employeeId}</span>
+                              <span style={{ fontSize: 11, background: "rgba(26,26,46,0.06)", color: "var(--ink)", borderRadius: 20, padding: "2px 9px", fontWeight: 600 }}>{t.employeeId}</span>
                               {t.isClassTeacher === 1 && (
                                 <span style={{ fontSize: 11, background: "#e8f5e9", color: "#2e7d32", borderRadius: 20, padding: "2px 9px", fontWeight: 600 }}>📋 Class Teacher · {t.classTeacherOf}</span>
                               )}
@@ -1566,11 +1566,11 @@ export default function AdminDashboard() {
                             {assignments.length > 0 && (
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
                                 {assignments.map((a: any, aIdx: number) => (
-                                  <div key={aIdx} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#f0effe", borderRadius: 8, padding: "4px 10px", border: "1px solid #ddd8f8" }}>
-                                    <span style={{ fontSize: 11, fontWeight: 700, color: "#3d2c8d" }}>Cl {a.class}-{a.section}</span>
-                                    <span style={{ width: 1, height: 12, background: "#ccc8ee", display: "inline-block" }} />
+                                  <div key={aIdx} style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "rgba(26,26,46,0.04)", borderRadius: 8, padding: "4px 10px", border: "1px solid rgba(26,26,46,0.12)" }}>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)" }}>Cl {a.class}-{a.section}</span>
+                                    <span style={{ width: 1, height: 12, background: "rgba(26,26,46,0.2)", display: "inline-block" }} />
                                     {(a.subjects || []).map((sub: string) => (
-                                      <span key={sub} style={{ display: "inline-block", padding: "1px 8px", background: "white", borderRadius: 10, border: "1px solid #ddd8f8", fontSize: 11, fontWeight: 500, color: "#555" }}>{sub}</span>
+                                      <span key={sub} style={{ display: "inline-block", padding: "1px 8px", background: "white", borderRadius: 10, border: "1px solid rgba(26,26,46,0.12)", fontSize: 11, fontWeight: 500, color: "#555" }}>{sub}</span>
                                     ))}
                                   </div>
                                 ))}
@@ -1606,10 +1606,10 @@ export default function AdminDashboard() {
                             : [];
 
                           return (
-                            <div style={{ background: "#faf9ff", border: "1.5px solid #b3a6f0", borderTop: "none", borderRadius: "0 0 12px 12px", padding: "16px 16px 18px" }}>
+                            <div style={{ background: "white", border: "1.5px solid rgba(26,26,46,0.18)", borderTop: "none", borderRadius: "0 0 12px 12px", padding: "16px 16px 18px" }}>
 
                               {/* ── Profile fields ── */}
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#3d2c8d", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.09em" }}>Profile Details</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.09em" }}>Profile Details</div>
                               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 14 }}>
                                 <div>
                                   <Input placeholder="Teacher Name" value={mgdTeacherForm.teacherName} onChange={e => setMgdTeacherForm(v => ({ ...v, teacherName: e.target.value }))} />
@@ -1636,10 +1636,10 @@ export default function AdminDashboard() {
                               </div>
 
                               {/* ── Divider ── */}
-                              <div style={{ borderTop: "1px solid #e0dcf5", marginBottom: 16 }} />
+                              <div style={{ borderTop: "1px solid rgba(26,26,46,0.12)", marginBottom: 16 }} />
 
                               {/* ── Subject Assignments (draft) ── */}
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#3d2c8d", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.09em" }}>Subject Assignments</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--ink)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.09em" }}>Subject Assignments</div>
                               <div style={{ fontSize: 11, color: "var(--mid)", marginBottom: 12 }}>Changes below are staged — hit <strong>Save Changes</strong> at the bottom to apply all at once.</div>
 
                               {mgdTeacherForm.assignments.length === 0 ? (
@@ -1652,9 +1652,9 @@ export default function AdminDashboard() {
                                     const currentSubs: string[] = a.subjects || [];
                                     const addableSubs = allSubjectsForSlot.filter((s: string) => !currentSubs.includes(s));
                                     return (
-                                      <div key={aIdx} style={{ background: "white", borderRadius: 10, border: "1px solid #e0dcf5", padding: "10px 12px" }}>
+                                      <div key={aIdx} style={{ background: "white", borderRadius: 10, border: "1px solid rgba(26,26,46,0.14)", padding: "10px 12px" }}>
                                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                                          <span style={{ fontSize: 13, fontWeight: 700, color: "#3d2c8d" }}>Class {a.class} — Section {a.section}</span>
+                                          <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>Class {a.class} — Section {a.section}</span>
                                           <button
                                             onClick={() => setMgdTeacherForm(v => ({ ...v, assignments: v.assignments.filter((_: any, i: number) => i !== aIdx) }))}
                                             style={{ background: "none", border: "none", cursor: "pointer", color: "#c93c3c", fontSize: 12, padding: "2px 6px", borderRadius: 6, display: "flex", alignItems: "center", gap: 4 }}
@@ -1665,7 +1665,7 @@ export default function AdminDashboard() {
                                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                                           {/* Current subjects — click × to stage removal */}
                                           {currentSubs.map((sub: string) => (
-                                            <span key={sub} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 6px 4px 10px", background: "#e8e4fb", borderRadius: 20, border: "1px solid #c8c0f0", fontSize: 12, fontWeight: 600, color: "#3d2c8d" }}>
+                                            <span key={sub} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 6px 4px 10px", background: "rgba(26,26,46,0.05)", borderRadius: 20, border: "1px solid rgba(26,26,46,0.16)", fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>
                                               {sub}
                                               <button
                                                 onClick={() => {
@@ -1677,9 +1677,9 @@ export default function AdminDashboard() {
                                                       : v.assignments.filter((_: any, i: number) => i !== aIdx)
                                                   }));
                                                 }}
-                                                style={{ width: 16, height: 16, borderRadius: "50%", background: "#b3a6f0", border: "none", cursor: "pointer", color: "white", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, padding: 0, flexShrink: 0 }}
+                                                style={{ width: 16, height: 16, borderRadius: "50%", background: "#7d8796", border: "none", cursor: "pointer", color: "white", fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1, padding: 0, flexShrink: 0 }}
                                                 onMouseEnter={e => (e.currentTarget.style.background = "#c93c3c")}
-                                                onMouseLeave={e => (e.currentTarget.style.background = "#b3a6f0")}
+                                                onMouseLeave={e => (e.currentTarget.style.background = "#7d8796")}
                                               >×</button>
                                             </span>
                                           ))}
@@ -1688,8 +1688,8 @@ export default function AdminDashboard() {
                                             <button
                                               key={sub}
                                               onClick={() => setMgdTeacherForm(v => ({ ...v, assignments: v.assignments.map((aa: any, i: number) => i === aIdx ? { ...aa, subjects: [...(aa.subjects || []), sub] } : aa) }))}
-                                              style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "white", borderRadius: 20, border: "1.5px dashed #b3a6f0", fontSize: 12, fontWeight: 600, color: "#7a6abf", cursor: "pointer" }}
-                                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#e8e4fb"; (e.currentTarget as HTMLElement).style.borderStyle = "solid"; }}
+                                              style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "white", borderRadius: 20, border: "1.5px dashed rgba(26,26,46,0.30)", fontSize: 12, fontWeight: 600, color: "#5f6b7a", cursor: "pointer" }}
+                                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "rgba(26,26,46,0.05)"; (e.currentTarget as HTMLElement).style.borderStyle = "solid"; }}
                                               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "white"; (e.currentTarget as HTMLElement).style.borderStyle = "dashed"; }}
                                             >+ {sub}</button>
                                           ))}
@@ -1701,7 +1701,7 @@ export default function AdminDashboard() {
                               )}
 
                               {/* ── Add new assignment(s) — staged, not yet saved ── */}
-                              <div style={{ padding: "12px 14px", background: "rgba(61,44,141,0.04)", borderRadius: 10, border: "1px dashed #c8c0f0", marginBottom: 18 }}>
+                              <div style={{ padding: "12px 14px", background: "rgba(0,0,0,0.03)", borderRadius: 10, border: "1px dashed rgba(26,26,46,0.20)", marginBottom: 18 }}>
                                 <div style={{ fontSize: 11, fontWeight: 600, color: "var(--mid)", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.07em" }}>Add New Assignment</div>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
                                   <div>
@@ -1741,7 +1741,7 @@ export default function AdminDashboard() {
                                     ) : (
                                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                         {newAssignAvailableSubjects.map((sub: string) => (
-                                          <label key={sub} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${teacherAssignSubjects.includes(sub) ? "#3d2c8d" : "var(--rule)"}`, background: teacherAssignSubjects.includes(sub) ? "#e8e4fb" : "var(--pane)" }}>
+                                          <label key={sub} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", padding: "6px 12px", borderRadius: 8, border: `1.5px solid ${teacherAssignSubjects.includes(sub) ? "#4b5563" : "var(--rule)"}`, background: teacherAssignSubjects.includes(sub) ? "#eef2f7" : "var(--pane)" }}>
                                             <input type="checkbox" checked={teacherAssignSubjects.includes(sub)} onChange={e => setTeacherAssignSubjects(v => e.target.checked ? [...v, sub] : v.filter((s: string) => s !== sub))} style={{ display: "none" }} />{sub}
                                           </label>
                                         ))}
