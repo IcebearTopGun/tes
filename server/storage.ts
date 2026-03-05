@@ -28,6 +28,8 @@ export interface IStorage {
 
   createExam(exam: InsertExam): Promise<Exam>;
   getExamsByTeacher(teacherId: number): Promise<Exam[]>;
+  updateExam(id: number, data: Partial<InsertExam>): Promise<Exam>;
+  deleteExam(id: number): Promise<void>;
 
   getAnswerSheetsByExam(examId: number): Promise<any[]>;
   createAnswerSheet(sheet: any): Promise<any>;
@@ -212,6 +214,78 @@ export class DatabaseStorage implements IStorage {
 
   async getExamsByTeacher(teacherId: number): Promise<Exam[]> {
     return await db.select().from(exams).where(eq(exams.teacherId, teacherId));
+  }
+
+  async updateExam(id: number, data: Partial<InsertExam>): Promise<Exam> {
+    const [updated] = await db
+      .update(exams)
+      .set(data)
+      .where(eq(exams.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteExam(id: number): Promise<void> {
+    await db.transaction(async (tx) => {
+      const sheets = await tx
+        .select({ id: answerSheets.id })
+        .from(answerSheets)
+        .where(eq(answerSheets.examId, id));
+      const sheetIds = sheets.map((s) => s.id);
+
+      let evaluationIds: number[] = [];
+      if (sheetIds.length > 0) {
+        const evals = await tx
+          .select({ id: evaluations.id })
+          .from(evaluations)
+          .where(inArray(evaluations.answerSheetId, sheetIds));
+        evaluationIds = evals.map((e) => e.id);
+      }
+
+      if (evaluationIds.length > 0) {
+        await tx
+          .delete(deviationLogs)
+          .where(inArray(deviationLogs.evaluationId, evaluationIds));
+      }
+
+      if (sheetIds.length > 0) {
+        await tx
+          .delete(deviationLogs)
+          .where(inArray(deviationLogs.answerSheetId, sheetIds));
+      }
+
+      await tx
+        .delete(deviationLogs)
+        .where(eq(deviationLogs.examId, id));
+
+      if (sheetIds.length > 0) {
+        await tx
+          .delete(evaluations)
+          .where(inArray(evaluations.answerSheetId, sheetIds));
+      }
+
+      if (sheetIds.length > 0) {
+        await tx
+          .delete(mergedAnswerScripts)
+          .where(inArray(mergedAnswerScripts.answerSheetId, sheetIds));
+      }
+
+      await tx
+        .delete(mergedAnswerScripts)
+        .where(eq(mergedAnswerScripts.examId, id));
+
+      await tx
+        .delete(answerSheetPages)
+        .where(eq(answerSheetPages.examId, id));
+
+      await tx
+        .delete(answerSheets)
+        .where(eq(answerSheets.examId, id));
+
+      await tx
+        .delete(exams)
+        .where(eq(exams.id, id));
+    });
   }
 
   async getAnswerSheetsByExam(examId: number): Promise<any[]> {

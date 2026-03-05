@@ -481,7 +481,11 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   await initAdminUsers(); // ensures admin_users table exists + seeds ADMIN001 and PRIN001
-  await seedDatabase();
+  if (process.env.INTEGRATION_TEST_MODE !== "1") {
+    await seedDatabase();
+  } else {
+    console.log("[seed] Skipped in integration test mode.");
+  }
 
   // TEACHER LOGIN
   app.post(api.auth.teacherLogin.path, async (req, res) => {
@@ -739,6 +743,24 @@ export async function registerRoutes(
   });
 
   // EXAMS
+  const examUpdateSchema = z.object({
+    examName: z.string().min(1).optional(),
+    subject: z.string().min(1).optional(),
+    className: z.string().min(1).optional(),
+    section: z.string().min(1).optional().nullable(),
+    totalMarks: z.coerce.number().int().min(1).optional(),
+    questionText: z.string().optional().nullable(),
+    modelAnswerText: z.string().optional().nullable(),
+    markingSchemeText: z.string().optional().nullable(),
+    category: z.string().min(1).optional(),
+    questionImages: z.string().optional().nullable(),
+    modelAnswerImages: z.string().optional().nullable(),
+    subjectCode: z.string().optional().nullable(),
+    useNcert: z.coerce.number().int().min(0).max(1).optional(),
+    description: z.string().optional().nullable(),
+    examDate: z.string().optional().nullable(),
+  });
+
   app.post(api.exams.create.path, authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") {
       return res.status(401).json({ message: "Unauthorized" });
@@ -764,6 +786,60 @@ export async function registerRoutes(
     }
     const exams = await storage.getExamsByTeacher(req.user.id);
     res.json(exams);
+  });
+
+  app.put("/api/exams/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const examId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(examId)) return res.status(400).json({ message: "Invalid exam id" });
+
+      const existing = await storage.getExam(examId);
+      if (!existing || existing.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+      const today = new Date().toISOString().split("T")[0];
+      if (existing.examDate && existing.examDate <= today) {
+        return res.status(400).json({ message: "Cannot edit exam on or after exam date" });
+      }
+
+      const parsed = examUpdateSchema.parse(req.body || {});
+      if (Object.keys(parsed).length === 0) {
+        return res.status(400).json({ message: "No fields provided to update" });
+      }
+
+      if (parsed.examDate && parsed.examDate < today) {
+        return res.status(400).json({ message: "Exam date cannot be in the past" });
+      }
+
+      const next = await storage.updateExam(examId, parsed as any);
+      res.json(next);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: err.errors[0].message });
+      }
+      res.status(500).json({ message: "Failed to update exam" });
+    }
+  });
+
+  app.delete("/api/exams/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const examId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(examId)) return res.status(400).json({ message: "Invalid exam id" });
+
+      const existing = await storage.getExam(examId);
+      if (!existing || existing.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+      const today = new Date().toISOString().split("T")[0];
+      if (existing.examDate && existing.examDate <= today) {
+        return res.status(400).json({ message: "Cannot delete exam on or after exam date" });
+      }
+
+      await storage.deleteExam(examId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to delete exam", detail: err?.message });
+    }
   });
 
   app.get("/api/exams/:id/answer-sheets", authMiddleware, async (req: AuthRequest, res) => {

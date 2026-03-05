@@ -9,7 +9,7 @@ export interface StartedServer {
 export async function startIntegrationServer(port: number): Promise<StartedServer> {
   const baseUrl = `http://localhost:${port}`;
   const serverPath = path.resolve(process.cwd(), "server/index.ts");
-  const proc = spawn("npx", ["tsx", serverPath], {
+  const proc = spawn("node", ["--import", "tsx", serverPath], {
     cwd: process.cwd(),
     env: {
       ...process.env,
@@ -21,12 +21,19 @@ export async function startIntegrationServer(port: number): Promise<StartedServe
     stdio: "pipe",
   });
 
-  proc.stdout.on("data", () => undefined);
-  proc.stderr.on("data", () => undefined);
+  let stdoutLog = "";
+  let stderrLog = "";
+  proc.stdout.on("data", (chunk) => { stdoutLog += String(chunk); });
+  proc.stderr.on("data", (chunk) => { stderrLog += String(chunk); });
 
-  const maxWaitMs = 45000;
+  const maxWaitMs = 60000;
   const startedAt = Date.now();
   while (Date.now() - startedAt < maxWaitMs) {
+    if (proc.exitCode !== null) {
+      throw new Error(
+        `Integration server exited early with code ${proc.exitCode}.\nSTDOUT:\n${stdoutLog}\nSTDERR:\n${stderrLog}`,
+      );
+    }
     try {
       const res = await fetch(`${baseUrl}/api/admin/stats`);
       // 401/403 are enough to prove server is up.
@@ -40,7 +47,9 @@ export async function startIntegrationServer(port: number): Promise<StartedServe
   }
 
   proc.kill("SIGTERM");
-  throw new Error("Integration server did not become ready in time.");
+  throw new Error(
+    `Integration server did not become ready in time.\nSTDOUT:\n${stdoutLog}\nSTDERR:\n${stderrLog}`,
+  );
 }
 
 export async function stopIntegrationServer(proc: ChildProcessWithoutNullStreams) {

@@ -92,6 +92,8 @@ app.use((req, res, next) => {
       ALTER TABLE exams ADD COLUMN IF NOT EXISTS section TEXT;
       ALTER TABLE exams ADD COLUMN IF NOT EXISTS subject_code TEXT;
       ALTER TABLE exams ADD COLUMN IF NOT EXISTS use_ncert INTEGER DEFAULT 0;
+      ALTER TABLE exams ADD COLUMN IF NOT EXISTS description TEXT;
+      ALTER TABLE exams ADD COLUMN IF NOT EXISTS exam_date TEXT;
       ALTER TABLE exams ADD COLUMN IF NOT EXISTS created_at TEXT DEFAULT CURRENT_TIMESTAMP;
     `);
     console.log("[DB] Schema auto-migration complete");

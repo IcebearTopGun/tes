@@ -68,6 +68,8 @@ export const exams = pgTable("exams", {
   section: text("section"),
   subjectCode: text("subject_code"),
   useNcert: integer("use_ncert").default(0), // 0 = no, 1 = yes
+  description: text("description"),
+  examDate: text("exam_date"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 

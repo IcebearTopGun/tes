@@ -200,6 +200,28 @@ export const api = {
         401: errorSchemas.unauthorized
       }
     },
+    update: {
+      method: 'PUT' as const,
+      path: '/api/exams/:id' as const,
+      input: insertExamSchema.partial(),
+      responses: {
+        200: z.custom<typeof exams.$inferSelect>(),
+        400: errorSchemas.validation,
+        401: errorSchemas.unauthorized,
+        403: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      }
+    },
+    delete: {
+      method: 'DELETE' as const,
+      path: '/api/exams/:id' as const,
+      responses: {
+        200: z.object({ success: z.boolean() }),
+        401: errorSchemas.unauthorized,
+        403: errorSchemas.unauthorized,
+        404: errorSchemas.notFound,
+      }
+    },
     processAnswerSheet: {
       method: 'POST' as const,
       path: '/api/exams/:id/process-answer-sheet' as const,

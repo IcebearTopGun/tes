@@ -2063,6 +2063,7 @@ export default function TeacherDashboard() {
   const [examSubjectCode, setExamSubjectCode] = useState("");
   const [examDescription, setExamDescription] = useState("");
   const [examDate, setExamDate] = useState("");
+  const [editingExam, setEditingExam] = useState<any | null>(null);
   const [useNcert, setUseNcert] = useState(false);
   const [questionImages, setQuestionImages] = useState<string[]>([]);
   const [modelAnswerImages, setModelAnswerImages] = useState<string[]>([]);
@@ -2132,6 +2133,17 @@ export default function TeacherDashboard() {
     setHwQuestionsText(""); setHwQuestionImages([]); setHwModelSolution("");
     setHwModelAnswerImages([]); setHwUseNcert(false); setHwDueDate("");
     setHwActiveTab("description");
+  };
+
+  const parseImageArray = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.length > 0);
+    if (typeof value !== "string" || !value.trim()) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string" && v.length > 0) : [];
+    } catch {
+      return [];
+    }
   };
 
   const createHomework = useMutation({
@@ -2285,11 +2297,56 @@ export default function TeacherDashboard() {
     return `${date}-${subj}-${cat}-${cls}`;
   })();
 
+  const displayedExamName = editingExam?.examName || generatedExamName;
+
+  const resetExamForm = () => {
+    form.reset({
+      subject: "",
+      className: "",
+      examName: "",
+      category: "unit_test",
+      totalMarks: 0,
+      questionText: "",
+      modelAnswerText: "",
+      markingSchemeText: "",
+    });
+    setExamSection("");
+    setExamSubjectCode("");
+    setUseNcert(false);
+    setExamDescription("");
+    setExamDate("");
+    setQuestionImages([]);
+    setModelAnswerImages([]);
+    setEditingExam(null);
+  };
+
+  const openEditExam = (exam: any) => {
+    setEditingExam(exam);
+    form.reset({
+      subject: exam.subject || "",
+      className: exam.className || "",
+      examName: exam.examName || "",
+      category: exam.category || "unit_test",
+      totalMarks: Number(exam.totalMarks || 0),
+      questionText: exam.questionText || "",
+      modelAnswerText: exam.modelAnswerText || "",
+      markingSchemeText: exam.markingSchemeText || "",
+    });
+    setExamSection(exam.section || "");
+    setExamSubjectCode(exam.subjectCode || "");
+    setUseNcert((exam.useNcert || 0) === 1);
+    setExamDescription(exam.description || "");
+    setExamDate(exam.examDate || "");
+    setQuestionImages(parseImageArray(exam.questionImages));
+    setModelAnswerImages(parseImageArray(exam.modelAnswerImages));
+    setIsDialogOpen(true);
+  };
+
   const onSubmit = async (values: any) => {
     try {
-      await apiRequest("POST", api.exams.create.path, {
+      const payload = {
         ...values,
-        examName: generatedExamName,
+        examName: editingExam?.examName || generatedExamName,
         questionText: values.questionText || null,
         modelAnswerText: values.modelAnswerText || null,
         markingSchemeText: values.markingSchemeText || null,
@@ -2300,15 +2357,21 @@ export default function TeacherDashboard() {
         useNcert: useNcert ? 1 : 0,
         description: examDescription || null,
         examDate: examDate || null,
-      });
+      };
+
+      if (editingExam?.id) {
+        await apiRequest("PUT", buildUrl(api.exams.update.path, { id: editingExam.id }), payload);
+      } else {
+        await apiRequest("POST", api.exams.create.path, payload);
+      }
+
       queryClient.invalidateQueries({ queryKey: [api.exams.list.path] });
-      toast({ title: "Exam created" });
+      toast({ title: editingExam?.id ? "Exam updated" : "Exam created" });
       setIsDialogOpen(false);
-      form.reset();
-      setExamSection(""); setExamSubjectCode(""); setUseNcert(false);
-      setExamDescription(""); setExamDate("");
-      setQuestionImages([]); setModelAnswerImages([]);
-    } catch { toast({ title: "Error", description: "Failed to create exam", variant: "destructive" }); }
+      resetExamForm();
+    } catch (err: any) {
+      toast({ title: "Error", description: err?.message || "Failed to save exam", variant: "destructive" });
+    }
   };
 
   // Handle image upload for questions/model answers
@@ -3409,13 +3472,22 @@ export default function TeacherDashboard() {
                               catLabel={catLabel}
                               catColor={catColor}
                               today={today}
-                              onEdit={() => { /* edit exam — future enhancement */ toast({ title: "Edit exam", description: "Exam editing coming soon." }); }}
+                              onEdit={() => openEditExam(exam)}
                               onDelete={() => {
                                 if (confirm("Delete this exam? All answer sheets and evaluations will also be removed.")) {
-                                  fetchWithAuth(`/api/exams/${exam.id}`, { method: "DELETE" })
-                                    .then(r => {
-                                      if (r.ok) { toast({ title: "Exam deleted." }); queryClient.invalidateQueries({ queryKey: [api.exams.list.path] }); }
-                                      else toast({ title: "Error", description: "Could not delete exam.", variant: "destructive" });
+                                  apiRequest("DELETE", buildUrl(api.exams.delete.path, { id: exam.id }))
+                                    .then(() => {
+                                      toast({ title: "Exam deleted." });
+                                      queryClient.setQueryData<Exam[] | undefined>([api.exams.list.path], (prev) =>
+                                        Array.isArray(prev) ? prev.filter((e: any) => e.id !== exam.id) : prev
+                                      );
+                                      if (selectedExamId === String(exam.id)) setSelectedExamId("");
+                                      if (selectedResultExamId === exam.id) setSelectedResultExamId(null);
+                                      if (expandedExamId === exam.id) setExpandedExamId(null);
+                                      queryClient.invalidateQueries({ queryKey: [api.exams.list.path] });
+                                    })
+                                    .catch((err: any) => {
+                                      toast({ title: "Error", description: err?.message || "Could not delete exam.", variant: "destructive" });
                                     });
                                 }
                               }}
@@ -3845,10 +3917,10 @@ export default function TeacherDashboard() {
       {/* ── CREATE EXAM DIALOG ── */}
       <Dialog open={isDialogOpen} onOpenChange={(open) => {
         setIsDialogOpen(open);
-        if (!open) { setQuestionImages([]); setModelAnswerImages([]); setExamSection(""); setExamSubjectCode(""); setUseNcert(false); setExamDescription(""); setExamDate(""); }
+        if (!open) resetExamForm();
       }}>
         <DialogContent className="sm:max-w-[600px] rounded-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Create New Exam</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingExam ? "Edit Exam" : "Create New Exam"}</DialogTitle></DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
               {/* Step 1: Class */}
@@ -4029,8 +4101,8 @@ export default function TeacherDashboard() {
               </div>
               {/* Auto-name */}
               <div className="p-3 bg-muted/30 rounded-xl border border-border/30">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide font-bold mb-1">Auto-generated Exam Name</p>
-                <p className="text-sm font-mono font-semibold text-primary">{generatedExamName}</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide font-bold mb-1">{editingExam ? "Exam Name" : "Auto-generated Exam Name"}</p>
+                <p className="text-sm font-mono font-semibold text-primary">{displayedExamName}</p>
               </div>
 
               {/* Questions — text OR images, required */}
@@ -4110,7 +4182,7 @@ export default function TeacherDashboard() {
                 </div>
               )}
               <Button type="submit" className="w-full rounded-xl" disabled={form.formState.isSubmitting || !examDescription.trim() || !examDate || (!form.watch("questionText")?.trim() && questionImages.length === 0)}>
-                {form.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Create Exam"}
+                {form.formState.isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : (editingExam ? "Update Exam" : "Create Exam")}
               </Button>
             </form>
           </Form>
