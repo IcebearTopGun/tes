@@ -183,7 +183,6 @@ export default function PrincipalDashboard() {
                   <div key={kpi.label} style={{ marginTop: blockIdx === 0 ? 0 : 4 }}>
                     <div className="sf-f-cat">{kpi.label}</div>
                     <div className="sf-f-num" style={{ color: kpi.color }}>{kpi.value}</div>
-                    <div className="sf-f-desc">Live school metric.</div>
                   </div>
                 ))}
               </div>

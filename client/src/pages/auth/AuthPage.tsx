@@ -111,7 +111,7 @@ export default function AuthPage({ mode }: { mode: "login" | "signup" }) {
         <div className="h-8 w-8 bg-primary rounded-xl flex items-center justify-center shadow-md">
           <BookOpen className="h-4 w-4 text-primary-foreground" />
         </div>
-        <span className="font-display font-bold text-xl tracking-tight hidden sm:block">scholarai</span>
+        <span className="font-display font-bold text-xl tracking-tight hidden sm:block">SCHOLAR.AI</span>
       </Link>
 
       <motion.div

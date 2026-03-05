@@ -175,7 +175,7 @@ export default function Home() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap');
         .lp-root *, .lp-root *::before, .lp-root *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        .lp-root { font-family: 'DM Sans', sans-serif; background: ${C.cream}; color: ${C.textDark}; overflow-x: hidden; }
+        .lp-root { font-family: 'DM Sans', sans-serif; background: ${C.cream}; color: ${C.textDark}; overflow-x: hidden; scroll-behavior: smooth; }
         .lp-nav-link { text-decoration: none; font-size: 0.9rem; font-weight: 500; color: ${C.textMid}; transition: color 0.2s; }
         .lp-nav-link:hover { color: ${C.purpleDark}; }
         .lp-btn-outline { padding: 9px 22px; border: 1.5px solid ${C.purpleDark}; border-radius: 50px; background: transparent; color: ${C.purpleDark}; font-size: 0.875rem; font-weight: 500; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.2s; }
@@ -208,14 +208,11 @@ export default function Home() {
         {/* NAV */}
         <nav style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 60px", background: "rgba(245,243,238,0.92)", backdropFilter: "blur(16px)", borderBottom: "1px solid rgba(184,169,219,0.35)" }}>
           <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "1.4rem", color: C.purpleDark, letterSpacing: "-0.02em" }}>
-            scholar<span style={{ color: C.purpleDark }}>ai</span>
+            SCHOLAR.AI
           </div>
-          <ul style={{ display: "flex", gap: 36, listStyle: "none" }}>
-            {["Schools", "Teachers", "Students", "Resources"].map(l => <li key={l}><a href="#" className="lp-nav-link">{l}</a></li>)}
-          </ul>
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <Link href="/login"><button className="lp-btn-outline">Login</button></Link>
-            <Link href="/login"><button className="lp-btn-primary">Request a Demo</button></Link>
+            <a href="#demo-contact"><button className="lp-btn-primary">Request a Demo</button></a>
           </div>
         </nav>
 
@@ -231,7 +228,7 @@ export default function Home() {
               Where Teachers, Students &amp; Schools <em style={{ fontStyle: "italic", color: C.pinkHot }}>Think Smarter.</em>
             </h1>
             <p style={{ fontSize: "1.15rem", lineHeight: 1.65, color: C.textMid, maxWidth: 520, marginBottom: 40, fontWeight: 300 }}>
-              scholarai is the AI intelligence layer for your entire school — automated answer checking, early risk detection, chapter-level learning gaps, and real-time performance insights in one calm platform.
+              SCHOLAR.AI is the AI intelligence layer for your entire school — automated answer checking, early risk detection, chapter-level learning gaps, and real-time performance insights in one calm platform.
             </p>
             <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
               <Link href="/login"><button className="lp-btn-hero">Get Started Free →</button></Link>
@@ -354,17 +351,26 @@ export default function Home() {
             Ready to transform how your school <em style={{ fontStyle: "italic", color: C.pinkHot }}>thinks?</em>
           </h2>
           <p style={{ fontSize: "1.05rem", color: C.textMid, marginBottom: 40, position: "relative", zIndex: 2, fontWeight: 300 }}>
-            Join hundreds of schools already using scholarai to grade faster, identify struggling students earlier, and improve academic outcomes.
+            Join hundreds of schools already using SCHOLAR.AI to grade faster, identify struggling students earlier, and improve academic outcomes.
           </p>
           <Link href="/login"><button className="lp-cta-btn" style={{ position: "relative", zIndex: 2 }}>Get Started Free →</button></Link>
+        </section>
+
+        {/* DEMO CONTACT */}
+        <section id="demo-contact" style={{ padding: "64px 60px", background: "#F3EEF9", borderTop: "1px solid rgba(184,169,219,0.45)", textAlign: "center" }}>
+          <h3 style={{ fontFamily: "DM Serif Display, serif", fontSize: "2rem", color: C.textDark, marginBottom: 10 }}>Request Demo</h3>
+          <p style={{ fontSize: "0.98rem", color: C.textMid, marginBottom: 8 }}>For demo requests, contact us at:</p>
+          <a href="mailto:touchmenot@gmail.com" style={{ fontSize: "1.05rem", fontWeight: 600, color: C.purpleDark, textDecoration: "none", borderBottom: `1px solid ${C.purpleDark}` }}>
+            touchmenot@gmail.com
+          </a>
         </section>
 
         {/* FOOTER */}
         <footer style={{ padding: "40px 60px", background: C.textDark, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontFamily: "DM Serif Display, serif", fontSize: "1.2rem", color: "white" }}>
-            scholar<span style={{ color: C.pinkMid }}>ai</span>
+            SCHOLAR.AI
           </div>
-          <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>© 2026 scholarai. Empowering schools through intelligent data.</p>
+          <p style={{ fontSize: "0.8rem", color: "rgba(255,255,255,0.4)" }}>© 2026 SCHOLAR.AI. Empowering schools through intelligent data.</p>
         </footer>
 
       </div>
