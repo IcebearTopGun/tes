@@ -81,6 +81,7 @@ const EXCEL_SCHEMAS: Record<string, { col: string; required: boolean; type?: "nu
     { col: "employeeId",  required: true  },
     { col: "email",       required: false },
     { col: "phoneNumber", required: false },
+    { col: "assignmentsJson", required: false },
     { col: "assignments", required: false },
     { col: "class",       required: false, type: "number" },
     { col: "section",     required: false, type: "letter" },
@@ -129,12 +130,23 @@ function validateExcelRows(rows: any[], type: string): string[] {
         const key = presentHeaders.find(h => h.toLowerCase() === name.toLowerCase());
         return key ? (row[key] ?? "").toString().trim() : "";
       };
+      const assignmentsJson = getVal("assignmentsJson");
       const assignments = getVal("assignments");
       const cls = getVal("class");
       const sec = getVal("section");
       const subs = getVal("subjects");
-      if (!assignments && !(cls && sec && subs)) {
-        errors.push(`Row ${rowNum}: provide either "assignments" or "class"+"section"+"subjects".`);
+      if (!assignmentsJson && !assignments && !(cls && sec && subs)) {
+        errors.push(`Row ${rowNum}: provide "assignmentsJson" (preferred) or "assignments" or "class"+"section"+"subjects".`);
+      }
+      if (assignmentsJson) {
+        try {
+          const parsed = JSON.parse(assignmentsJson);
+          if (!Array.isArray(parsed) || parsed.length === 0) {
+            errors.push(`Row ${rowNum}: "assignmentsJson" must be a non-empty JSON array.`);
+          }
+        } catch {
+          errors.push(`Row ${rowNum}: "assignmentsJson" must be valid JSON.`);
+        }
       }
     }
   });
@@ -479,7 +491,7 @@ export default function AdminDashboard() {
   const validateMgdStudentForm = (editingId?: number) => {
     const errs: Record<string, string> = {};
     if (!mgdStudentForm.studentName.trim()) errs.studentName = "Name required";
-    if (!/^[0-9]{10,15}$/.test(mgdStudentForm.phoneNumber.trim())) errs.phoneNumber = "Phone must be 10-15 digits";
+    if (!/^[0-9]{10}$/.test(mgdStudentForm.phoneNumber.trim())) errs.phoneNumber = "Phone must be exactly 10 digits";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mgdStudentForm.email.trim())) errs.email = "Valid email required";
     if (!/^[A-Za-z0-9._/-]{2,32}$/.test(mgdStudentForm.admissionNumber.trim())) errs.admissionNumber = "Invalid admission number";
     if (!availableStudentClasses.includes(String(mgdStudentForm.class))) errs.class = "Select a valid class";
@@ -571,10 +583,10 @@ export default function AdminDashboard() {
         rows: [["Rahul Sharma", "9876543210", "rahul@school.edu", "2024001", "5", "A"]],
       },
       mgdTeacher: {
-        header: ["teacherName", "employeeId", "email", "phoneNumber", "assignments", "isClassTeacher", "classTeacherOfClass", "classTeacherOfSection"],
+        header: ["teacherName", "employeeId", "email", "phoneNumber", "assignmentsJson", "isClassTeacher", "classTeacherOfClass", "classTeacherOfSection"],
         rows: [
-          ["Ramesh Singh", "T100", "ramesh@school.edu", "9876543210", "5-A:English|Maths;6-B:Science", "true", "5", "A"],
-          ["Neha Iyer", "T101", "neha@school.edu", "9876501111", "7-A:Maths;8-A:Physics|Maths", "false", "", ""],
+          ["Ramesh Singh", "T100", "ramesh@school.edu", "9876543210", '[{"class":"5","section":"A","subjects":["English","Maths"]},{"class":"6","section":"B","subjects":["Science"]}]', "true", "5", "A"],
+          ["Neha Iyer", "T101", "neha@school.edu", "9876501111", '[{"class":"7","section":"A","subjects":["Maths"]},{"class":"8","section":"A","subjects":["Physics","Maths"]}]', "false", "", ""],
         ],
       },
     };
@@ -641,7 +653,7 @@ export default function AdminDashboard() {
   }
 
   // ── Upload error/success banner ─────────────────────────────────────────────
-  const UploadSuccessBanner = () => bulkUploadResult ? (
+  const UploadSuccessBanner = () => (showUploadBannerInCurrentTab && bulkUploadResult) ? (
     <div style={{ marginTop: 12, padding: "10px 14px", background: "#f0fdf4", borderRadius: 8, border: "1px solid #86efac", fontSize: 13 }}>
       ✅ Created {bulkUploadResult.created} records.
     </div>
@@ -657,13 +669,19 @@ export default function AdminDashboard() {
     ...bulkUploadErrors,
     ...((bulkUploadResult?.duplicates || []).map((d: string) => duplicateReason(d))),
   ];
+  const activeUploadSectionByType: Record<string, string> = {
+    classSection: "mgd-classes",
+    mgdStudent: "mgd-students",
+    mgdTeacher: "mgd-teachers",
+  };
+  const showUploadBannerInCurrentTab = !!bulkUploadType && activeUploadSectionByType[bulkUploadType] === activeSection;
   const isPartialFailure = !!bulkUploadResult && (
     (bulkUploadResult.created ?? 0) > 0 ||
     (bulkUploadResult.duplicates?.length ?? 0) > 0 ||
     bulkUploadErrors.length > 0
   );
 
-  const UploadErrorBanner = () => uploadFailureDetails.length > 0 ? (
+  const UploadErrorBanner = () => (showUploadBannerInCurrentTab && uploadFailureDetails.length > 0) ? (
     <div style={{ marginTop: 12, padding: "12px 16px", background: "#fff5f5", borderRadius: 8, border: "1px solid #fecaca", fontSize: 13 }}>
       <div style={{ fontWeight: 700, color: "#c93c3c", marginBottom: 6 }}>
         {isPartialFailure ? "⚠️ Upload partially failed — some rows were skipped:" : "⚠️ Upload failed — please fix the following issues:"}

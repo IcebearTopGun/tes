@@ -292,7 +292,7 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PHONE_RE = /^[0-9]{10,15}$/;
+const PHONE_RE = /^[0-9]{10}$/;
 const ADMISSION_RE = /^[A-Za-z0-9._/-]{2,32}$/;
 const EMPLOYEE_RE = /^[A-Za-z0-9._/-]{2,32}$/;
 const CLASS_RE = /^[0-9]{1,2}$/;
@@ -325,7 +325,7 @@ export function validateStudentPayload(payload: any, opts: { partial?: boolean; 
   }
   if (!partial || "phone" in payload || "phoneNumber" in payload) {
     if (requireContact && !phone) errs.push("Phone number is required");
-    else if (phone && !PHONE_RE.test(phone)) errs.push("Phone number must be 10-15 digits");
+    else if (phone && !PHONE_RE.test(phone)) errs.push("Phone number must be exactly 10 digits");
   }
   if (!partial || "email" in payload) {
     if (requireContact && !email) errs.push("Email is required");
@@ -381,7 +381,7 @@ export function validateTeacherPayload(payload: any, opts: { partial?: boolean; 
   }
   if (!partial || "phoneNumber" in payload || "phone" in payload) {
     if (requireContact && !phone) errs.push("Phone number is required");
-    else if (phone && !PHONE_RE.test(phone)) errs.push("Phone number must be 10-15 digits");
+    else if (phone && !PHONE_RE.test(phone)) errs.push("Phone number must be exactly 10 digits");
   }
   if (!partial || "email" in payload) {
     if (requireContact && !email) errs.push("Email is required");
@@ -4006,6 +4006,25 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
     try {
       const { records } = req.body;
       if (!Array.isArray(records)) return res.status(400).json({ message: "Records array required" });
+      const parseAssignmentsJsonCell = (raw: unknown): Array<{ class: string; section: string; subjects: string[] }> => {
+        const text = String(raw ?? "").trim();
+        if (!text) return [];
+        try {
+          const arr = JSON.parse(text);
+          if (!Array.isArray(arr)) return [];
+          return arr
+            .map((a: any) => ({
+              class: String(a?.class ?? "").trim(),
+              section: String(a?.section ?? "").trim().toUpperCase(),
+              subjects: Array.from(new Set((Array.isArray(a?.subjects) ? a.subjects : [])
+                .map((s: any) => String(s).trim())
+                .filter(Boolean))),
+            }))
+            .filter((a: any) => CLASS_RE.test(a.class) && SECTION_RE.test(a.section) && a.subjects.length > 0);
+        } catch {
+          return [];
+        }
+      };
       const parseAssignmentsCell = (raw: unknown): Array<{ class: string; section: string; subjects: string[] }> => {
         const text = String(raw ?? "").trim();
         if (!text) return [];
@@ -4038,7 +4057,10 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const errors: string[] = [];
 
       for (const r of records) {
-        const assignments = parseAssignmentsCell(r.assignments);
+        const assignments = parseAssignmentsJsonCell(r.assignmentsJson);
+        if (!assignments.length) {
+          assignments.push(...parseAssignmentsCell(r.assignments));
+        }
         if (!assignments.length && r.class && r.section && r.subjects) {
           assignments.push({
             class: String(r.class).trim(),
@@ -4093,7 +4115,10 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
         if (assignmentError) { errors.push(`${normalized.employeeId}: ${assignmentError}`); continue; }
         if (normalized.isClassTeacher && normalized.classTeacherOf) {
           const isUnique = await ensureUniqueClassTeacher(normalized.classTeacherOf);
-          if (!isUnique) { duplicates.push(normalized.employeeId); continue; }
+          if (!isUnique) {
+            errors.push(`${normalized.employeeId}: class teacher already assigned for ${normalized.classTeacherOf}`);
+            continue;
+          }
         }
         const { classesAssigned, subjectsAssigned } = deriveTeacherLists(normalized.assignments);
         const password = await bcrypt.hash("changeme123", 10);
