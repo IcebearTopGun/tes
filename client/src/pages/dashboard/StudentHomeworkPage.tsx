@@ -245,13 +245,13 @@ export default function StudentHomeworkPage() {
 
                           {!isEditable && submission && (
                             <div style={{ fontSize: 12, color: "var(--mid)" }}>
-                              Submission is locked because results are visible.
+                              Submission is locked after the due date.
                             </div>
                           )}
 
                           {submission && !analysisVisible && (
                             <div style={{ fontSize: 12, color: "var(--mid)" }}>
-                              Analysis will be visible after due date, or when your teacher releases results.
+                              Analysis will be visible after the due date.
                             </div>
                           )}
 
@@ -310,6 +310,7 @@ export default function StudentHomeworkPage() {
     </div>
   );
 }
+
 
 
 

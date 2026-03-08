@@ -2066,7 +2066,9 @@ Return ONLY valid JSON:
         const sub = await storage.getHomeworkSubmission(hw.id, req.user!.id);
         const now = new Date();
         const due = new Date(hw.dueDate);
-        return { ...hw, submission: sub || null, editable: now <= due };
+        const duePassed = now > due;
+        const analysisVisible = duePassed || Number((hw as any).showResultsBeforeDue || 0) === 1;
+        return { ...hw, submission: sub || null, editable: now <= due, analysisVisible };
       }));
       withStatus.sort((a, b) => {
         const subjectCmp = String(a.subject || "").localeCompare(String(b.subject || ""));
@@ -4949,6 +4951,8 @@ Notes:
 This file was extracted from a large file during refactoring to improve maintainability.
 No business logic was modified.
 */
+
+
 
 
 
