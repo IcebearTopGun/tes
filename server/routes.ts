@@ -963,6 +963,19 @@ export async function registerRoutes(
         if (!prev || Number(r.totalMarks || 0) >= Number(prev.totalMarks || 0)) byAdmission.set(key, r);
       }
       const validResults = Array.from(byAdmission.values());
+      const allStudents = await storage.getAllStudents();
+      const classStudents = allStudents.filter(
+        (s: any) =>
+          String(s.studentClass) === String(exam.className) &&
+          String(s.section || "").trim().toUpperCase() === String((exam as any).section || "").trim().toUpperCase(),
+      );
+      const evaluatedAdmissions = new Set(
+        validResults.map((r: any) => String(r?.admissionNumber || "").trim().toUpperCase()).filter(Boolean),
+      );
+      const missingStudents = classStudents
+        .filter((s: any) => !evaluatedAdmissions.has(String(s.admissionNumber || "").trim().toUpperCase()))
+        .map((s: any) => ({ admissionNumber: s.admissionNumber, name: s.name }))
+        .sort((a, b) => String(a.admissionNumber).localeCompare(String(b.admissionNumber), "en", { numeric: true, sensitivity: "base" }));
 
       // Class-level stats
       const totalStudents = validResults.length;
@@ -996,6 +1009,7 @@ export async function registerRoutes(
       res.json({
         exam: { id: exam.id, name: exam.examName, subject: exam.subject, className: exam.className, section: (exam as any).section, totalMarks: exam.totalMarks },
         students: validResults,
+        missingStudents,
         classSummary: { totalStudents, avgScore, distribution, chapterAnalysis },
       });
     } catch (err: any) {
@@ -2773,7 +2787,20 @@ Generate 5 practice questions that target the student's specific gaps. Vary ques
       if (!hw) return res.status(404).json({ message: "Homework not found" });
       if (hw.teacherId !== req.user.id) return res.status(403).json({ message: "Forbidden" });
       const evaluations = await storage.getHomeworkEvaluations(hwId);
-      res.json(evaluations);
+      const allStudents = await storage.getAllStudents();
+      const classStudents = allStudents.filter(
+        (s: any) =>
+          String(s.studentClass) === String(hw.className) &&
+          String(s.section || "").trim().toUpperCase() === String(hw.section || "").trim().toUpperCase(),
+      );
+      const submittedAdmissions = new Set(
+        evaluations.map((e: any) => String(e?.admissionNumber || "").trim().toUpperCase()).filter(Boolean),
+      );
+      const missingStudents = classStudents
+        .filter((s: any) => !submittedAdmissions.has(String(s.admissionNumber || "").trim().toUpperCase()))
+        .map((s: any) => ({ admissionNumber: s.admissionNumber, name: s.name }))
+        .sort((a, b) => String(a.admissionNumber).localeCompare(String(b.admissionNumber), "en", { numeric: true, sensitivity: "base" }));
+      res.json({ evaluations, missingStudents });
     } catch (err: any) {
       res.status(500).json({ message: "Failed to load evaluations", detail: err?.message });
     }

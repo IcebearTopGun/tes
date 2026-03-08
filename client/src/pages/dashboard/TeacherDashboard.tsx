@@ -47,6 +47,54 @@ import { BAR_COLORS, EXAM_CATEGORIES, EXAMPLE_QUESTIONS } from "./teacher/consta
 import type { AnalyticsData, ClassSection, OcrResult, ScriptEntry, StructuredSubject } from "./teacher/types";
 import { pctColor, readFileAsDataUrl } from "./teacher/utils";
 
+function compareAdmissionNumbers(a: string, b: string): number {
+  return String(a || "").localeCompare(String(b || ""), "en", { numeric: true, sensitivity: "base" });
+}
+
+function toShortAnalysisSummary(input: any): string {
+  const overall = String(input?.overallFeedback || input?.aiFeedback || "").trim();
+  if (overall) return overall.slice(0, 180);
+  const areas = Array.isArray(input?.areasOfImprovement) ? input.areasOfImprovement : [];
+  if (areas.length > 0) {
+    return areas
+      .slice(0, 2)
+      .map((a: any) => `${a.topic}${a.detail ? `: ${a.detail}` : ""}`)
+      .join("; ")
+      .slice(0, 180);
+  }
+  return "No summary available";
+}
+
+function exportWorkbookXml(fileName: string, resultsRows: Array<Array<string | number>>, missingRows: Array<Array<string | number>>) {
+  const esc = (v: string | number) =>
+    String(v ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;");
+  const sheet = (name: string, rows: Array<Array<string | number>>) => {
+    const xmlRows = rows
+      .map((row) => `<Row>${row.map((cell) => `<Cell><Data ss:Type="String">${esc(cell)}</Data></Cell>`).join("")}</Row>`)
+      .join("");
+    return `<Worksheet ss:Name="${esc(name)}"><Table>${xmlRows}</Table></Worksheet>`;
+  };
+  const xml = `<?xml version="1.0"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+${sheet("Results", resultsRows)}
+${sheet("Missing", missingRows)}
+</Workbook>`;
+  const blob = new Blob([xml], { type: "application/vnd.ms-excel" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function BulkUploadZone({
   examId,
   onUploadComplete,
@@ -449,7 +497,7 @@ function BulkUploadZone({
                       {g.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() || "??"}
                     </div>
                     {/* Info */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setDetailsOpen(v => !v)}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.studentName}</div>
                       <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>
                         {g.admissionNumber} &nbsp;·&nbsp; {g.pages} page{g.pages !== 1 ? "s" : ""}
@@ -831,7 +879,7 @@ function HwAiChat({ hw, onClose }: { hw: any; onClose: () => void }) {
           borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0
         }}>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setDetailsOpen(v => !v)}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                 <div style={{
                   width: 26, height: 26, borderRadius: 7, flexShrink: 0,
@@ -1049,12 +1097,40 @@ function HwListItem({ hw, today, onEval, onEdit, onDelete, onChat, onToggleResul
   onEval: () => void; onEdit: () => void; onDelete: () => void; onChat: () => void; onToggleResults: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [isResultConfirmOpen, setIsResultConfirmOpen] = useState(false);
   const isPastDue = hw.dueDate < today;
   const subCount = hw.submissionCount ?? 0;
   const totalStu = hw.totalStudents ?? 0;
   const showResultsBeforeDue = hw.showResultsBeforeDue === 1;
   const pct = totalStu > 0 ? Math.round((subCount / totalStu) * 100) : 0;
+
+  const plain = (value: string) =>
+    String(value || "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const parseImageList = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && v.length > 0);
+    if (typeof value !== "string" || !value.trim()) return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string" && v.length > 0) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const questionImages = parseImageList(hw.questionImages);
+  const answerImages = parseImageList(hw.modelAnswerImages);
+  const descText = plain(hw.description || "-");
+  const questionsText = plain(hw.questionsText || "No text questions");
+  const modelText = plain(hw.modelSolutionText || "No model answer text");
 
   return (
     <div style={{
@@ -1065,159 +1141,107 @@ function HwListItem({ hw, today, onEval, onEdit, onDelete, onChat, onToggleResul
       transition: "box-shadow 0.15s",
     }}>
       <div style={{ display: "flex", alignItems: "flex-start", padding: "13px 14px", gap: 12 }}>
-        {/* Subject icon */}
-        <div style={{
-          width: 40, height: 40, borderRadius: 10,
-          background: isPastDue ? "var(--cream)" : "var(--lav-bg)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 18, flexShrink: 0, marginTop: 1
-        }}>📝</div>
+        <div style={{ width: 40, height: 40, borderRadius: 10, background: isPastDue ? "var(--cream)" : "var(--lav-bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0, marginTop: 1 }}>HW</div>
 
-        {/* Main info */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setDetailsOpen(v => !v)}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{hw.subject}</div>
-            {hw.useNcertReference ? (
-              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#eff6ff", color: "#1d4ed8", fontWeight: 700 }}>NCERT</span>
-            ) : null}
-            {(hw.questionsText || hw.questionImages) ? (
-              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#fefce8", color: "#854d0e", fontWeight: 700 }}>Questions</span>
-            ) : null}
+            {hw.useNcertReference ? <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#eff6ff", color: "#1d4ed8", fontWeight: 700 }}>NCERT</span> : null}
+            {(hw.questionsText || hw.questionImages) ? <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#fefce8", color: "#854d0e", fontWeight: 700 }}>Questions</span> : null}
+            <span style={{ fontSize: 11, color: "var(--mid)", opacity: 0.5, marginLeft: 4 }}>{detailsOpen ? "\u25B2" : "\u25BC"}</span>
           </div>
 
-          {/* Description preview */}
-          <div
-            style={{ fontSize: 12, color: "var(--mid)", marginTop: 3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical" }}
-            dangerouslySetInnerHTML={{ __html: hw.description }}
-          />
+          <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical" }}>
+            {descText || "-"}
+          </div>
 
-          {/* Badges */}
           <div style={{ display: "flex", gap: 7, marginTop: 7, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{
-              display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600,
-              color: isPastDue ? "#92400e" : "#166534",
-              background: isPastDue ? "#fef3c7" : "#dcfce7",
-              padding: "2px 8px", borderRadius: 6,
-            }}>
-              {isPastDue ? "🔒" : "📅"} Due {new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: isPastDue ? "#92400e" : "#166534", background: isPastDue ? "#fef3c7" : "#dcfce7", padding: "2px 8px", borderRadius: 6 }}>
+              {isPastDue ? "Locked" : "Due"} {new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
             </span>
-            <span style={{
-              display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600,
-              color: pct === 100 ? "#166534" : pct > 50 ? "#92400e" : "var(--mid)",
-              background: pct === 100 ? "#dcfce7" : pct > 50 ? "#fef3c7" : "var(--cream)",
-              padding: "2px 8px", borderRadius: 6,
-            }}>
-              👥 {subCount}/{totalStu}{totalStu > 0 ? ` (${pct}%)` : ""}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: pct === 100 ? "#166534" : pct > 50 ? "#92400e" : "var(--mid)", background: pct === 100 ? "#dcfce7" : pct > 50 ? "#fef3c7" : "var(--cream)", padding: "2px 8px", borderRadius: 6 }}>
+              Stu {subCount}/{totalStu}{totalStu > 0 ? ` (${pct}%)` : ""}
             </span>
           </div>
         </div>
 
-        {/* Action buttons */}
         <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
-          {/* AI Chat icon — the new feature */}
-          <button
-            onClick={onChat}
-            title="Ask AI about this homework"
-            data-testid={`btn-hw-chat-${hw.id}`}
-            style={{
-              width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-              border: "1.5px solid rgba(108,71,216,0.25)",
-              background: "linear-gradient(135deg,rgba(108,71,216,0.08),rgba(59,130,246,0.08))",
-              cursor: "pointer", fontSize: 15, color: "#6c47d8",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              transition: "all 0.15s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "rgba(108,71,216,0.18)"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.5)"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg,rgba(108,71,216,0.08),rgba(59,130,246,0.08))"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.25)"; }}
-          >✦</button>
-
-          {!isPastDue && (
-            <button
-              onClick={onToggleResults}
-              style={{
-                display: "flex", alignItems: "center", gap: 5,
-                padding: "6px 11px", borderRadius: 8,
-                border: "1.5px solid var(--border)", background: showResultsBeforeDue ? "#dcfce7" : "#fff",
-                fontSize: 12, fontWeight: 600, color: showResultsBeforeDue ? "#166534" : "var(--ink2)",
-                cursor: "pointer", transition: "all 0.15s",
-              }}
-            >
-              {showResultsBeforeDue ? "Hide Results" : "Show Results"}
-            </button>
-          )}
-          {/* Evaluations */}
-          <button
-            onClick={onEval}
-            data-testid={`btn-hw-eval-${hw.id}`}
-            style={{
-              display: "flex", alignItems: "center", gap: 5,
-              padding: "6px 11px", borderRadius: 8,
-              border: "1.5px solid var(--border)", background: "#fff",
-              fontSize: 12, fontWeight: 600, color: "var(--ink2)",
-              cursor: "pointer", transition: "all 0.15s",
-            }}
-            onMouseEnter={e => (e.currentTarget.style.background = "var(--lav-bg)")}
-            onMouseLeave={e => (e.currentTarget.style.background = "#fff")}
-          >
-            <span>📊</span> Results
-          </button>
-
-          {/* Three-dot menu */}
+          <button onClick={onChat} title="Ask AI about this homework" data-testid={`btn-hw-chat-${hw.id}`} style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, border: "1.5px solid rgba(108,71,216,0.25)", background: "linear-gradient(135deg,rgba(108,71,216,0.08),rgba(59,130,246,0.08))", cursor: "pointer", fontSize: 15, color: "#6c47d8", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}>{"\u2726"}</button>
+          {!isPastDue && (<button onClick={onToggleResults} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: 8, border: "1.5px solid var(--border)", background: showResultsBeforeDue ? "#dcfce7" : "#fff", fontSize: 12, fontWeight: 600, color: showResultsBeforeDue ? "#166534" : "var(--ink2)", cursor: "pointer", transition: "all 0.15s" }}>{showResultsBeforeDue ? "Hide Results" : "Show Results"}</button>)}
+          <button onClick={onEval} data-testid={`btn-hw-eval-${hw.id}`} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 11px", borderRadius: 8, border: "1.5px solid var(--border)", background: "#fff", fontSize: 12, fontWeight: 600, color: "var(--ink2)", cursor: "pointer", transition: "all 0.15s" }}>Results</button>
           <div style={{ position: "relative" }}>
-            <button
-              onClick={() => setMenuOpen(p => !p)}
-              data-testid={`btn-hw-menu-${hw.id}`}
-              style={{
-                width: 32, height: 32, borderRadius: 8,
-                border: "1.5px solid var(--border)", background: "#fff",
-                cursor: "pointer", fontSize: 17, color: "var(--mid)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                transition: "all 0.15s"
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = "var(--cream)")}
-              onMouseLeave={e => (e.currentTarget.style.background = "#fff")}
-            >⋮</button>
-            {menuOpen && (
-              <div
-                style={{
-                  position: "absolute", right: 0, top: 36, zIndex: 50,
-                  background: "#fff", border: "1.5px solid var(--border)", borderRadius: 12,
-                  boxShadow: "0 6px 24px rgba(0,0,0,.12)", minWidth: 172, overflow: "hidden"
-                }}
-                onMouseLeave={() => setMenuOpen(false)}
-              >
-                {!isPastDue ? (
-                  <button
-                    style={{ width: "100%", padding: "11px 16px", textAlign: "left", fontSize: 13, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "var(--cream)")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                    onClick={() => { setMenuOpen(false); onEdit(); }}
-                  ><span>✏️</span> Edit Homework</button>
-                ) : (
-                  <div style={{ padding: "11px 16px", fontSize: 12, color: "var(--mid)", display: "flex", alignItems: "center", gap: 8 }}>
-                    <span>🔒</span> Editing locked
-                  </div>
-                )}
-                <div style={{ height: 1, background: "var(--border)", margin: "0 12px" }} />
-                {!isPastDue ? (
-                  <button
-                    style={{ width: "100%", padding: "11px 16px", textAlign: "left", fontSize: 13, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", color: "#d94f4f", display: "flex", alignItems: "center", gap: 8 }}
-                    onMouseEnter={e => (e.currentTarget.style.background = "#fff0f0")}
-                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
-                    onClick={() => { setMenuOpen(false); onDelete(); }}
-                  ><span>🗑️</span> Delete</button>
-                ) : (
-                  <div style={{ padding: "11px 16px", fontSize: 12, color: "var(--mid)", display: "flex", alignItems: "center", gap: 8 }}>
-                    <span>🔒</span> Deletion locked
-                  </div>
-                )}
-              </div>
-            )}
+            <button onClick={() => setMenuOpen(p => !p)} data-testid={`btn-hw-menu-${hw.id}`} style={{ width: 32, height: 32, borderRadius: 8, border: "1.5px solid var(--border)", background: "#fff", cursor: "pointer", fontSize: 17, color: "var(--mid)", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}>...</button>
+            {menuOpen && (<div style={{ position: "absolute", right: 0, top: 36, zIndex: 50, background: "#fff", border: "1.5px solid var(--border)", borderRadius: 12, boxShadow: "0 6px 24px rgba(0,0,0,.12)", minWidth: 172, overflow: "hidden" }} onMouseLeave={() => setMenuOpen(false)}>{!isPastDue ? (<button style={{ width: "100%", padding: "11px 16px", textAlign: "left", fontSize: 13, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }} onClick={() => { setMenuOpen(false); onEdit(); }}><span>Edit</span> Edit Homework</button>) : (<div style={{ padding: "11px 16px", fontSize: 12, color: "var(--mid)", display: "flex", alignItems: "center", gap: 8 }}><span>Lock</span> Editing locked</div>)}<div style={{ height: 1, background: "var(--border)", margin: "0 12px" }} />{!isPastDue ? (<button style={{ width: "100%", padding: "11px 16px", textAlign: "left", fontSize: 13, fontWeight: 600, border: "none", background: "transparent", cursor: "pointer", color: "#d94f4f", display: "flex", alignItems: "center", gap: 8 }} onClick={() => { setMenuOpen(false); onDelete(); }}><span>Del</span> Delete</button>) : (<div style={{ padding: "11px 16px", fontSize: 12, color: "var(--mid)", display: "flex", alignItems: "center", gap: 8 }}><span>Lock</span> Deletion locked</div>)}</div>)}
           </div>
         </div>
       </div>
 
-      {/* Progress bar */}
+      {detailsOpen && (
+        <div style={{ borderTop: "1px solid var(--rule)", padding: "0 14px 14px" }}>
+          <div style={{ marginTop: 12, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Description</div>
+            <div style={{ fontSize: 13, color: "var(--ink)", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, padding: "10px 14px", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+              {descText || "-"}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Questions</div>
+            <div style={{ fontSize: 13, color: "var(--ink)", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, padding: "10px 14px", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+              {questionsText}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Model Answer</div>
+            <div style={{ fontSize: 13, color: "var(--ink)", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, padding: "10px 14px", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+              {modelText}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: "var(--lav-bg)", color: "var(--ink2)", fontWeight: 700 }}>
+              NCERT: {hw.useNcertReference ? "Enabled" : "Disabled"}
+            </span>
+            <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: "var(--cream)", color: "var(--mid)", fontWeight: 700 }}>
+              Due: {new Date(hw.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+            </span>
+          </div>
+
+          {(questionImages.length > 0 || answerImages.length > 0) && (
+            <div style={{ marginTop: 10, marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Attachments</div>
+              <div style={{ fontSize: 13, color: "var(--ink)", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, padding: "10px 14px", lineHeight: 1.7 }}>
+                {questionImages.length > 0 && (
+                  <div style={{ marginBottom: answerImages.length > 0 ? 8 : 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Question Images</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {questionImages.map((img, i) => (
+                        <a key={i} href={img} download={`homework_${hw.id}_question_${i + 1}.png`} style={{ fontSize: 12, color: "#2563c0", textDecoration: "underline" }}>
+                          Download {i + 1}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {answerImages.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Model Answer Images</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {answerImages.map((img, i) => (
+                        <a key={i} href={img} download={`homework_${hw.id}_answer_${i + 1}.png`} style={{ fontSize: 12, color: "#2563c0", textDecoration: "underline" }}>
+                          Download {i + 1}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {totalStu > 0 && (
         <div style={{ padding: "0 14px 10px", marginTop: -4 }}>
           <div style={{ height: 3, background: "var(--cream)", borderRadius: 99, overflow: "hidden" }}>
@@ -1233,8 +1257,6 @@ function HwListItem({ hw, today, onEval, onEdit, onDelete, onChat, onToggleResul
   );
 }
 
-// ─── HwFormBody ─────────────────────────────────────────────────────────────────
-// Shared form body used in both Create and Edit dialogs
 function HwFormBody({
   activeTab, onTabChange,
   description, onDescription,
@@ -1482,29 +1504,35 @@ function EditHwForm({ hw, teacherOptions, onSave, isSaving, sectionsForClass, su
 // ─── HwEvaluationsModal ─────────────────────────────────────────────────────
 function HwEvaluationsModal({ hwId, onClose }: { hwId: number; onClose: () => void }) {
   const { toast } = useToast();
-  const { data: evals, isLoading } = useQuery<any[]>({
+  const { data, isLoading } = useQuery<{ evaluations: any[]; missingStudents: Array<{ admissionNumber: string; name: string }> }>({
     queryKey: ["/api/teacher/homework", hwId, "evaluations"],
     queryFn: () => fetchWithAuth(`/api/teacher/homework/${hwId}/evaluations`).then(r => r.json()),
     enabled: !!hwId,
   });
+  const evals = data?.evaluations || [];
+  const missingStudents = data?.missingStudents || [];
 
   const downloadExcel = () => {
-    if (!evals?.length) return;
-    const rows = [
-      ["Admission No.", "Student Name", "Score (/100)", "Status", "On Time", "Submitted At", "AI Feedback"],
-      ...evals.map(e => [
-        e.admissionNumber, e.studentName || "—", e.correctnessScore ?? "Pending", e.status,
-        e.isOnTime ? "Yes" : "No",
-        e.submittedAt ? new Date(e.submittedAt).toLocaleString("en-IN") : "—",
-        (e.aiFeedback || "—").replace(/"/g, "'")
-      ])
+    if (!evals.length && !missingStudents.length) return;
+    const resultsRows = [
+      ["Admission Number", "Name", "Marks", "Result Analysis (Short)"],
+      ...[...evals]
+        .sort((a, b) => compareAdmissionNumbers(a.admissionNumber, b.admissionNumber))
+        .map((e) => [
+          e.admissionNumber,
+          e.studentName || "-",
+          e.correctnessScore != null ? `${e.correctnessScore}/100` : "Pending",
+          toShortAnalysisSummary(e),
+        ]),
     ];
-    const csv = rows.map(row => row.map(cell => `"${cell}"`).join(",")).join("\n");
-    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `homework_${hwId}_evaluations.csv`; a.click();
-    URL.revokeObjectURL(url);
-    toast({ title: "Downloaded!", description: "Evaluation results exported." });
+    const missingRows = [
+      ["Admission Number", "Name"],
+      ...[...missingStudents]
+        .sort((a, b) => compareAdmissionNumbers(a.admissionNumber, b.admissionNumber))
+        .map((s) => [s.admissionNumber, s.name || "-"]),
+    ];
+    exportWorkbookXml(`homework_${hwId}_results.xls`, resultsRows, missingRows);
+    toast({ title: "Downloaded!", description: "Homework results exported to Excel." });
   };
 
   return (
@@ -1518,7 +1546,7 @@ function HwEvaluationsModal({ hwId, onClose }: { hwId: number; onClose: () => vo
         <div style={{ marginTop: 8 }}>
           {isLoading ? (
             <div style={{ padding: "32px 0", textAlign: "center" }}><Spinner /></div>
-          ) : !evals?.length ? (
+          ) : !evals?.length && !missingStudents.length ? (
             <div className="sf-empty">
               <div className="sf-empty-icon">📭</div>
               No submissions yet for this homework.
@@ -1546,7 +1574,7 @@ function HwEvaluationsModal({ hwId, onClose }: { hwId: number; onClose: () => vo
                   onMouseEnter={e => (e.currentTarget.style.background = "var(--lav-bg)")}
                   onMouseLeave={e => (e.currentTarget.style.background = "#fff")}
                 >
-                  <span>⬇️</span> Export CSV
+                  <span>⬇️</span> Export Excel
                 </button>
               </div>
 
@@ -1588,7 +1616,7 @@ function HwEvaluationsModal({ hwId, onClose }: { hwId: number; onClose: () => vo
                             Submitted: {e.submittedAt ? new Date(e.submittedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
                           </div>
                           {e.aiFeedback && (
-                            <div style={{ fontSize: 11.5, color: "var(--ink2)", marginTop: 6, fontStyle: "italic", lineHeight: 1.5, background: "#fafaf9", padding: "6px 10px", borderRadius: 8, borderLeft: `3px solid ${scoreColor}` }}>
+                            <div style={{ fontSize: 11.5, color: "var(--ink2)", marginTop: 6, fontStyle: "italic", lineHeight: 1.5, background: "#fafaf9", padding: "5px 9px", borderRadius: 8, borderLeft: `3px solid ${scoreColor}` }}>
                               "{e.aiFeedback.slice(0, 200)}{e.aiFeedback.length > 200 ? "…" : ""}"
                             </div>
                           )}
@@ -1695,7 +1723,7 @@ function ExamAiChat({ exam, onClose }: { exam: any; onClose: () => void }) {
           borderBottom: "1px solid rgba(255,255,255,0.07)", flexShrink: 0
         }}>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setDetailsOpen(v => !v)}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
                 <div style={{
                   width: 26, height: 26, borderRadius: 7, flexShrink: 0,
@@ -1872,12 +1900,12 @@ function ExamAiChat({ exam, onClose }: { exam: any; onClose: () => void }) {
 }
 
 // ─── ExamListItem ─────────────────────────────────────────────────────────────
-function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catColor, today, onEdit, onDelete, onChat, onExpand, isExpanded, answerSheets, onUploadComplete, onToggleStudentResults }: {
+function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catColor, today, onEdit, onDelete, onChat, onExpand, isExpanded, onToggleStudentResults }: {
   exam: any; isLocked: boolean; subjectIcon: string; evaluated: boolean;
   catLabel: Record<string, string>; catColor: Record<string, string>; today: string;
   onEdit: () => void; onDelete: () => void; onChat: () => void;
   onExpand: () => void; isExpanded: boolean;
-  answerSheets?: any[]; onUploadComplete: () => void; onToggleStudentResults: () => void;
+  onToggleStudentResults: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isResultConfirmOpen, setIsResultConfirmOpen] = useState(false);
@@ -1885,17 +1913,6 @@ function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catCol
   const examDateLabel = exam.examDate
     ? new Date(exam.examDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
     : null;
-  const evaluatedByStudent = Array.from((answerSheets || []).reduce((acc: Map<string, any>, s: any) => {
-    if (s.status !== "evaluated") return acc;
-    const key = String(s.admissionNumber || "UNKNOWN").trim().toUpperCase();
-    const existing = acc.get(key);
-    const currMarks = Number(s.evaluation?.totalMarks ?? s.totalMarks ?? -1);
-    const prevMarks = Number(existing?.evaluation?.totalMarks ?? existing?.totalMarks ?? -1);
-    if (!existing || currMarks > prevMarks || (currMarks === prevMarks && Number(s.id || 0) > Number(existing.id || 0))) {
-      acc.set(key, s);
-    }
-    return acc;
-  }, new Map<string, any>()).values());
 
   return (
     <div style={{
@@ -2094,23 +2111,24 @@ function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catCol
               </div>
             </div>
           )}
-          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, marginTop: 14 }}>Upload Answer Sheets</div>
-          <BulkUploadZone examId={exam.id} onUploadComplete={onUploadComplete} />
-          {evaluatedByStudent.length > 0 && (
-            <div style={{ marginTop: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Evaluated Results</div>
-              {evaluatedByStudent.map((sheet: any) => (
-                <div key={sheet.id} className="sf-exam-item" style={{ cursor: "default" }}>
-                  <div className="sf-exam-subj" style={{ background: "var(--green-bg)", fontSize: 12 }}>{getInitials(sheet.studentName || sheet.admissionNumber)}</div>
-                  <div className="sf-exam-info">
-                    <div className="sf-exam-name">{sheet.studentName || sheet.admissionNumber}</div>
-                    <div className="sf-exam-meta">{sheet.admissionNumber}</div>
-                  </div>
-                  <span className="sf-exam-status sf-es-done">{sheet.evaluation?.totalMarks ?? sheet.totalMarks ?? "?"}/{exam.totalMarks}</span>
-                </div>
-              ))}
+          <div style={{ marginTop: 12, marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Question Paper</div>
+            <div style={{ fontSize: 13, color: "var(--ink)", background: "var(--cream)", border: "1px solid var(--rule)", borderRadius: 10, padding: "10px 14px", whiteSpace: "pre-wrap", lineHeight: 1.7, maxHeight: 160, overflowY: "auto" }}>
+              {exam.questionText || "No question text provided."}
             </div>
-          )}
+            {exam.questionImages && <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 6 }}>Question images were attached at creation.</div>}
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: "var(--lav-bg)", color: "var(--ink2)", fontWeight: 700 }}>
+              NCERT: {exam.useNcertReference ? "Enabled" : "Disabled"}
+            </span>
+            {examDateLabel && (
+              <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: "var(--cream)", color: "var(--mid)", fontWeight: 700 }}>
+                Date: {examDateLabel}
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -2236,6 +2254,31 @@ export default function TeacherDashboard() {
     queryFn: () => fetchWithAuth(`/api/exams/${selectedResultExamId}/results`).then(r => r.json()),
     enabled: !!selectedResultExamId,
   });
+
+  const downloadExamResultsExcel = () => {
+    if (!selectedResultExamId || !examResults) return;
+    const students = Array.isArray(examResults.students) ? examResults.students : [];
+    const missing = Array.isArray(examResults.missingStudents) ? examResults.missingStudents : [];
+    const resultsRows = [
+      ["Admission Number", "Name", "Marks", "Result Analysis (Short)"],
+      ...[...students]
+        .sort((a: any, b: any) => compareAdmissionNumbers(a.admissionNumber, b.admissionNumber))
+        .map((s: any) => [
+          s.admissionNumber,
+          s.studentName || "-",
+          `${s.totalMarks}/${s.maxMarks}`,
+          toShortAnalysisSummary(s),
+        ]),
+    ];
+    const missingRows = [
+      ["Admission Number", "Name"],
+      ...[...missing]
+        .sort((a: any, b: any) => compareAdmissionNumbers(a.admissionNumber, b.admissionNumber))
+        .map((s: any) => [s.admissionNumber, s.name || "-"]),
+    ];
+    exportWorkbookXml(`exam_${selectedResultExamId}_results.xls`, resultsRows, missingRows);
+    toast({ title: "Downloaded!", description: "Exam results exported to Excel." });
+  };
 
   const resetHwForm = () => {
     setHwSubject(""); setHwClass(""); setHwSection(""); setHwDescription("");
@@ -2968,7 +3011,7 @@ export default function TeacherDashboard() {
                         <div style={{ width: 32, height: 32, borderRadius: 8, background: `${flagColor}1a`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0, marginTop: 1 }}>
                           {flagIcon}
                         </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setDetailsOpen(v => !v)}>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>
                             {q.examName} — Q{q.questionNumber}
                             <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase" }}>{q.subject}</span>
@@ -3339,7 +3382,7 @@ export default function TeacherDashboard() {
                   <div style={{ width: 40, height: 40, borderRadius: "50%", background: `${riskColor}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: riskColor, flexShrink: 0 }}>
                     {w.studentName?.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setDetailsOpen(v => !v)}>
                     <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{w.studentName}</div>
                     <div style={{ fontSize: 12, color: "var(--mid)", marginTop: 2 }}>
                       Class {w.studentClass} &nbsp;·&nbsp; {w.earlierAvgPct}% → {w.recentAvgPct}% &nbsp;·&nbsp; HW: {w.hwSubmitted}/{w.hwTotal}
@@ -3626,8 +3669,6 @@ export default function TeacherDashboard() {
                               onChat={() => setExamAiTarget(exam)}
                               onExpand={() => { setExpandedExamId(exam.id === expandedExamId ? null : exam.id); setSelectedExamId(String(exam.id)); }}
                               isExpanded={expandedExamId === exam.id}
-                              answerSheets={selectedExamId === String(exam.id) ? answerSheets : undefined}
-                              onUploadComplete={() => { refetchSheets(); refetchMergedScripts(); queryClient.invalidateQueries({ queryKey: ["/api/analytics"] }); }}
                               onToggleStudentResults={() => toggleExamStudentResults.mutate({ id: exam.id, showResultsToStudents: !(exam.showResultsToStudents === 1) })}
                             />
                           );
@@ -3678,6 +3719,20 @@ export default function TeacherDashboard() {
                         return <option key={e.id} value={e.id}>[{catLabel[e.category] || e.category}] {e.examName || `${e.subject} Exam`}</option>;
                       })}
                     </select>
+                    <button
+                      onClick={downloadExamResultsExcel}
+                      disabled={!selectedResultExamId || !examResults}
+                      title="Export exam results"
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                        padding: "5px 9px", borderRadius: 8,
+                        border: "1.5px solid var(--border)", background: "#fff",
+                        fontSize: 12, fontWeight: 600, color: "var(--ink2)",
+                        cursor: !selectedResultExamId || !examResults ? "not-allowed" : "pointer",
+                        opacity: !selectedResultExamId || !examResults ? 0.55 : 1,
+                        alignSelf: "flex-end",
+                      }}
+                    >Export Results</button>
                     {/* Exam type + stats strip */}
                     {selectedResultExamId && examStats && examStats.count > 0 && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -3841,7 +3896,7 @@ export default function TeacherDashboard() {
                               <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--lav-bg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "var(--ink2)", flexShrink: 0 }}>
                                 #{idx + 1}
                               </div>
-                              <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => setDetailsOpen(v => !v)}>
                                 <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{student.studentName}</div>
                                 <div style={{ fontSize: 11, color: "var(--mid)", marginTop: 1 }}>{student.admissionNumber}</div>
                               </div>
@@ -4444,6 +4499,15 @@ Notes:
 This file was extracted from a large file during refactoring to improve maintainability.
 No business logic was modified.
 */
+
+
+
+
+
+
+
+
+
 
 
 
