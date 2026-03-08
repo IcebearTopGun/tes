@@ -61,6 +61,9 @@ function BulkUploadZone({
   const [uploadPhase, setUploadPhase] = useState<"" | "reading" | "ocr" | "done">("");
   const [readDone, setReadDone] = useState(0);
   const [grouped, setGrouped] = useState<ScriptEntry[]>([]);
+  const [invalidAdmissionIds, setInvalidAdmissionIds] = useState<string[]>([]);
+  const [missingAdmissionIds, setMissingAdmissionIds] = useState<string[]>([]);
+  const [uploadedGroups, setUploadedGroups] = useState<any[]>([]);
   const { toast } = useToast();
 
   const addFiles = (incoming: FileList | null) => {
@@ -73,6 +76,47 @@ function BulkUploadZone({
   };
 
   const removeFile = (idx: number) => setFiles(prev => prev.filter((_, i) => i !== idx));
+
+  const fetchUploadedGroups = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`/api/exams/${examId}/uploaded-pages`);
+      const data = await res.json();
+      if (res.ok) setUploadedGroups(Array.isArray(data) ? data : []);
+    } catch {
+      // non-fatal
+    }
+  }, [examId]);
+
+  useEffect(() => { fetchUploadedGroups(); }, [fetchUploadedGroups]);
+
+  const fetchMergedScripts = useCallback(async () => {
+    try {
+      const res = await fetchWithAuth(`/api/exams/${examId}/merged-scripts`);
+      const data = await res.json();
+      if (!res.ok || !Array.isArray(data)) return;
+      const mapped = data.map((s: any) => {
+        let pageCount = 1;
+        try {
+          const ids = typeof s.pageIds === "string" ? JSON.parse(s.pageIds) : s.pageIds;
+          pageCount = Array.isArray(ids) ? ids.length : 1;
+        } catch {}
+        return {
+          admissionNumber: s.admissionNumber,
+          studentName: s.studentName,
+          pages: pageCount,
+          status: s.status === "evaluated" ? "done" : "pending",
+          scriptId: s.id,
+          marks: s.evaluation?.totalMarks != null ? String(s.evaluation.totalMarks) : undefined,
+          maxMarks: s.evaluation?.maxMarks,
+        } as ScriptEntry;
+      });
+      setGrouped(mapped);
+    } catch {
+      // non-fatal
+    }
+  }, [examId]);
+
+  useEffect(() => { fetchMergedScripts(); }, [fetchMergedScripts]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -102,6 +146,10 @@ function BulkUploadZone({
       const scripts: any[] = result.mergedScripts || [];
       const ocrDetails: any[] = result.ocrDetails || [];
       const errors: string[] = result.errors || [];
+      const invalidIds: string[] = result.invalidAdmissionIds || [];
+      const missingIds: string[] = result.missingAdmissionIds || [];
+      setInvalidAdmissionIds(invalidIds);
+      setMissingAdmissionIds(missingIds);
 
       // Log OCR details for debugging
       if (ocrDetails.length > 0) {
@@ -147,9 +195,16 @@ function BulkUploadZone({
         toast({ title: "Upload complete", description: `${scripts.length} student script${scripts.length !== 1 ? "s" : ""} grouped — click Evaluate to grade.` });
       }
       onUploadComplete();
+      fetchUploadedGroups();
+      fetchMergedScripts();
     } catch (err: any) {
       setUploadPhase("");
       toast({ title: "Upload failed", description: err.message || "Something went wrong", variant: "destructive" });
+      setInvalidAdmissionIds([]);
+      setMissingAdmissionIds([]);
+      onUploadComplete();
+      fetchUploadedGroups();
+      fetchMergedScripts();
     } finally {
       setIsUploading(false);
     }
@@ -167,6 +222,8 @@ function BulkUploadZone({
         ? { ...s, status: "done", marks: String(result.totalMarks ?? "?"), maxMarks: result.maxMarks }
         : s));
       onUploadComplete();
+      fetchUploadedGroups();
+      fetchMergedScripts();
       toast({ title: "Evaluated", description: `${g.studentName} scored ${result.totalMarks ?? "?"} marks.` });
     } catch (err: any) {
       setGrouped(prev => prev.map((s, i) => i === idx ? { ...s, status: "error" } : s));
@@ -283,6 +340,71 @@ function BulkUploadZone({
               : <><Upload className="h-4 w-4" /> Process {files.length} page{files.length !== 1 ? "s" : ""} with AI OCR</>
             }
           </button>
+        </div>
+      )}
+
+      {(invalidAdmissionIds.length > 0 || missingAdmissionIds.length > 0) && (
+        <div style={{ marginTop: 14, border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", background: "#fff8ed" }}>
+          {invalidAdmissionIds.length > 0 && <div style={{ fontSize: 12, color: "#92400e" }}><b>Invalid admission IDs:</b> {invalidAdmissionIds.join(", ")}</div>}
+          {missingAdmissionIds.length > 0 && <div style={{ fontSize: 12, color: "#92400e", marginTop: 4 }}><b>Missing admissions for this exam class/section:</b> {missingAdmissionIds.join(", ")}</div>}
+        </div>
+      )}
+
+      {uploadedGroups.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Uploaded Pages by Student</div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {uploadedGroups.map((g: any) => (
+              <div key={g.admissionNumber} style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "10px 12px", background: "#fff" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{g.studentName} � {g.admissionNumber}</div>
+                  <button
+                    onClick={async () => {
+                      const del = await fetchWithAuth(`/api/exams/${examId}/uploads/${encodeURIComponent(g.admissionNumber)}`, { method: "DELETE" });
+                      if (del.ok) {
+                        toast({ title: "Student uploads deleted" });
+                        onUploadComplete();
+                        fetchUploadedGroups();
+                        fetchMergedScripts();
+                      } else {
+                        const msg = await del.json();
+                        toast({ title: "Delete failed", description: msg.message || "Could not delete student uploads", variant: "destructive" });
+                      }
+                    }}
+                    style={{ border: "1px solid #fecaca", borderRadius: 8, padding: "4px 8px", background: "#fff1f2", color: "#b91c1c", fontSize: 12, cursor: "pointer" }}
+                  >
+                    Delete Student Uploads
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                  {(g.pages || []).length > 0 ? (g.pages || []).map((p: any) => (
+                    <button
+                      key={p.id}
+                      onClick={async () => {
+                        const del = await fetchWithAuth(`/api/answer-sheet-pages/${p.id}`, { method: "DELETE" });
+                        if (del.ok) {
+                          toast({ title: "Page deleted" });
+                          onUploadComplete();
+                          fetchUploadedGroups();
+                          fetchMergedScripts();
+                        } else {
+                          const msg = await del.json();
+                          toast({ title: "Delete failed", description: msg.message || "Could not delete page", variant: "destructive" });
+                        }
+                      }}
+                      style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "4px 8px", background: "#fafaf8", fontSize: 12, cursor: "pointer" }}
+                    >
+                      Page {p.sheetNumber || 1} �
+                    </button>
+                  )) : (
+                    <div style={{ fontSize: 12, color: "var(--mid)" }}>
+                      No page images stored. Existing evaluated sheet is present for this student.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -922,14 +1044,16 @@ function HwClassGroup({ label, count, activeCount, children }: {
 }
 
 // ─── HwListItem ─────────────────────────────────────────────────────────────
-function HwListItem({ hw, today, onEval, onEdit, onDelete, onChat }: {
+function HwListItem({ hw, today, onEval, onEdit, onDelete, onChat, onToggleResults }: {
   hw: any; today: string;
-  onEval: () => void; onEdit: () => void; onDelete: () => void; onChat: () => void;
+  onEval: () => void; onEdit: () => void; onDelete: () => void; onChat: () => void; onToggleResults: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isResultConfirmOpen, setIsResultConfirmOpen] = useState(false);
   const isPastDue = hw.dueDate < today;
   const subCount = hw.submissionCount ?? 0;
   const totalStu = hw.totalStudents ?? 0;
+  const showResultsBeforeDue = hw.showResultsBeforeDue === 1;
   const pct = totalStu > 0 ? Math.round((subCount / totalStu) * 100) : 0;
 
   return (
@@ -1007,6 +1131,20 @@ function HwListItem({ hw, today, onEval, onEdit, onDelete, onChat }: {
             onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg,rgba(108,71,216,0.08),rgba(59,130,246,0.08))"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.25)"; }}
           >✦</button>
 
+          {!isPastDue && (
+            <button
+              onClick={onToggleResults}
+              style={{
+                display: "flex", alignItems: "center", gap: 5,
+                padding: "6px 11px", borderRadius: 8,
+                border: "1.5px solid var(--border)", background: showResultsBeforeDue ? "#dcfce7" : "#fff",
+                fontSize: 12, fontWeight: 600, color: showResultsBeforeDue ? "#166534" : "var(--ink2)",
+                cursor: "pointer", transition: "all 0.15s",
+              }}
+            >
+              {showResultsBeforeDue ? "Hide Results" : "Show Results"}
+            </button>
+          )}
           {/* Evaluations */}
           <button
             onClick={onEval}
@@ -1734,18 +1872,30 @@ function ExamAiChat({ exam, onClose }: { exam: any; onClose: () => void }) {
 }
 
 // ─── ExamListItem ─────────────────────────────────────────────────────────────
-function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catColor, today, onEdit, onDelete, onChat, onExpand, isExpanded, answerSheets, onUploadComplete }: {
+function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catColor, today, onEdit, onDelete, onChat, onExpand, isExpanded, answerSheets, onUploadComplete, onToggleStudentResults }: {
   exam: any; isLocked: boolean; subjectIcon: string; evaluated: boolean;
   catLabel: Record<string, string>; catColor: Record<string, string>; today: string;
   onEdit: () => void; onDelete: () => void; onChat: () => void;
   onExpand: () => void; isExpanded: boolean;
-  answerSheets?: any[]; onUploadComplete: () => void;
+  answerSheets?: any[]; onUploadComplete: () => void; onToggleStudentResults: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isResultConfirmOpen, setIsResultConfirmOpen] = useState(false);
   const catClr = catColor[exam.category] || "#6c47d8";
   const examDateLabel = exam.examDate
     ? new Date(exam.examDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
     : null;
+  const evaluatedByStudent = Array.from((answerSheets || []).reduce((acc: Map<string, any>, s: any) => {
+    if (s.status !== "evaluated") return acc;
+    const key = String(s.admissionNumber || "UNKNOWN").trim().toUpperCase();
+    const existing = acc.get(key);
+    const currMarks = Number(s.evaluation?.totalMarks ?? s.totalMarks ?? -1);
+    const prevMarks = Number(existing?.evaluation?.totalMarks ?? existing?.totalMarks ?? -1);
+    if (!existing || currMarks > prevMarks || (currMarks === prevMarks && Number(s.id || 0) > Number(existing.id || 0))) {
+      acc.set(key, s);
+    }
+    return acc;
+  }, new Map<string, any>()).values());
 
   return (
     <div style={{
@@ -1830,6 +1980,20 @@ function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catCol
             onMouseEnter={e => { e.currentTarget.style.background = "rgba(108,71,216,0.18)"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.5)"; }}
             onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg,rgba(108,71,216,0.08),rgba(59,130,246,0.08))"; e.currentTarget.style.borderColor = "rgba(108,71,216,0.25)"; }}
           >✦</button>
+          <button
+            onClick={() => setIsResultConfirmOpen(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "6px 11px", borderRadius: 8,
+              border: "1.5px solid var(--border)",
+              background: exam.showResultsToStudents ? "#dcfce7" : "#fff",
+              fontSize: 12, fontWeight: 600,
+              color: exam.showResultsToStudents ? "#166534" : "var(--ink2)",
+              cursor: "pointer",
+            }}
+          >
+            {exam.showResultsToStudents ? "Hide Results" : "Show Results"}
+          </button>
 
 
           {/* Three-dot menu */}
@@ -1894,6 +2058,23 @@ function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catCol
         </div>
       </div>
 
+
+      <Dialog open={isResultConfirmOpen} onOpenChange={setIsResultConfirmOpen}>
+        <DialogContent style={{ maxWidth: 430 }}>
+          <DialogHeader>
+            <DialogTitle>{exam.showResultsToStudents ? "Hide Results from Students?" : "Show Results to Students?"}</DialogTitle>
+          </DialogHeader>
+          <div style={{ fontSize: 13, color: "var(--mid)", lineHeight: 1.6 }}>
+            {exam.showResultsToStudents
+              ? "Students will no longer see this exam result until you enable it again."
+              : "Students will immediately be able to see their marks and analysis for this exam."}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+            <Button variant="outline" onClick={() => setIsResultConfirmOpen(false)}>Cancel</Button>
+            <Button onClick={() => { onToggleStudentResults(); setIsResultConfirmOpen(false); }}>Confirm</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       {/* Expanded body */}
       {isExpanded && (
         <div style={{ padding: "0 14px 18px", borderTop: "1px solid var(--rule)" }}>
@@ -1915,10 +2096,10 @@ function ExamListItem({ exam, isLocked, subjectIcon, evaluated, catLabel, catCol
           )}
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10, marginTop: 14 }}>Upload Answer Sheets</div>
           <BulkUploadZone examId={exam.id} onUploadComplete={onUploadComplete} />
-          {answerSheets && answerSheets.filter((s: any) => s.status === "evaluated").length > 0 && (
+          {evaluatedByStudent.length > 0 && (
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mid)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Evaluated Results</div>
-              {answerSheets.filter((s: any) => s.status === "evaluated").map((sheet: any) => (
+              {evaluatedByStudent.map((sheet: any) => (
                 <div key={sheet.id} className="sf-exam-item" style={{ cursor: "default" }}>
                   <div className="sf-exam-subj" style={{ background: "var(--green-bg)", fontSize: 12 }}>{getInitials(sheet.studentName || sheet.admissionNumber)}</div>
                   <div className="sf-exam-info">
@@ -2110,6 +2291,18 @@ export default function TeacherDashboard() {
     onError: (err: any) => toast({ title: "Error", description: "Could not update homework.", variant: "destructive" }),
   });
 
+  const toggleHomeworkResults = useMutation({
+    mutationFn: ({ id, showResultsBeforeDue }: { id: number; showResultsBeforeDue: boolean }) =>
+      fetchWithAuth(`/api/teacher/homework/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ showResultsBeforeDue }),
+      }),
+    onSuccess: () => {
+      toast({ title: "Homework visibility updated" });
+      refetchTeacherHw();
+    },
+    onError: () => toast({ title: "Error", description: "Could not update result visibility.", variant: "destructive" }),
+  });
   const deleteHomework = useMutation({
     mutationFn: (id: number) => fetchWithAuth(`/api/teacher/homework/${id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -2117,6 +2310,16 @@ export default function TeacherDashboard() {
       refetchTeacherHw();
     },
     onError: () => toast({ title: "Error", description: "Could not delete homework.", variant: "destructive" }),
+  });
+
+  const toggleExamStudentResults = useMutation({
+    mutationFn: ({ id, showResultsToStudents }: { id: number; showResultsToStudents: boolean }) =>
+      fetchWithAuth(`/api/exams/${id}`, { method: "PUT", body: JSON.stringify({ showResultsToStudents }) }),
+    onSuccess: (_data, variables) => {
+      toast({ title: variables.showResultsToStudents ? "Results released to students" : "Results hidden from students" });
+      queryClient.invalidateQueries({ queryKey: [api.exams.list.path] });
+    },
+    onError: () => toast({ title: "Error", description: "Could not update exam result visibility.", variant: "destructive" }),
   });
 
   const analyticsUrl = `/api/analytics?class=${classFilter}&subject=${subjectFilter}&viewMode=${viewMode}`;
@@ -2963,6 +3166,7 @@ export default function TeacherDashboard() {
                               }
                             }}
                             onChat={() => setHwChatHw(hw)}
+                            onToggleResults={() => toggleHomeworkResults.mutate({ id: hw.id, showResultsBeforeDue: !(hw.showResultsBeforeDue === 1) })}
                           />
                         ))}
                       </HwClassGroup>
@@ -3424,6 +3628,7 @@ export default function TeacherDashboard() {
                               isExpanded={expandedExamId === exam.id}
                               answerSheets={selectedExamId === String(exam.id) ? answerSheets : undefined}
                               onUploadComplete={() => { refetchSheets(); refetchMergedScripts(); queryClient.invalidateQueries({ queryKey: ["/api/analytics"] }); }}
+                              onToggleStudentResults={() => toggleExamStudentResults.mutate({ id: exam.id, showResultsToStudents: !(exam.showResultsToStudents === 1) })}
                             />
                           );
                         })}
@@ -4239,3 +4444,48 @@ Notes:
 This file was extracted from a large file during refactoring to improve maintainability.
 No business logic was modified.
 */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

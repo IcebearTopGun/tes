@@ -3,6 +3,9 @@ export interface HomeworkSubmission {
   answerText?: string | null;
   aiFeedback?: string | null;
   correctnessScore?: number | null;
+  totalMarks?: number | null;
+  maxMarks?: number | null;
+  questionAnalysis?: Array<{ question_number?: number; marks_awarded?: number; max_marks?: number; analysis?: string }> | null;
   status?: string | null;
   submittedAt?: string | null;
 }
@@ -13,6 +16,10 @@ export interface StudentHomeworkItem {
   description: string;
   dueDate: string;
   submission?: HomeworkSubmission | null;
+  editable?: boolean;
+  canDeleteSubmission?: boolean;
+  resultsVisible?: boolean;
+  analysisVisible?: boolean;
 }
 
 export interface HomeworkAnalytics {
@@ -33,6 +40,16 @@ export interface StudentEvaluationItem {
   pct: number;
   overallFeedback?: string | null;
   areasOfImprovement: string[];
+  questions?: Array<{
+    questionNumber: number;
+    marksAwarded: number;
+    maxMarks: number;
+    chapter?: string;
+    missingPoints?: string[];
+    expectedKeyPoints?: string[];
+    deviationReason?: string;
+    improvementSuggestion?: string;
+  }>;
 }
 
 export interface EvaluationStats {
@@ -41,3 +58,9 @@ export interface EvaluationStats {
   topPct: number;
   improveCount: number;
 }
+
+
+
+
+
+

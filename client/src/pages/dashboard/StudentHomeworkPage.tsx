@@ -47,6 +47,20 @@ export default function StudentHomeworkPage() {
     },
   });
 
+  const deleteSubmission = useMutation({
+    mutationFn: (hwId: number) => StudentWorkspaceService.deleteHomeworkSubmission(hwId),
+    onSuccess: () => {
+      toast({ title: "Submission deleted", description: "You can upload a fresh version until results are released." });
+      homeworkQuery.refetch();
+      analyticsQuery.refetch();
+    },
+    onError: (error: Error) =>
+      toast({
+        title: "Delete failed",
+        description: error?.message || "Could not delete submission.",
+        variant: "destructive",
+      }),
+  });
   const chatMutation = useMutation({
     mutationFn: ({ hwId, question }: { hwId: number; question: string }) =>
       StudentWorkspaceService.askHomeworkQuestion(hwId, question),
@@ -160,7 +174,9 @@ export default function StudentHomeworkPage() {
                       const submission = homework.submission;
                       const dueDate = new Date(homework.dueDate);
                       const isDuePassed = new Date() > dueDate;
-                      const isEditable = !isDuePassed;
+                      const analysisVisible = !!homework.analysisVisible;
+                      const isEditable = !!homework.editable;
+                      const canDeleteSubmission = !!homework.canDeleteSubmission;
                       const isUploading = uploadingHwId === homework.id;
                       const statusLabel = submission
                         ? submission.status === "needs_improvement"
@@ -220,42 +236,46 @@ export default function StudentHomeworkPage() {
                                 )}
                               </Button>
                             )}
+                            {submission && canDeleteSubmission && (
+                              <Button size="sm" variant="outline" className="rounded-xl" disabled={deleteSubmission.isPending} onClick={() => deleteSubmission.mutate(homework.id)}>
+                                Delete Submission
+                              </Button>
+                            )}
                           </div>
 
                           {!isEditable && submission && (
                             <div style={{ fontSize: 12, color: "var(--mid)" }}>
-                              Submission is locked because the due date has passed.
+                              Submission is locked because results are visible.
                             </div>
                           )}
 
-                          {submission?.aiFeedback && (
-                            <div
-                              style={{
-                                width: "100%",
-                                padding: "10px 14px",
-                                background: "var(--lav-bg)",
-                                borderRadius: 10,
-                                fontSize: 12.5,
-                                color: "var(--ink2)",
-                                lineHeight: 1.6,
-                              }}
-                            >
+                          {submission && !analysisVisible && (
+                            <div style={{ fontSize: 12, color: "var(--mid)" }}>
+                              Analysis will be visible after due date, or when your teacher releases results.
+                            </div>
+                          )}
+
+                          {analysisVisible && submission?.aiFeedback && (
+                            <div style={{ width: "100%", padding: "10px 14px", background: "var(--lav-bg)", borderRadius: 10, fontSize: 12.5, color: "var(--ink2)", lineHeight: 1.6 }}>
                               <b>Analysis:</b> {submission.aiFeedback}
-                              {submission.correctnessScore != null && (
-                                <span
-                                  style={{
-                                    marginLeft: 8,
-                                    fontWeight: 700,
-                                    color: submission.correctnessScore >= 70 ? "var(--green)" : "var(--amber)",
-                                  }}
-                                >
-                                  {submission.correctnessScore}%
-                                </span>
+                              <div style={{ marginTop: 8, fontWeight: 700 }}>
+                                Total: {submission.totalMarks ?? submission.correctnessScore ?? 0}/{submission.maxMarks ?? 100}
+                              </div>
+                              {Array.isArray(submission.questionAnalysis) && submission.questionAnalysis.length > 0 && (
+                                <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                                  {submission.questionAnalysis.map((q, idx) => (
+                                    <div key={idx} style={{ background: "#fff", borderRadius: 8, padding: "8px 10px", border: "1px solid var(--border)" }}>
+                                      <div style={{ fontWeight: 700 }}>
+                                        Q{q.question_number ?? idx + 1}: {q.marks_awarded ?? 0}/{q.max_marks ?? 0}
+                                      </div>
+                                      {q.analysis && <div style={{ marginTop: 4 }}>{q.analysis}</div>}
+                                    </div>
+                                  ))}
+                                </div>
                               )}
                             </div>
                           )}
-
-                          {submission && (
+{submission && analysisVisible && (
                             <PrivateEvaluationQA
                               question={chatState.q}
                               answer={chatState.a}
@@ -290,3 +310,7 @@ export default function StudentHomeworkPage() {
     </div>
   );
 }
+
+
+
+

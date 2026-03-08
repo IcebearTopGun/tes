@@ -119,6 +119,29 @@ export default function StudentEvaluationsPage() {
                     <b>Analysis:</b> {evaluation.overallFeedback || "No analysis available."}
                   </div>
 
+                  {(evaluation.questions || []).length > 0 && (
+                    <div style={{ width: "100%", display: "grid", gap: 8 }}>
+                      {(evaluation.questions || []).map((q) => (
+                        <div key={q.questionNumber} style={{ border: "1px solid var(--border)", borderRadius: 10, padding: "9px 11px", background: "#fff" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5, fontWeight: 700, color: "var(--ink)" }}>
+                            <span>Q{q.questionNumber} {q.chapter ? `· ${q.chapter}` : ""}</span>
+                            <span>{q.marksAwarded}/{q.maxMarks}</span>
+                          </div>
+                          {(q.missingPoints || []).length > 0 && (
+                            <div style={{ marginTop: 5, fontSize: 12, color: "#7c2d12" }}>
+                              <b>Missing:</b> {q.missingPoints.join(", ")}
+                            </div>
+                          )}
+                          {q.improvementSuggestion && (
+                            <div style={{ marginTop: 4, fontSize: 12, color: "var(--ink2)" }}>
+                              <b>Suggestion:</b> {q.improvementSuggestion}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {(evaluation.areasOfImprovement || []).length > 0 && (
                     <div style={{ width: "100%", fontSize: 12.5, color: "var(--ink2)" }}>
                       <b>Areas of Improvement:</b> {evaluation.areasOfImprovement.join(", ")}
@@ -154,3 +177,6 @@ export default function StudentEvaluationsPage() {
     </div>
   );
 }
+
+
+

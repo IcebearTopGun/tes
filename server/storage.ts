@@ -42,9 +42,15 @@ export interface IStorage {
   // Bulk upload
   createAnswerSheetPage(page: any): Promise<any>;
   getAnswerSheetPagesByExam(examId: number): Promise<any[]>;
+  getAnswerSheetPage(id: number): Promise<any>;
   updateAnswerSheetPage(id: number, data: any): Promise<any>;
+  deleteAnswerSheetPage(id: number): Promise<void>;
+  deleteExamAnswerDataForAdmissions(examId: number, admissionNumbers: string[]): Promise<void>;
   createMergedAnswerScript(script: any): Promise<any>;
   getMergedAnswerScriptsByExam(examId: number): Promise<any[]>;
+  deleteMergedAnswerScriptsByExam(examId: number): Promise<void>;
+  deleteMergedAnswerScript(id: number): Promise<void>;
+  deleteMergedAnswerScriptsByExamAndAdmissions(examId: number, admissionNumbers: string[]): Promise<void>;
   getMergedAnswerScript(id: number): Promise<any>;
   updateMergedAnswerScript(id: number, data: any): Promise<any>;
 
@@ -79,6 +85,7 @@ export interface IStorage {
   createHomeworkSubmission(sub: InsertHomeworkSubmission): Promise<HomeworkSubmission>;
   getHomeworkSubmission(homeworkId: number, studentId: number): Promise<HomeworkSubmission | undefined>;
   updateHomeworkSubmission(id: number, data: Partial<HomeworkSubmission>): Promise<HomeworkSubmission>;
+  deleteHomeworkSubmission(id: number): Promise<void>;
   getHomeworkSubmissionsByStudent(studentId: number): Promise<any[]>;
   getHomeworkSubmissionsByTeacher(teacherId: number): Promise<any[]>;
   getHomeworkById(id: number): Promise<Homework | undefined>;
@@ -210,7 +217,32 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getExamsByTeacher(teacherId: number): Promise<Exam[]> {
-    return await db.select().from(exams).where(eq(exams.teacherId, teacherId));
+    const teacherExams = await db.select().from(exams).where(eq(exams.teacherId, teacherId));
+    const out: any[] = [];
+
+    for (const exam of teacherExams) {
+      const sheets = await db
+        .select({ id: answerSheets.id })
+        .from(answerSheets)
+        .where(eq(answerSheets.examId, exam.id));
+      const sheetIds = sheets.map((s) => s.id);
+
+      let evalCount = 0;
+      if (sheetIds.length > 0) {
+        const evalRows = await db
+          .select({ id: evaluations.id })
+          .from(evaluations)
+          .where(inArray(evaluations.answerSheetId, sheetIds));
+        evalCount = evalRows.length;
+      }
+
+      out.push({
+        ...exam,
+        sheetsEvaluated: evalCount,
+      });
+    }
+
+    return out as Exam[];
   }
 
   async updateExam(id: number, data: Partial<InsertExam>): Promise<Exam> {
@@ -326,6 +358,7 @@ export class DatabaseStorage implements IStorage {
       questions: evaluations.questions,
       evaluationId: evaluations.id,
       answerSheetId: evaluations.answerSheetId,
+      showResultsToStudents: exams.showResultsToStudents,
     })
     .from(evaluations)
     .innerJoin(answerSheets, eq(evaluations.answerSheetId, answerSheets.id))
@@ -344,11 +377,48 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(answerSheetPages).where(eq(answerSheetPages.examId, examId));
   }
 
+  async getAnswerSheetPage(id: number): Promise<any> {
+    const [page] = await db.select().from(answerSheetPages).where(eq(answerSheetPages.id, id));
+    return page;
+  }
+
   async updateAnswerSheetPage(id: number, data: any): Promise<any> {
     const [updated] = await db.update(answerSheetPages).set(data).where(eq(answerSheetPages.id, id)).returning();
     return updated;
   }
 
+  async deleteAnswerSheetPage(id: number): Promise<void> {
+    await db.delete(answerSheetPages).where(eq(answerSheetPages.id, id));
+  }
+
+  async deleteExamAnswerDataForAdmissions(examId: number, admissionNumbers: string[]): Promise<void> {
+    const normalized = Array.from(new Set(admissionNumbers.flatMap((a) => { const v = String(a || "").trim(); return v ? [v, v.toUpperCase()] : []; }).filter(Boolean)));
+    if (normalized.length === 0) return;
+
+    await db.transaction(async (tx) => {
+      const sheets = await tx
+        .select({ id: answerSheets.id })
+        .from(answerSheets)
+        .where(and(eq(answerSheets.examId, examId), inArray(answerSheets.admissionNumber, normalized)));
+      const sheetIds = sheets.map((s) => s.id);
+
+      if (sheetIds.length === 0) return;
+
+      const evalRows = await tx
+        .select({ id: evaluations.id })
+        .from(evaluations)
+        .where(inArray(evaluations.answerSheetId, sheetIds));
+      const evalIds = evalRows.map((e) => e.id);
+
+      if (evalIds.length > 0) {
+        await tx.delete(deviationLogs).where(inArray(deviationLogs.evaluationId, evalIds));
+      }
+
+      await tx.delete(deviationLogs).where(inArray(deviationLogs.answerSheetId, sheetIds));
+      await tx.delete(evaluations).where(inArray(evaluations.answerSheetId, sheetIds));
+      await tx.delete(answerSheets).where(inArray(answerSheets.id, sheetIds));
+    });
+  }
   async createMergedAnswerScript(script: any): Promise<any> {
     const [created] = await db.insert(mergedAnswerScripts).values(script).returning();
     return created;
@@ -356,6 +426,22 @@ export class DatabaseStorage implements IStorage {
 
   async getMergedAnswerScriptsByExam(examId: number): Promise<any[]> {
     return await db.select().from(mergedAnswerScripts).where(eq(mergedAnswerScripts.examId, examId));
+  }
+
+  async deleteMergedAnswerScriptsByExam(examId: number): Promise<void> {
+    await db.delete(mergedAnswerScripts).where(eq(mergedAnswerScripts.examId, examId));
+  }
+
+  async deleteMergedAnswerScript(id: number): Promise<void> {
+    await db.delete(mergedAnswerScripts).where(eq(mergedAnswerScripts.id, id));
+  }
+
+  async deleteMergedAnswerScriptsByExamAndAdmissions(examId: number, admissionNumbers: string[]): Promise<void> {
+    const normalized = Array.from(new Set(admissionNumbers.flatMap((a) => { const v = String(a || "").trim(); return v ? [v, v.toUpperCase()] : []; }).filter(Boolean)));
+    if (normalized.length === 0) return;
+    await db
+      .delete(mergedAnswerScripts)
+      .where(and(eq(mergedAnswerScripts.examId, examId), inArray(mergedAnswerScripts.admissionNumber, normalized)));
   }
 
   async getMergedAnswerScript(id: number): Promise<any> {
@@ -561,6 +647,10 @@ export class DatabaseStorage implements IStorage {
   async updateHomeworkSubmission(id: number, data: Partial<HomeworkSubmission>): Promise<HomeworkSubmission> {
     const [updated] = await db.update(homeworkSubmissions).set(data as any).where(eq(homeworkSubmissions.id, id)).returning();
     return updated;
+  }
+
+  async deleteHomeworkSubmission(id: number): Promise<void> {
+    await db.delete(homeworkSubmissions).where(eq(homeworkSubmissions.id, id));
   }
 
   async getHomeworkSubmissionsByStudent(studentId: number): Promise<any[]> {
@@ -902,6 +992,7 @@ export class DatabaseStorage implements IStorage {
     const allEvals = await db.select({
       totalMarks: evaluations.totalMarks,
       answerSheetId: evaluations.answerSheetId,
+      showResultsToStudents: exams.showResultsToStudents,
     }).from(evaluations);
 
     const sheetsEvaluated = allEvals.length;
@@ -1483,3 +1574,6 @@ Notes:
 This file was extracted from a large file during refactoring to improve maintainability.
 No business logic was modified.
 */
+
+
+

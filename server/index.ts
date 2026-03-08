@@ -95,6 +95,11 @@ app.use((req, res, next) => {
       ALTER TABLE exams ADD COLUMN IF NOT EXISTS description TEXT;
       ALTER TABLE exams ADD COLUMN IF NOT EXISTS exam_date TEXT;
       ALTER TABLE exams ADD COLUMN IF NOT EXISTS created_at TEXT DEFAULT CURRENT_TIMESTAMP;
+      ALTER TABLE exams ADD COLUMN IF NOT EXISTS show_results_to_students INTEGER DEFAULT 0;
+      ALTER TABLE homework ADD COLUMN IF NOT EXISTS show_results_before_due INTEGER DEFAULT 0;
+      ALTER TABLE homework_submissions ADD COLUMN IF NOT EXISTS total_marks INTEGER;
+      ALTER TABLE homework_submissions ADD COLUMN IF NOT EXISTS max_marks INTEGER;
+      ALTER TABLE homework_submissions ADD COLUMN IF NOT EXISTS question_analysis TEXT;
     `);
     console.log("[DB] Schema auto-migration complete");
   } catch (migErr: any) {
@@ -143,3 +148,7 @@ app.use((req, res, next) => {
     },
   );
 })();
+
+
+
+

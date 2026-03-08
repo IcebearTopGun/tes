@@ -121,6 +121,67 @@ function getOpenAIClient() {
   return new OpenAI({ apiKey, baseURL });
 }
 
+async function refineEvaluationWithRubric(params: {
+  examTotalMarks: number;
+  modelAnswerText: string;
+  markingSchemeText: string;
+  studentAnswers: Array<{ question_number: number; answer_text: string }>;
+  initialEvaluation: any;
+}): Promise<any> {
+  const hasApiKey = !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY);
+  if (!hasApiKey) return params.initialEvaluation;
+
+  const prompt = `You are validating and correcting an exam evaluation JSON.
+
+You must enforce strict consistency:
+1) If a student's answer is unrelated/out of context for a question, marks_awarded must be 0 for that question.
+2) If marking scheme defines explicit component marks (example: equation = 10), and that component is missing, deduct that component properly.
+3) Keep conceptual grading (not word-match), but follow rubric strictly.
+4) question_number must remain stable.
+5) max_marks should follow paper/rubric expectations.
+6) total_marks must equal sum(marks_awarded).
+7) Sum of max_marks should equal exam total where possible.
+
+=== EXAM TOTAL ===
+${params.examTotalMarks}
+
+=== MODEL ANSWER ===
+${params.modelAnswerText || "(none)"}
+
+=== MARKING SCHEME ===
+${params.markingSchemeText || "(none)"}
+
+=== STUDENT ANSWERS ===
+${JSON.stringify(params.studentAnswers || [], null, 2)}
+
+=== INITIAL EVALUATION JSON ===
+${JSON.stringify(params.initialEvaluation || {}, null, 2)}
+
+Return ONLY corrected JSON in same schema:
+{
+  "student_name": "...",
+  "admission_number": "...",
+  "total_marks": <number>,
+  "questions": [
+    {
+      "question_number": <number>,
+      "chapter": "<string>",
+      "marks_awarded": <number>,
+      "max_marks": <number>,
+      "deviation_reason": "<string>",
+      "improvement_suggestion": "<string>"
+    }
+  ],
+  "overall_feedback": "<string>"
+}`;
+
+  const response = await getOpenAIClient().chat.completions.create({
+    model: "gpt-4o",
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
+  });
+  return JSON.parse(response.choices[0].message.content || "{}");
+}
 async function extractDocumentText(dataUrl: string, label: string): Promise<string> {
   const mimeMatch = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
   if (!mimeMatch) return "";
@@ -175,6 +236,59 @@ async function extractDocumentText(dataUrl: string, label: string): Promise<stri
 
   console.log(`[EXTRACT] Unsupported format for ${label}: ${mimeType}`);
   return "";
+}
+
+function detectQuestionMarker(line: string): { questionNumber: number; markerLength: number } | null {
+  const normalized = String(line || "").trim();
+  if (!normalized) return null;
+  const patterns = [
+    /^\s*(?:ans(?:wer)?|q(?:ue)?|question)\s*[-.:]?\s*(\d{1,2})\s*[-.):]/i,
+    /^\s*(\d{1,2})\s*[-.):]/,
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+    const qn = Number(match[1]);
+    if (!Number.isFinite(qn) || qn <= 0) continue;
+    return { questionNumber: qn, markerLength: match[0].length };
+  }
+  return null;
+}
+
+function splitOcrAnswerIntoQuestions(answers: Array<{ question_number?: number; answer_text?: string }>): Array<{ question_number: number; answer_text: string }> {
+  const result: Array<{ question_number: number; answer_text: string }> = [];
+  const pushSegment = (questionNumber: number | null, text: string) => {
+    const clean = text.replace(/\s+/g, " ").trim();
+    if (!clean || !questionNumber || questionNumber <= 0) return;
+    const existing = result.find((r) => r.question_number === questionNumber);
+    if (existing) existing.answer_text = `${existing.answer_text} ${clean}`.replace(/\s+/g, " ").trim();
+    else result.push({ question_number: questionNumber, answer_text: clean });
+  };
+
+  for (const raw of answers || []) {
+    const lines = String(raw?.answer_text || "").split(/\r?\n/);
+    let currentQn = Number(raw?.question_number || 0) > 0 ? Number(raw?.question_number) : null;
+    let buffer: string[] = [];
+    for (const originalLine of lines) {
+      const line = String(originalLine || "").trim();
+      if (!line) { buffer.push(""); continue; }
+      const marker = detectQuestionMarker(line);
+      if (marker) {
+        pushSegment(currentQn, buffer.join("\n"));
+        currentQn = marker.questionNumber;
+        const remainder = line.slice(marker.markerLength).trim();
+        buffer = remainder ? [remainder] : [];
+      } else {
+        buffer.push(line);
+      }
+    }
+    pushSegment(currentQn, buffer.join("\n"));
+  }
+  return result;
+}
+function answerStartsWithExplicitMarker(text: string): boolean {
+  const firstLine = String(text || "").split(/\r?\n/)[0] || "";
+  return detectQuestionMarker(firstLine.trim()) !== null;
 }
 
 // Deterministic pseudo-random 0-1 from integer seed
@@ -575,7 +689,7 @@ export async function registerRoutes(
     const student = await storage.getStudent(req.user.id);
     if (!student) return res.status(404).json({ message: "Student not found" });
 
-    const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
+    const evals = (await storage.getEvaluationsByStudent(student.admissionNumber)).filter((e: any) => Number(e.showResultsToStudents) === 1);
 
     // Build marks overview per subject (latest eval per subject wins)
     const subjectMap = new Map<string, { score: number; total: number; exam: string }>();
@@ -623,7 +737,7 @@ export async function registerRoutes(
 
     const peerStats: Array<{ admissionNumber: string; name: string; avgPct: number }> = [];
     for (const peer of classmates) {
-      const peerEvals = await storage.getEvaluationsByStudent(peer.admissionNumber);
+      const peerEvals = (await storage.getEvaluationsByStudent(peer.admissionNumber)).filter((e: any) => Number(e.showResultsToStudents) === 1);
       if (!peerEvals.length) continue;
       const peerAvg = Math.round(
         peerEvals.reduce((acc, e) => acc + (e.totalMarks / e.maxMarks) * 100, 0) / peerEvals.length,
@@ -689,6 +803,7 @@ export async function registerRoutes(
     useNcert: z.coerce.number().int().min(0).max(1).optional(),
     description: z.string().optional().nullable(),
     examDate: z.string().optional().nullable(),
+    showResultsToStudents: z.coerce.number().int().min(0).max(1).optional(),
   });
 
   app.post(api.exams.create.path, authMiddleware, async (req: AuthRequest, res) => {
@@ -727,14 +842,16 @@ export async function registerRoutes(
       const existing = await storage.getExam(examId);
       if (!existing || existing.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
 
-      const today = new Date().toISOString().split("T")[0];
-      if (existing.examDate && existing.examDate <= today) {
-        return res.status(400).json({ message: "Cannot edit exam on or after exam date" });
-      }
-
       const parsed = examUpdateSchema.parse(req.body || {});
       if (Object.keys(parsed).length === 0) {
         return res.status(400).json({ message: "No fields provided to update" });
+      }
+
+      const today = new Date().toISOString().split("T")[0];
+      const lockedByDate = !!(existing.examDate && existing.examDate <= today);
+      const onlyVisibilityToggle = Object.keys(parsed).every((k) => k === "showResultsToStudents");
+      if (lockedByDate && !onlyVisibilityToggle) {
+        return res.status(400).json({ message: "Cannot edit exam on or after exam date" });
       }
 
       if (parsed.examDate && parsed.examDate < today) {
@@ -837,7 +954,15 @@ export async function registerRoutes(
         };
       }));
 
-      const validResults = results.filter(Boolean);
+      const validResultsRaw = results.filter(Boolean);
+      const byAdmission = new Map<string, any>();
+      for (const r of validResultsRaw as any[]) {
+        const key = String(r?.admissionNumber || "").trim().toUpperCase();
+        if (!key) continue;
+        const prev = byAdmission.get(key);
+        if (!prev || Number(r.totalMarks || 0) >= Number(prev.totalMarks || 0)) byAdmission.set(key, r);
+      }
+      const validResults = Array.from(byAdmission.values());
 
       // Class-level stats
       const totalStudents = validResults.length;
@@ -1079,9 +1204,16 @@ Admission Number: ${sheet.admissionNumber}
 ${studentAnswers || sheet.ocrOutput}
 
 === INSTRUCTIONS ===
-- Compare each student answer against the model answer.
+- Evaluate by conceptual correctness and context, not word-by-word text matching.
+- Compare each student answer against the model answer for meaning, key points, and scientific accuracy.
+- If a student covers most key points but misses a few details, award majority marks (high partial credit), not near-zero marks.
+- Use the marking scheme as the source of truth for per-question and component-level marks.
+- First determine each question's max_marks from the paper/marking scheme, then grade; do not reduce max_marks due to student quality.
+- If marking scheme assigns component marks, apply those component deductions exactly when missing.
 - Award marks fairly: full marks for correct, partial for partially correct, 0 for blank/wrong.
-- Total marks awarded must not exceed ${exam.totalMarks}.
+- The questions array must include every attempted/asked question with correct question_number and correct max_marks.
+- total_marks must exactly equal the sum of all marks_awarded in questions.
+- The sum of all max_marks in questions must equal ${exam.totalMarks}.
 - For each question, identify the NCERT chapter it relates to (use chapter name from reference above, or "General" if not applicable).
 - Provide a deviation reason explaining how the student's answer differs from the model answer.
 - Provide specific improvement suggestions per question.
@@ -1116,6 +1248,7 @@ Return ONLY valid JSON with this exact structure:
         });
       } else {
         console.log("[EVAL] Calling OpenAI GPT-4o for evaluation (text-only)...");
+        console.log("[EVAL] Prompt sent to OpenAI:\n" + evalPrompt);
         const response = await getOpenAIClient().chat.completions.create({
           model: "gpt-4o",
           messages: [{ role: "user", content: evalPrompt }],
@@ -1126,21 +1259,30 @@ Return ONLY valid JSON with this exact structure:
         console.log("[EVAL] Raw OpenAI response:", rawEval.substring(0, 300));
         evalData = JSON.parse(rawEval);
       }
-      console.log(`[EVAL] Parsed eval — student: ${evalData.student_name}, total_marks: ${evalData.total_marks}, questions: ${evalData.questions?.length ?? 0}`);
+      console.log(`[EVAL] Parsed eval - student: ${evalData.student_name}, total_marks: ${evalData.total_marks}, questions: ${evalData.questions?.length ?? 0}`);
+      const refinedEval = await refineEvaluationWithRubric({
+        examTotalMarks: exam.totalMarks,
+        modelAnswerText,
+        markingSchemeText,
+        studentAnswers: ocrData.answers ?? [],
+        initialEvaluation: evalData,
+      });
+      const normalizedQuestions = Array.isArray(refinedEval?.questions) ? refinedEval.questions : (Array.isArray(evalData.questions) ? evalData.questions : []);
+      const normalizedTotal = Math.max(0, Math.min(exam.totalMarks, Number(refinedEval?.total_marks ?? evalData.total_marks ?? 0)));
 
       const evaluation = await storage.createEvaluation({
         answerSheetId,
-        studentName: evalData.student_name || sheet.studentName,
+        studentName: refinedEval?.student_name || evalData.student_name || sheet.studentName,
         admissionNumber: evalData.admission_number || sheet.admissionNumber,
-        totalMarks: evalData.total_marks ?? 0,
-        questions: JSON.stringify(evalData.questions ?? []),
-        overallFeedback: evalData.overall_feedback || ""
+        totalMarks: normalizedTotal,
+        questions: JSON.stringify(normalizedQuestions),
+        overallFeedback: refinedEval?.overall_feedback || evalData.overall_feedback || ""
       });
 
       // Save per-question deviation logs for analytics
       try {
-        const admissionNumber = evalData.admission_number || sheet.admissionNumber;
-        const devLogs = (evalData.questions ?? []).map((q: any) => ({
+        const admissionNumber = refinedEval?.admission_number || evalData.admission_number || sheet.admissionNumber;
+        const devLogs = (normalizedQuestions ?? []).map((q: any) => ({
           evaluationId: evaluation.id,
           answerSheetId,
           admissionNumber,
@@ -1279,6 +1421,71 @@ Return ONLY valid JSON with this exact structure:
     }
   });
 
+
+  // AI Insights: generate chart-ready narrative + chart specs from scoped data context
+  app.post("/api/ai/insights", authMiddleware, async (req: AuthRequest, res) => {
+    try {
+      const { question, dataContext } = req.body || {};
+      if (!question || typeof question !== "string") {
+        return res.status(400).json({ message: "question is required" });
+      }
+
+      const systemPrompt = `You are a school analytics AI. You have access to real school performance data and generate visualization specs in JSON.
+
+The user will ask a question about school data. You must:
+1) Analyze the provided data context.
+2) Generate chart(s) that directly answer the question using ONLY real data values from the context.
+3) Return pure JSON only.
+
+Available chart types: "bar", "horizontal_bar", "line", "donut", "table", "stat_cards", "progress_bars"
+
+Return JSON format:
+{
+  "narrative": "2-3 sentence explanation of what the data shows",
+  "charts": [
+    {
+      "type": "bar",
+      "title": "Chart title",
+      "description": "What this chart shows",
+      "data": [{"label": "...", "value": 42}],
+      "labelKey": "label",
+      "valueKey": "value",
+      "summary": "One-line key finding"
+    }
+  ],
+  "recommendations": ["actionable recommendation 1", "actionable recommendation 2"]
+}
+
+Rules:
+- Use ONLY values present in data context.
+- If data is empty, charts must be [] and narrative should say data is unavailable.
+- Keep chart data arrays <= 15 items.
+- Return valid JSON only, no markdown/code fences.`;
+
+      const userPrompt = `User question: "${question}"
+
+Real data context:
+${JSON.stringify(dataContext ?? {}, null, 2)}
+
+Generate the JSON response now.`;
+
+      const aiResp = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+      });
+
+      const raw = aiResp.choices[0].message.content || "{}";
+      const parsed = JSON.parse(raw);
+      return res.json(parsed);
+    } catch (err: any) {
+      console.error("[AI INSIGHTS] Error:", err?.message || err);
+      return res.status(500).json({ message: "Failed to generate insight", detail: err?.message });
+    }
+  });
   // BULK UPLOAD — OCR all pages, group by admission number, merge into scripts
   app.post("/api/exams/:id/bulk-upload", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
@@ -1293,6 +1500,15 @@ Return ONLY valid JSON with this exact structure:
     if (!exam || exam.teacherId !== req.user.id) {
       return res.status(403).json({ message: "Access denied" });
     }
+
+    const prePages = await storage.getAnswerSheetPagesByExam(examId);
+    const preScripts = await storage.getMergedAnswerScriptsByExam(examId);
+    const preSheets = await storage.getAnswerSheetsByExam(examId);
+    const preExistingAdmissions = new Set<string>([
+      ...prePages.map((p: any) => String(p.admissionNumber || "").trim().toUpperCase()),
+      ...preScripts.map((s: any) => String(s.admissionNumber || "").trim().toUpperCase()),
+      ...preSheets.map((s: any) => String(s.admissionNumber || "").trim().toUpperCase()),
+    ].filter(Boolean));
 
     console.log(`[BULK] Starting bulk OCR for exam ${examId}, ${images.length} pages`);
 
@@ -1421,20 +1637,58 @@ If you genuinely cannot read the name, use "UNKNOWN". If you cannot read the adm
 
       // 3. Sort each group by sheet_number and merge answers
       const mergedScripts: any[] = [];
+      const duplicateAdmissionIds: string[] = [];
+      const invalidAdmissionIds: string[] = [];
       for (const [admNo, group] of groups.entries()) {
+        const normalizedAdm = String(group.admissionNumber || admNo || "").trim().toUpperCase();
+        if (!normalizedAdm || normalizedAdm === "UNKNOWN") {
+          for (const gp of group.pages) {
+            if (Number(gp?.page?.id) > 0) await storage.deleteAnswerSheetPage(Number(gp.page.id));
+          }
+          continue;
+        }
+        if (preExistingAdmissions.has(normalizedAdm)) {
+          duplicateAdmissionIds.push(normalizedAdm);
+          for (const gp of group.pages) {
+            if (Number(gp?.page?.id) > 0) await storage.deleteAnswerSheetPage(Number(gp.page.id));
+          }
+          continue;
+        }
+
+        const dbStudent = await storage.getStudentByAdmissionNumber(normalizedAdm);
+        if (!dbStudent) {
+          invalidAdmissionIds.push(normalizedAdm);
+          for (const gp of group.pages) {
+            if (Number(gp?.page?.id) > 0) await storage.deleteAnswerSheetPage(Number(gp.page.id));
+          }
+          continue;
+        }
+        const resolvedStudentName = String(dbStudent.name || "UNKNOWN").trim();
         const sortedPages = group.pages.sort((a, b) => (a.page.sheetNumber || 1) - (b.page.sheetNumber || 1));
         const mergedAnswers: any[] = [];
         const pageIds: number[] = sortedPages.map(p => p.page.id);
 
-        for (const { ocrData } of sortedPages) {
-          const answers = ocrData.answers ?? [];
-          for (const ans of answers) {
-            const existing = mergedAnswers.find(m => m.question_number === ans.question_number);
-            if (existing) {
-              existing.answer_text += " " + ans.answer_text;
-            } else {
-              mergedAnswers.push({ ...ans });
+        let lastQuestionInSequence = 0;
+        for (let pageIdx = 0; pageIdx < sortedPages.length; pageIdx++) {
+          const { ocrData } = sortedPages[pageIdx];
+          const answers = splitOcrAnswerIntoQuestions(ocrData.answers ?? []);
+          for (let ansIdx = 0; ansIdx < answers.length; ansIdx++) {
+            const ans = answers[ansIdx];
+            let qNum = Number(ans.question_number || 0);
+            const hasExplicit = answerStartsWithExplicitMarker(String(ans.answer_text || ""));
+
+            if (pageIdx > 0 && ansIdx === 0 && !hasExplicit && lastQuestionInSequence > 0) {
+              qNum = lastQuestionInSequence;
             }
+            if (qNum <= 0) qNum = lastQuestionInSequence > 0 ? lastQuestionInSequence : 1;
+
+            const existing = mergedAnswers.find((m) => Number(m.question_number) === qNum);
+            if (existing) {
+              existing.answer_text = `${existing.answer_text} ${ans.answer_text}`.replace(/\s+/g, " ").trim();
+            } else {
+              mergedAnswers.push({ question_number: qNum, answer_text: String(ans.answer_text || "").trim() });
+            }
+            lastQuestionInSequence = qNum;
           }
         }
 
@@ -1442,8 +1696,8 @@ If you genuinely cannot read the name, use "UNKNOWN". If you cannot read the adm
         const scriptObj: any = {
           id: Date.now() + Math.floor(Math.random() * 10000), // temp id
           examId,
-          admissionNumber: group.admissionNumber || admNo,
-          studentName: group.studentName,
+          admissionNumber: normalizedAdm,
+          studentName: resolvedStudentName,
           mergedAnswers: JSON.stringify(mergedAnswers),
           pageIds: JSON.stringify(pageIds),
           status: "pending",
@@ -1455,7 +1709,7 @@ If you genuinely cannot read the name, use "UNKNOWN". If you cannot read the adm
           const saved = await storage.createMergedAnswerScript({
             examId,
             admissionNumber: scriptObj.admissionNumber,
-            studentName: scriptObj.studentName,
+            studentName: resolvedStudentName,
             mergedAnswers: scriptObj.mergedAnswers,
             pageIds: scriptObj.pageIds,
             status: "pending",
@@ -1470,6 +1724,12 @@ If you genuinely cannot read the name, use "UNKNOWN". If you cannot read the adm
       }
 
       const errors = pageResults.filter((r: any) => r.error).map((r: any) => r.error);
+      if (duplicateAdmissionIds.length > 0) {
+        errors.push(...duplicateAdmissionIds.map((adm) => `Admission ${adm} already has an uploaded/evaluated sheet for this exam.`));
+      }
+      if (invalidAdmissionIds.length > 0) {
+        errors.push(...invalidAdmissionIds.map((adm) => `Admission ${adm} not found in student database.`));
+      }
       console.log(`[BULK] Done: ${mergedScripts.length} merged scripts, ${errors.length} errors`);
       // Log what OCR extracted for debugging
       for (const r of successResults) {
@@ -1478,6 +1738,8 @@ If you genuinely cannot read the name, use "UNKNOWN". If you cannot read the adm
       res.json({
         pagesProcessed: successResults.length,
         errors,
+        duplicateAdmissionIds,
+        invalidAdmissionIds,
         mergedScripts,
         ocrDetails: successResults.map(r => ({
           studentName: r.page.studentName,
@@ -1492,6 +1754,71 @@ If you genuinely cannot read the name, use "UNKNOWN". If you cannot read the adm
     }
   });
 
+  // Uploaded pages grouped by student (for evaluator UI)
+  app.get("/api/exams/:id/uploaded-pages", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const examId = parseInt(req.params.id);
+    try {
+      const exam = await storage.getExam(examId);
+      if (!exam || exam.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+      const pages = await storage.getAnswerSheetPagesByExam(examId);
+      const scripts = await storage.getMergedAnswerScriptsByExam(examId);
+      const sheets = await storage.getAnswerSheetsByExam(examId);
+      const grouped = new Map<string, { studentName: string; admissionNumber: string; pages: any[] }>();
+
+      const ensure = async (admission: string, fallbackName: string) => {
+        const key = String(admission || "").trim().toUpperCase();
+        if (!key) return null;
+        if (!grouped.has(key)) {
+          const dbStudent = await storage.getStudentByAdmissionNumber(key);
+          grouped.set(key, {
+            studentName: String(dbStudent?.name || fallbackName || "UNKNOWN").trim(),
+            admissionNumber: key,
+            pages: [],
+          });
+        }
+        return grouped.get(key)!;
+      };
+
+      for (const p of pages as any[]) {
+        const g = await ensure(String(p.admissionNumber || ""), String(p.studentName || ""));
+        if (!g) continue;
+        g.pages.push({ id: p.id, sheetNumber: p.sheetNumber || 1, status: p.status || "processed" });
+      }
+      for (const s of scripts as any[]) await ensure(String(s.admissionNumber || ""), String(s.studentName || ""));
+      for (const sh of sheets as any[]) await ensure(String(sh.admissionNumber || ""), String(sh.studentName || ""));
+
+      const out = Array.from(grouped.values())
+        .map((g) => ({ ...g, pages: g.pages.sort((a, b) => (a.sheetNumber || 1) - (b.sheetNumber || 1)) }))
+        .sort((a, b) => a.admissionNumber.localeCompare(b.admissionNumber));
+      res.json(out);
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to load uploaded pages", detail: err?.message });
+    }
+  });
+
+  // Delete a single uploaded page; also clear derived merged/evaluated data for that admission
+  app.delete("/api/answer-sheet-pages/:id", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const pageId = parseInt(req.params.id);
+    try {
+      const page = await storage.getAnswerSheetPage(pageId);
+      if (!page) return res.status(404).json({ message: "Page not found" });
+      const exam = await storage.getExam((page as any).examId);
+      if (!exam || exam.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+      const admission = String((page as any).admissionNumber || "").trim().toUpperCase();
+      await storage.deleteAnswerSheetPage(pageId);
+      if (admission) {
+        await storage.deleteMergedAnswerScriptsByExamAndAdmissions((page as any).examId, [admission]);
+        await storage.deleteExamAnswerDataForAdmissions((page as any).examId, [admission]);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: "Failed to delete page", detail: err?.message });
+    }
+  });
   // GET merged scripts for an exam
   app.get("/api/exams/:id/merged-scripts", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
@@ -1511,6 +1838,38 @@ If you genuinely cannot read the name, use "UNKNOWN". If you cannot read the adm
     res.json(withEval);
   });
 
+  // Delete uploaded sheets/scripts/evaluations for one student in an exam
+  app.delete("/api/exams/:id/uploads/:admissionNumber", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const examId = parseInt(req.params.id);
+    const admissionNumber = String(req.params.admissionNumber || "").trim().toUpperCase();
+    if (!admissionNumber) return res.status(400).json({ message: "Admission number is required" });
+
+    try {
+      const exam = await storage.getExam(examId);
+      if (!exam || exam.teacherId !== req.user.id) return res.status(403).json({ message: "Access denied" });
+
+      const pages = await storage.getAnswerSheetPagesByExam(examId);
+      const pageRows = pages.filter((p: any) => String(p.admissionNumber || "").trim().toUpperCase() === admissionNumber);
+      for (const p of pageRows) {
+        await storage.deleteAnswerSheetPage(p.id);
+      }
+
+      await storage.deleteMergedAnswerScriptsByExamAndAdmissions(examId, [admissionNumber]);
+      await storage.deleteExamAnswerDataForAdmissions(examId, [admissionNumber]);
+
+      res.json({
+        success: true,
+        deleted: {
+          pages: pageRows.length,
+          admissionNumber,
+        },
+      });
+    } catch (err: any) {
+      console.error("[UPLOAD-DELETE]", err?.message);
+      res.status(500).json({ message: "Failed to delete student uploads", detail: err?.message });
+    }
+  });
   // Evaluate a merged answer script
   app.post("/api/merged-scripts/:id/evaluate", authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
@@ -1533,7 +1892,10 @@ If you genuinely cannot read the name, use "UNKNOWN". If you cannot read the adm
         markingSchemeText = await extractDocumentText(exam.markingSchemeUrl, "marking scheme");
       }
 
-      const ncertChaptersData = await storage.getNcertChaptersByClassAndSubject(exam.className, exam.subject);
+      const shouldUseNcert = (exam as any).useNcert === 1;
+      const ncertChaptersData = shouldUseNcert
+        ? await storage.getNcertChaptersByClassAndSubject(exam.className, exam.subject)
+        : [];
       const ncertContext = ncertChaptersData.length > 0
         ? ncertChaptersData.map(ch => `Chapter: ${ch.chapterName}\n${ch.chapterContent}`).join("\n\n---\n\n")
         : "";
@@ -1566,9 +1928,16 @@ Admission Number: ${script.admissionNumber}
 ${studentAnswers}
 
 === INSTRUCTIONS ===
-- Compare each student answer against the model answer.
+- Evaluate by conceptual correctness and context, not word-by-word text matching.
+- Compare each student answer against the model answer for meaning, key points, and scientific accuracy.
+- If a student covers most key points but misses a few details, award majority marks (high partial credit), not near-zero marks.
+- Use the marking scheme as the source of truth for per-question and component-level marks.
+- First determine each question's max_marks from the paper/marking scheme, then grade; do not reduce max_marks due to student quality.
+- If marking scheme assigns component marks, apply those component deductions exactly when missing.
 - Award marks fairly: full marks for correct, partial for partially correct, 0 for blank/wrong.
-- Total marks awarded must not exceed ${exam.totalMarks}.
+- The questions array must include every attempted/asked question with correct question_number and correct max_marks.
+- total_marks must exactly equal the sum of all marks_awarded in questions.
+- The sum of all max_marks in questions must equal ${exam.totalMarks}.
 - For each question, identify the NCERT chapter it relates to.
 - Provide a deviation reason explaining how the student's answer differs.
 - Provide specific improvement suggestions per question.
@@ -1591,6 +1960,7 @@ Return ONLY valid JSON:
   "overall_feedback": "<2-3 sentence summary>"
 }`;
 
+      console.log("[BULK-EVAL] Prompt sent to OpenAI:\n" + evalPrompt);
       const response = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o",
         messages: [{ role: "user", content: evalPrompt }],
@@ -1598,7 +1968,16 @@ Return ONLY valid JSON:
       });
 
       const evalData = JSON.parse(response.choices[0].message.content || "{}");
-      console.log(`[BULK-EVAL] Eval done — student: ${evalData.student_name}, marks: ${evalData.total_marks}`);
+      const refinedEval = await refineEvaluationWithRubric({
+        examTotalMarks: exam.totalMarks,
+        modelAnswerText,
+        markingSchemeText,
+        studentAnswers: mergedAnswers,
+        initialEvaluation: evalData,
+      });
+      const normalizedQuestions = Array.isArray(refinedEval?.questions) ? refinedEval.questions : (Array.isArray(evalData.questions) ? evalData.questions : []);
+      const normalizedTotal = Math.max(0, Math.min(exam.totalMarks, Number(refinedEval?.total_marks ?? evalData.total_marks ?? 0)));
+      console.log(`[BULK-EVAL] Eval done - student: ${refinedEval?.student_name || evalData.student_name}, marks: ${normalizedTotal}`);
 
       // Find or create answer sheet record for this student
       const student = await storage.getStudentByAdmissionNumber(script.admissionNumber);
@@ -1613,19 +1992,19 @@ Return ONLY valid JSON:
 
       const evaluation = await storage.createEvaluation({
         answerSheetId: sheet.id,
-        studentName: evalData.student_name || script.studentName,
+        studentName: refinedEval?.student_name || evalData.student_name || script.studentName,
         admissionNumber: evalData.admission_number || script.admissionNumber,
-        totalMarks: evalData.total_marks ?? 0,
-        questions: JSON.stringify(evalData.questions ?? []),
-        overallFeedback: evalData.overall_feedback || "",
+        totalMarks: normalizedTotal,
+        questions: JSON.stringify(normalizedQuestions),
+        overallFeedback: refinedEval?.overall_feedback || evalData.overall_feedback || "",
       });
 
       // Save deviation logs for bulk-eval
       try {
-        const devLogs = (evalData.questions ?? []).map((q: any) => ({
+        const devLogs = (normalizedQuestions ?? []).map((q: any) => ({
           evaluationId: evaluation.id,
           answerSheetId: sheet.id,
-          admissionNumber: evalData.admission_number || script.admissionNumber,
+          admissionNumber: refinedEval?.admission_number || evalData.admission_number || script.admissionNumber,
           examId: exam.id,
           subject: exam.subject,
           questionNumber: q.question_number ?? 0,
@@ -1751,29 +2130,41 @@ Return ONLY valid JSON:
 
       if (ocrText && hw.modelSolutionText) {
         try {
+          const homeworkEvalPrompt = `You are an experienced teacher evaluating a student's homework response.
+
+=== HOMEWORK DETAILS ===
+Subject: ${hw.subject}
+Description: ${hw.description || "(No description provided)"}
+NCERT reference enabled: ${hw.useNcertReference === 1 ? "Yes" : "No"}
+
+=== MODEL ANSWER / SOLUTION ===
+${hw.modelSolutionText}
+
+=== STUDENT ANSWER (OCR) ===
+${ocrText}
+
+=== INSTRUCTIONS ===
+- Evaluate by conceptual correctness and context, not word-by-word text matching.
+- Compare meaning, key points, scientific correctness, and completeness against the model solution.
+- If most key points are present but some details are missing, award high partial credit.
+- If answer is unrelated/out of context, assign very low marks (or 0 where appropriate).
+- Keep scoring internally consistent with the reasoning.
+- correctness_score must be an integer from 0 to 100.
+- status must be "completed" if score >= 60, otherwise "needs_improvement".
+- feedback must align with score and mention missing key concepts/components.
+
+Return ONLY valid JSON:
+{
+  "correctness_score": <integer 0-100>,
+  "status": "completed" | "needs_improvement",
+  "feedback": "<2-3 sentence feedback>"
+}`;
+          console.log("[HW SUBMIT] Prompt sent to OpenAI:\n" + homeworkEvalPrompt);
           const evalResp = await getOpenAIClient().chat.completions.create({
             model: "gpt-4o",
             messages: [{
               role: "user",
-              content: `You are evaluating a student's handwritten homework submission.
-
-Homework description: ${hw.description}
-Subject: ${hw.subject}
-
-Model solution:
-${hw.modelSolutionText}
-
-Student's submitted answer (extracted via OCR):
-${ocrText}
-
-Rate the student's answer on a scale of 0–100 for correctness and completeness. Also give brief feedback.
-
-Return JSON:
-{
-  "correctness_score": <0-100>,
-  "status": "completed" | "needs_improvement",
-  "feedback": "<2-3 sentence feedback>"
-}`
+              content: homeworkEvalPrompt
             }],
             response_format: { type: "json_object" },
           });
@@ -1936,7 +2327,7 @@ Answer the student's question briefly and specifically.`;
       const student = await storage.getStudent(req.user.id);
       if (!student) return res.status(404).json({ message: "Student not found" });
 
-      const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
+      const evals = (await storage.getEvaluationsByStudent(student.admissionNumber)).filter((e: any) => Number(e.showResultsToStudents) === 1);
       const formatted = evals.map((e: any) => {
         let questions: any[] = [];
         try { questions = JSON.parse(e.questions || "[]"); } catch {}
@@ -1979,7 +2370,7 @@ Answer the student's question briefly and specifically.`;
       const student = await storage.getStudent(req.user.id);
       if (!student) return res.status(404).json({ message: "Student not found" });
 
-      const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
+      const evals = (await storage.getEvaluationsByStudent(student.admissionNumber)).filter((e: any) => Number(e.showResultsToStudents) === 1);
       const evaluation = evals.find((e: any) => e.evaluationId === evalId);
       if (!evaluation) return res.status(404).json({ message: "Evaluation not found" });
 
@@ -2123,7 +2514,7 @@ ${dataContext}`,
       const student = await storage.getStudent(req.user.id);
       if (!student) return res.status(404).json({ message: "Student not found" });
 
-      const evals = await storage.getEvaluationsByStudent(student.admissionNumber);
+      const evals = (await storage.getEvaluationsByStudent(student.admissionNumber)).filter((e: any) => Number(e.showResultsToStudents) === 1);
       if (evals.length === 0) {
         return res.json({
           strengths: [],
@@ -2452,6 +2843,85 @@ ${hwContext}`;
     }
   });
 
+
+  // Teacher: exam-level AI chat (stateless)
+  app.post("/api/teacher/exams/:id/chat", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    try {
+      const examId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(examId)) return res.status(400).json({ message: "Invalid exam id" });
+
+      const exam = await storage.getExam(examId);
+      if (!exam) return res.status(404).json({ message: "Exam not found" });
+      if (exam.teacherId !== req.user.id) return res.status(403).json({ message: "Forbidden" });
+
+      const { question, history = [] } = req.body || {};
+      if (!question || typeof question !== "string") {
+        return res.status(400).json({ message: "question is required" });
+      }
+
+      const sheets = await storage.getAnswerSheetsByExam(examId);
+      const evalRows = (await Promise.all(
+        sheets.map(async (s: any) => {
+          const ev = await storage.getEvaluationByAnswerSheetId(s.id);
+          return ev ? { sheet: s, evaluation: ev } : null;
+        }),
+      )).filter(Boolean) as Array<{ sheet: any; evaluation: any }>;
+
+      const scored = evalRows.map((r) => Number(r.evaluation.totalMarks || 0));
+      const avgScore = scored.length ? Math.round(scored.reduce((a, b) => a + b, 0) / scored.length) : null;
+      const topScore = scored.length ? Math.max(...scored) : null;
+      const lowScore = scored.length ? Math.min(...scored) : null;
+
+      const resultLines = evalRows.slice(0, 50).map((r) => {
+        const name = r.evaluation.studentName || r.sheet.studentName || "Student";
+        const adm = r.evaluation.admissionNumber || r.sheet.admissionNumber || "";
+        const total = Number(r.evaluation.totalMarks || 0);
+        return `- ${name} (${adm}): ${total}/${exam.totalMarks}`;
+      }).join("\n");
+
+      const systemPrompt = `You are an AI assistant helping a teacher analyze one exam's performance.
+Only answer from the exam context below. If data is missing, say so clearly.
+Keep answers concise, numeric where possible, and actionable.
+
+EXAM DETAILS:
+- Name: ${exam.examName}
+- Subject: ${exam.subject}
+- Class: ${exam.className}${exam.section ? `-${exam.section}` : ""}
+- Total Marks: ${exam.totalMarks}
+- Exam Date: ${exam.examDate || "N/A"}
+
+EVALUATION SUMMARY:
+- Evaluated sheets: ${evalRows.length}
+- Average score: ${avgScore !== null ? `${avgScore}/${exam.totalMarks}` : "N/A"}
+- Highest score: ${topScore !== null ? `${topScore}/${exam.totalMarks}` : "N/A"}
+- Lowest score: ${lowScore !== null ? `${lowScore}/${exam.totalMarks}` : "N/A"}
+
+STUDENT SCORES:
+${resultLines || "No evaluated sheets yet."}`;
+
+      const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+        { role: "system", content: systemPrompt },
+        ...((Array.isArray(history) ? history : []).slice(-8).map((m: any) => ({
+          role: m?.role === "assistant" ? "assistant" : "user",
+          content: String(m?.content || ""),
+        }))),
+        { role: "user", content: question },
+      ];
+
+      const response = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages,
+        max_tokens: 500,
+      });
+
+      const answer = response.choices[0].message.content || "I couldn't analyze that right now.";
+      res.json({ answer });
+    } catch (err: any) {
+      console.error("[TEACHER EXAM CHAT] Error:", err?.message || err);
+      res.status(500).json({ message: "Chat failed", detail: err?.message });
+    }
+  });
   // ─── TEACHER OPTIONS (subjects, classes, sections for dropdowns) ───────────
 
   app.get("/api/teacher/options", authMiddleware, async (req: AuthRequest, res) => {
@@ -4479,3 +4949,46 @@ Notes:
 This file was extracted from a large file during refactoring to improve maintainability.
 No business logic was modified.
 */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

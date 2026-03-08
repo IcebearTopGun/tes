@@ -61,6 +61,7 @@ export const exams = pgTable("exams", {
   description: text("description"),
   examDate: text("exam_date"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+  showResultsToStudents: integer("show_results_to_students").notNull().default(0),
 });
 
 export const answerSheets = pgTable("answer_sheets", {
@@ -158,6 +159,7 @@ export const homework = pgTable("homework", {
   modelSolutionText: text("model_solution_text"),
   modelAnswerImages: text("model_answer_images"), // JSON array of base64 strings
   useNcertReference: integer("use_ncert_reference").notNull().default(0),
+  showResultsBeforeDue: integer("show_results_before_due").notNull().default(0),
   dueDate: text("due_date").notNull(),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
@@ -170,6 +172,9 @@ export const homeworkSubmissions = pgTable("homework_submissions", {
   fileBase64: text("file_base64"),
   ocrText: text("ocr_text"),
   correctnessScore: integer("correctness_score"),
+  totalMarks: integer("total_marks"),
+  maxMarks: integer("max_marks"),
+  questionAnalysis: text("question_analysis"), // JSON array
   status: text("status").notNull().default("pending"),
   aiFeedback: text("ai_feedback"),
   submittedAt: text("submitted_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -357,3 +362,7 @@ export type ManagedStudent = typeof managedStudents.$inferSelect;
 export type InsertManagedStudent = z.infer<typeof insertManagedStudentSchema>;
 export type ManagedTeacher = typeof managedTeachers.$inferSelect;
 export type InsertManagedTeacher = z.infer<typeof insertManagedTeacherSchema>;
+
+
+
+

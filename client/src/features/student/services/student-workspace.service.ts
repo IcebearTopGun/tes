@@ -25,6 +25,12 @@ export class StudentWorkspaceService {
     });
   }
 
+  static deleteHomeworkSubmission(homeworkId: number): Promise<{ success: boolean }> {
+    return fetchJsonWithAuth<{ success: boolean }>(`/api/student/homework/${homeworkId}/submission`, {
+      method: "DELETE",
+    });
+  }
+
   static askHomeworkQuestion(homeworkId: number, question: string): Promise<ChatResponse> {
     return fetchJsonWithAuth<ChatResponse>(`/api/student/homework/${homeworkId}/chat`, {
       method: "POST",
@@ -43,3 +49,4 @@ export class StudentWorkspaceService {
     });
   }
 }
+

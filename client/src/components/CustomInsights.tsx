@@ -331,67 +331,16 @@ export default function CustomInsights({ role }: Props) {
         };
       }
 
-      // 2. Call Anthropic API to generate chart spec + narrative
-      const systemPrompt = `You are a school analytics AI. You have access to real school performance data and generate visualisation specs in JSON.
-
-The user will ask a question about school data. You must:
-1. Analyse the provided data context
-2. Generate chart(s) that directly answer the question using ONLY real data values from the context
-3. Return a JSON response (no markdown, no preamble, pure JSON only)
-
-Available chart types: "bar", "horizontal_bar", "line", "donut", "table", "stat_cards", "progress_bars"
-
-Response format (strict JSON):
-{
-  "narrative": "2-3 sentence explanation of what the data shows",
-  "charts": [
-    {
-      "type": "bar",
-      "title": "Chart title",
-      "description": "What this chart shows",
-      "data": [{"label": "...", "value": 42}, ...],
-      "labelKey": "label",
-      "valueKey": "value",
-      "summary": "One-line key finding"
-    }
-  ],
-  "recommendations": ["actionable recommendation 1", "actionable recommendation 2"]
-}
-
-Rules:
-- Use ONLY data values from the provided context. Never invent numbers.
-- If data is empty, set charts to [] and explain in narrative.
-- labelKey and valueKey must match actual keys in each data object.
-- For "donut", include a "colorKey" if you add a color field.
-- Keep data arrays to max 15 items for readability.
-- Always include at least 1 chart if data is available.
-- Return pure JSON only — no markdown, no code fences, no explanation outside JSON.`;
-
-      const userMessage = `User question: "${q}"
-
-Real data context:
-${JSON.stringify(dataContext, null, 2)}
-
-Generate the JSON response now.`;
-
-      const apiRes = await fetch("https://api.anthropic.com/v1/messages", {
+            // 2. Call backend AI insights endpoint (server-side model call)
+      const insightRes = await fetchWithAuth("/api/ai/insights", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 4000,
-          system: systemPrompt,
-          messages: [{ role: "user", content: userMessage }],
+          question: q,
+          dataContext,
         }),
       });
 
-      const apiData = await apiRes.json();
-      const raw = apiData.content?.map((c: any) => c.text || "").join("") || "";
-
-      // Strip any accidental markdown fences
-      const cleaned = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
-      const parsed: InsightResponse = JSON.parse(cleaned);
-
+      const parsed: InsightResponse = await insightRes.json();
       setResult(parsed);
       setHistory(h => [{ prompt: q, result: parsed }, ...h.slice(0, 4)]);
       setPrompt("");
@@ -589,3 +538,4 @@ Generate the JSON response now.`;
     </div>
   );
 }
+
