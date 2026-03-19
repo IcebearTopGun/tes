@@ -19,6 +19,8 @@ export default function PrincipalDashboard() {
   const [classFilter, setClassFilter] = useState("");
   const [teacherFilter, setTeacherFilter] = useState("");
   const [moreInsightsOpen, setMoreInsightsOpen] = useState(false);
+  const [expandedClassKey, setExpandedClassKey] = useState<string | null>(null);
+  const [expandedTeacherId, setExpandedTeacherId] = useState<number | null>(null);
   const avaRef = useRef<HTMLDivElement>(null);
 
   const userName = (user as any)?.name || "Principal";
@@ -271,20 +273,57 @@ export default function PrincipalDashboard() {
                   <div className="sf-empty"><div className="sf-empty-icon">📈</div>No evaluation data yet.</div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-                    {filteredClasses.map((c: any) => (
-                      <div key={`${c.class}-${c.section}`} className="sf-exam-item" style={{ cursor: "default" }}>
+                    {filteredClasses.map((c: any) => {
+                      const classKey = `${c.class}-${c.section}`;
+                      const isOpen = expandedClassKey === classKey;
+                      return (
+                      <div
+                        key={classKey}
+                        className="sf-exam-item"
+                        style={{ cursor: "pointer", flexDirection: "column", alignItems: "stretch", gap: 10 }}
+                        onClick={() => setExpandedClassKey(isOpen ? null : classKey)}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <div className="sf-exam-subj" style={{ background: "var(--lav-bg)", fontSize: 11 }}>{c.class}{c.section}</div>
                         <div className="sf-exam-info">
                           <div className="sf-exam-name">Class {c.class} — Section {c.section}</div>
                           <div className="sf-exam-meta">{c.evaluatedCount || 0} students evaluated · Avg: {c.avgScore}%</div>
                         </div>
-                        <div style={{ display: "flex", gap: 8 }}>
+                        <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
                           <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "var(--green-bg)", color: "var(--green)", fontWeight: 700 }}>↑ {c.highPerformers || 0} High</span>
                           <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "var(--amber-bg)", color: "var(--amber)", fontWeight: 700 }}>~ {c.average || 0} Avg</span>
                           <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, background: "#fff0f0", color: "var(--red)", fontWeight: 700 }}>⚠ {c.atRisk || 0} Risk</span>
+                          <span style={{ fontSize: 13, color: "var(--mid)", fontWeight: 700 }}>{isOpen ? "▲" : "▼"}</span>
                         </div>
+                        </div>
+                        {isOpen && (
+                          <div style={{ width: "100%", display: "grid", gap: 10, padding: "10px", borderRadius: 10, background: "var(--pane)", border: "1px solid var(--rule)" }} onClick={(e) => e.stopPropagation()}>
+                            <div style={{ fontSize: 11, color: "var(--mid)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Top Students</div>
+                            {(c.topStudents || []).length === 0 ? (
+                              <div style={{ fontSize: 12, color: "var(--mid)" }}>No evaluated students yet.</div>
+                            ) : (
+                              (c.topStudents || []).map((s: any) => (
+                                <div key={`${c.class}-${c.section}-${s.admissionNumber}`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 8px", border: "1px solid var(--rule)", borderRadius: 8, background: "#fff" }}>
+                                  <span>{s.studentName} ({s.admissionNumber})</span>
+                                  <span style={{ fontWeight: 700 }}>{s.avgPct}% · {s.attempts} evals</span>
+                                </div>
+                              ))
+                            )}
+                            <div style={{ fontSize: 11, color: "var(--mid)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>At-Risk Students</div>
+                            {(c.atRiskStudents || []).length === 0 ? (
+                              <div style={{ fontSize: 12, color: "var(--mid)" }}>No at-risk students in current evaluated set.</div>
+                            ) : (
+                              (c.atRiskStudents || []).map((s: any) => (
+                                <div key={`${c.class}-${c.section}-risk-${s.admissionNumber}`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 8px", border: "1px solid #fca5a5", borderRadius: 8, background: "#fff5f5" }}>
+                                  <span>{s.studentName} ({s.admissionNumber})</span>
+                                  <span style={{ fontWeight: 700, color: "var(--red)" }}>{s.avgPct}% · {s.attempts} evals</span>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )}
               </div>
@@ -380,21 +419,68 @@ export default function PrincipalDashboard() {
                     <div className="sf-empty"><div className="sf-empty-icon">👩‍🏫</div>No teacher evaluation data yet.</div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-                      {filteredTeachers.map((t: any) => (
-                        <div key={t.teacherId} className="sf-exam-item" style={{ cursor: "default" }}>
+                      {filteredTeachers.map((t: any) => {
+                        const isOpen = expandedTeacherId === t.teacherId;
+                        return (
+                        <div
+                          key={t.teacherId}
+                          className="sf-exam-item"
+                          style={{ cursor: "pointer", flexDirection: "column", alignItems: "stretch", gap: 10 }}
+                          onClick={() => setExpandedTeacherId(isOpen ? null : t.teacherId)}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div className="sf-exam-subj" style={{ background: "var(--lav-bg)" }}>{getInitials(t.name || "T")}</div>
                           <div className="sf-exam-info">
                             <div className="sf-exam-name">{t.name}</div>
                             <div className="sf-exam-meta">{t.examCount} exams · {t.studentsEvaluated} students · Consistency: {t.consistencyIndex}</div>
                           </div>
-                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}>
                             <span className="sf-exam-status sf-es-done" style={{ background: "none", color: kpiColor(t.avgScore) }}>{t.avgScore}% avg</span>
                             <span className="sf-exam-status" style={{ background: t.consistencyIndex >= 75 ? "var(--green-bg)" : "var(--amber-bg)", color: t.consistencyIndex >= 75 ? "var(--green)" : "var(--amber)" }}>
                               {t.consistencyIndex >= 75 ? "Consistent" : "Variable"}
                             </span>
+                            <span style={{ fontSize: 13, color: "var(--mid)", fontWeight: 700 }}>{isOpen ? "▲" : "▼"}</span>
                           </div>
+                          </div>
+                          {isOpen && (
+                            <div style={{ width: "100%", display: "grid", gap: 10, padding: "10px", borderRadius: 10, background: "var(--pane)", border: "1px solid var(--rule)" }} onClick={(e) => e.stopPropagation()}>
+                              <div style={{ fontSize: 11, color: "var(--mid)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Class-Level Evaluations & Results</div>
+                              {(t.classInsights || []).length === 0 ? (
+                                <div style={{ fontSize: 12, color: "var(--mid)" }}>No class-level evaluation data yet.</div>
+                              ) : (
+                                (t.classInsights || []).map((ci: any, idx: number) => (
+                                  <div key={`${t.teacherId}-ci-${idx}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "6px 8px", border: "1px solid var(--rule)", borderRadius: 8, background: "#fff", gap: 10 }}>
+                                    <span style={{ fontWeight: 600 }}>{ci.classKey}</span>
+                                    <span style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                      <span style={{ fontWeight: 700 }}>{ci.avgPct}% avg</span>
+                                      <span style={{ color: "var(--mid)" }}>{ci.evaluations} evals</span>
+                                      <span style={{ color: "var(--mid)" }}>{ci.examsConducted} exams</span>
+                                      <span style={{ color: "var(--mid)" }}>{ci.studentsEvaluated}/{ci.totalStudents} students</span>
+                                      <span style={{ fontWeight: 700, color: kpiColor(ci.participation) }}>{ci.participation}% participation</span>
+                                    </span>
+                                  </div>
+                                ))
+                              )}
+                              <div style={{ fontSize: 11, color: "var(--mid)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 4 }}>Subject-Level Evaluations & Results</div>
+                              {(t.subjectInsights || []).length === 0 ? (
+                                <div style={{ fontSize: 12, color: "var(--mid)" }}>No subject-level evaluation data yet.</div>
+                              ) : (
+                                (t.subjectInsights || []).map((si: any, idx: number) => (
+                                  <div key={`${t.teacherId}-si-${idx}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "6px 8px", border: "1px solid var(--rule)", borderRadius: 8, background: "#fff", gap: 10 }}>
+                                    <span style={{ fontWeight: 600 }}>{si.subject}</span>
+                                    <span style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                                      <span style={{ fontWeight: 700 }}>{si.avgPct}% avg</span>
+                                      <span style={{ color: "var(--mid)" }}>{si.evaluations} evals</span>
+                                      <span style={{ color: "var(--mid)" }}>{si.examsConducted} exams</span>
+                                      <span style={{ color: "var(--mid)" }}>{si.studentsEvaluated} students</span>
+                                    </span>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
                         </div>
-                      ))}
+                      )})}
                     </div>
                   )}
                 </div>

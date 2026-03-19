@@ -985,6 +985,7 @@ export async function registerRoutes(
     if (req.user?.role !== "admin") return res.status(403).json({ message: "Forbidden" });
     try {
       const allTeachers = await storage.getAllTeachers();
+      const allStudents = await storage.getAllStudents();
       res.json(allTeachers.map(({ password, ...t }) => t));
     } catch (err) {
       res.status(500).json({ message: "Failed to load teachers" });
@@ -5148,7 +5149,57 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       res.json(stats);
     } catch (err) {
       console.error("[principal/stats]", err);
-      res.status(500).json({ message: "Failed" });
+      try {
+        // Fallback: derive metrics from live roster/exam/evaluation data.
+        const [students, teachers, exams, evaluations, classSections] = await Promise.all([
+          storage.getAllStudents?.() ?? Promise.resolve([]),
+          storage.getAllTeachers?.() ?? Promise.resolve([]),
+          storage.getAllExams?.() ?? Promise.resolve([]),
+          storage.getAllEvaluations?.() ?? Promise.resolve([]),
+          storage.getAllClassSections?.() ?? Promise.resolve([]),
+        ]);
+
+        const totalStudents = Array.isArray(students) ? students.length : 0;
+        const totalTeachers = Array.isArray(teachers) ? teachers.length : 0;
+        const totalExams = Array.isArray(exams) ? exams.length : 0;
+        const sheetsEvaluated = Array.isArray(evaluations) ? evaluations.length : 0;
+        const activeClasses = Array.isArray(classSections) ? classSections.length : 0;
+
+        const examById = new Map<number, any>((Array.isArray(exams) ? exams : []).map((e: any) => [Number(e.id), e]));
+        const sheetById = new Map<number, any>(
+          (await (storage.getAllAnswerSheets?.() ?? Promise.resolve([]))).map((s: any) => [Number(s.id), s]),
+        );
+        let avgPerformance = 0;
+        if (Array.isArray(evaluations) && evaluations.length > 0) {
+          let totalPct = 0;
+          let count = 0;
+          for (const ev of evaluations as any[]) {
+            const sheet = sheetById.get(Number(ev.answerSheetId));
+            const exam = sheet ? examById.get(Number(sheet.examId)) : undefined;
+            const max = Number(exam?.totalMarks || 0);
+            const got = Number(ev.totalMarks || 0);
+            if (max > 0) {
+              totalPct += got / max;
+              count++;
+            }
+          }
+          avgPerformance = count > 0 ? Math.round((totalPct / count) * 100) : 0;
+        }
+
+        return res.json({
+          totalStudents,
+          totalTeachers,
+          totalExams,
+          sheetsEvaluated,
+          avgPerformance,
+          activeClasses,
+          homeworkAssigned: 0,
+          homeworkSubmitted: 0,
+        });
+      } catch (fallbackErr) {
+        console.error("[principal/stats:fallback]", fallbackErr);
+        res.status(500).json({ message: "Failed" });
+      }
     }
   });
 
@@ -5167,7 +5218,7 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const sheetMap = new Map(allSheets.map((s: any) => [s.id, s]));
 
       // Per class-section performance
-      const classData: Record<string, { scores: number[]; students: Set<string>; totalStudents: number }> = {};
+      const classData: Record<string, { scores: number[]; students: Set<string>; totalStudents: number; studentPerf: Map<string, { studentName: string; pcts: number[] }> }> = {};
 
       for (const ev of allEvals) {
         const sheet = sheetMap.get(ev.answerSheetId);
@@ -5175,25 +5226,35 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
         const exam = examMap.get(sheet.examId);
         if (!exam) continue;
         const key = `${exam.className}-${exam.section || "?"}`;
-        if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0 };
+        if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0, studentPerf: new Map() };
         const qs = JSON.parse(ev.questions || "[]");
         const awarded = qs.reduce((a: number, q: any) => a + (q.marks_awarded || 0), 0);
         const max = qs.reduce((a: number, q: any) => a + (q.max_marks || 0), 0);
-        if (max > 0) classData[key].scores.push((awarded / max) * 100);
+        if (max > 0) {
+          const pct = (awarded / max) * 100;
+          classData[key].scores.push(pct);
+          const adm = String(ev.admissionNumber || "").trim().toUpperCase();
+          const cur = classData[key].studentPerf.get(adm) || {
+            studentName: String(ev.studentName || ev.admissionNumber || adm),
+            pcts: [],
+          };
+          cur.pcts.push(pct);
+          classData[key].studentPerf.set(adm, cur);
+        }
         classData[key].students.add(ev.admissionNumber);
       }
 
       // Total students per class
       for (const s of allStudents) {
         const key = `${s.studentClass}-${s.section}`;
-        if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0 };
+        if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0, studentPerf: new Map() };
         classData[key].totalStudents++;
       }
 
       // Ensure all class-sections created by admin are present (even if no evaluations yet)
       for (const cs of allClassSections) {
         const key = `${cs.className}-${cs.section}`;
-        if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0 };
+        if (!classData[key]) classData[key] = { scores: [], students: new Set(), totalStudents: 0, studentPerf: new Map() };
       }
 
       const result = Object.entries(classData).map(([key, data]) => {
@@ -5203,7 +5264,26 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
         const middle = data.scores.filter(s => s >= 50 && s < 75).length;
         const atRisk = data.scores.filter(s => s < 50).length;
         const participation = data.totalStudents > 0 ? Math.round((data.students.size / data.totalStudents) * 100) : 0;
-        return { class: cls, section: sec, avgScore: avg, highPerformers: high, average: middle, atRisk, participation, evaluatedCount: data.students.size, totalStudents: data.totalStudents };
+        const studentRows = Array.from(data.studentPerf.entries()).map(([adm, v]) => ({
+          admissionNumber: adm,
+          studentName: v.studentName,
+          avgPct: v.pcts.length ? Math.round(v.pcts.reduce((s, p) => s + p, 0) / v.pcts.length) : 0,
+          attempts: v.pcts.length,
+        }));
+        studentRows.sort((a, b) => b.avgPct - a.avgPct);
+        return {
+          class: cls,
+          section: sec,
+          avgScore: avg,
+          highPerformers: high,
+          average: middle,
+          atRisk,
+          participation,
+          evaluatedCount: data.students.size,
+          totalStudents: data.totalStudents,
+          topStudents: studentRows.slice(0, 5),
+          atRiskStudents: studentRows.filter((s) => s.avgPct < 50).slice(0, 5),
+        };
       }).sort((a, b) => parseInt(a.class) - parseInt(b.class));
 
       res.json(result);
@@ -5221,16 +5301,38 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const allSheets = await storage.getAllAnswerSheets?.() || [];
       const allExams = await storage.getAllExams?.() || [];
       const allTeachers = await storage.getAllTeachers();
+      const allStudents = await storage.getAllStudents();
 
       const examMap = new Map(allExams.map((e: any) => [e.id, e]));
       const sheetMap = new Map(allSheets.map((s: any) => [s.id, s]));
       const teacherMap = new Map(allTeachers.map((t: any) => [t.id, t]));
 
-      const teacherData: Record<number, { name: string; scores: number[]; examCount: number; studentSet: Set<string>; examsOverTime: string[] }> = {};
+      const teacherData: Record<number, {
+        name: string;
+        scores: number[];
+        examCount: number;
+        studentSet: Set<string>;
+        examsOverTime: string[];
+        classStats: Map<string, { total: number; count: number; exams: Set<number>; students: Set<string>; totalStudents: number }>;
+        subjectStats: Map<string, { total: number; count: number; exams: Set<number>; students: Set<string> }>;
+      }> = {};
+      const classRosterCount = new Map<string, number>();
+      for (const s of allStudents) {
+        const classKey = `${s.studentClass}-${s.section || "?"}`;
+        classRosterCount.set(classKey, (classRosterCount.get(classKey) || 0) + 1);
+      }
 
       // Include all teachers created by admin, even with no evaluations yet
       for (const t of allTeachers) {
-        teacherData[t.id] = { name: t?.name || "Unknown", scores: [], examCount: 0, studentSet: new Set(), examsOverTime: [] };
+        teacherData[t.id] = {
+          name: t?.name || "Unknown",
+          scores: [],
+          examCount: 0,
+          studentSet: new Set(),
+          examsOverTime: [],
+          classStats: new Map(),
+          subjectStats: new Map(),
+        };
       }
 
       for (const ev of allEvals) {
@@ -5241,12 +5343,49 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
         const tid = exam.teacherId;
         if (!teacherData[tid]) {
           const t = teacherMap.get(tid);
-          teacherData[tid] = { name: t?.name || "Unknown", scores: [], examCount: 0, studentSet: new Set(), examsOverTime: [] };
+          teacherData[tid] = {
+            name: t?.name || "Unknown",
+            scores: [],
+            examCount: 0,
+            studentSet: new Set(),
+            examsOverTime: [],
+            classStats: new Map(),
+            subjectStats: new Map(),
+          };
         }
         const qs = JSON.parse(ev.questions || "[]");
         const awarded = qs.reduce((a: number, q: any) => a + (q.marks_awarded || 0), 0);
         const max = qs.reduce((a: number, q: any) => a + (q.max_marks || 0), 0);
-        if (max > 0) teacherData[tid].scores.push((awarded / max) * 100);
+        if (max > 0) {
+          const pct = (awarded / max) * 100;
+          teacherData[tid].scores.push(pct);
+          const classKey = `${exam.className}-${exam.section || "?"}`;
+          const classCur = teacherData[tid].classStats.get(classKey) || {
+            total: 0,
+            count: 0,
+            exams: new Set<number>(),
+            students: new Set<string>(),
+            totalStudents: classRosterCount.get(classKey) || 0,
+          };
+          classCur.total += pct;
+          classCur.count += 1;
+          classCur.exams.add(Number(exam.id));
+          classCur.students.add(String(ev.admissionNumber || "").trim().toUpperCase());
+          teacherData[tid].classStats.set(classKey, classCur);
+
+          const subjectKey = String(exam.subject || "General").trim() || "General";
+          const subjCur = teacherData[tid].subjectStats.get(subjectKey) || {
+            total: 0,
+            count: 0,
+            exams: new Set<number>(),
+            students: new Set<string>(),
+          };
+          subjCur.total += pct;
+          subjCur.count += 1;
+          subjCur.exams.add(Number(exam.id));
+          subjCur.students.add(String(ev.admissionNumber || "").trim().toUpperCase());
+          teacherData[tid].subjectStats.set(subjectKey, subjCur);
+        }
         teacherData[tid].studentSet.add(ev.admissionNumber);
         if (exam.createdAt) teacherData[tid].examsOverTime.push(exam.createdAt);
       }
@@ -5263,11 +5402,35 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
           ? Math.round(data.scores.reduce((a, s) => a + Math.pow(s - avg, 2), 0) / data.scores.length)
           : 0;
         const consistencyIndex = Math.max(0, 100 - variance);
+        const classInsights = Array.from(data.classStats.entries())
+          .map(([classKey, d]) => ({
+            classKey,
+            avgPct: d.count > 0 ? Math.round(d.total / d.count) : 0,
+            evaluations: d.count,
+            examsConducted: d.exams.size,
+            studentsEvaluated: d.students.size,
+            totalStudents: d.totalStudents,
+            participation: d.totalStudents > 0 ? Math.round((d.students.size / d.totalStudents) * 100) : 0,
+          }))
+          .sort((a, b) => b.avgPct - a.avgPct)
+          .slice(0, 8);
+        const subjectInsights = Array.from(data.subjectStats.entries())
+          .map(([subject, d]) => ({
+            subject,
+            avgPct: d.count > 0 ? Math.round(d.total / d.count) : 0,
+            evaluations: d.count,
+            examsConducted: d.exams.size,
+            studentsEvaluated: d.students.size,
+          }))
+          .sort((a, b) => b.avgPct - a.avgPct)
+          .slice(0, 8);
         return {
           teacherId: parseInt(id), name: data.name, avgScore: avg,
           consistencyIndex, examCount: data.examCount,
           studentsEvaluated: data.studentSet.size,
           examsOverTime: data.examsOverTime.sort(),
+          classInsights,
+          subjectInsights,
         };
       }).sort((a, b) => b.avgScore - a.avgScore);
 

@@ -1023,13 +1023,8 @@ export class DatabaseStorage implements IStorage {
     const [hwSubCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(homeworkSubmissions);
     const [classSectionCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(classSections);
 
-    const allEvals = await db.select({
-      totalMarks: evaluations.totalMarks,
-      answerSheetId: evaluations.answerSheetId,
-      showResultsToStudents: exams.showResultsToStudents,
-    }).from(evaluations);
-
-    const sheetsEvaluated = allEvals.length;
+    const [evalCount] = await db.select({ count: drizzleSql<number>`count(*)` }).from(evaluations);
+    const sheetsEvaluated = Number(evalCount.count || 0);
 
     // Get max marks per evaluation by joining with answer sheets and exams
     const evalData = await db
@@ -1052,10 +1047,31 @@ export class DatabaseStorage implements IStorage {
     const managedTeachersTotal = Number(managedTeacherCount.count);
     const classSectionsTotal = Number(classSectionCount.count);
 
-    // Admin-managed tables are the source of truth for roster KPIs.
-    const totalStudentsCount = managedStudentsTotal > 0 ? managedStudentsTotal : directStudents;
-    const totalTeachersCount = managedTeachersTotal > 0 ? managedTeachersTotal : directTeachers;
-    const activeClassesCount = classSectionsTotal > 0 ? classSectionsTotal : classSet.size;
+    // Fallback to live exam/evaluation data when roster tables are sparse.
+    const evalRows = await db
+      .select({
+        admissionNumber: evaluations.admissionNumber,
+        teacherId: exams.teacherId,
+        className: exams.className,
+        section: exams.section,
+      })
+      .from(evaluations)
+      .innerJoin(answerSheets, eq(evaluations.answerSheetId, answerSheets.id))
+      .innerJoin(exams, eq(answerSheets.examId, exams.id));
+    const evalStudentSet = new Set(evalRows.map((r) => String(r.admissionNumber || "").trim().toUpperCase()).filter(Boolean));
+    const evalTeacherSet = new Set(evalRows.map((r) => Number(r.teacherId)).filter((n) => Number.isFinite(n)));
+    const evalClassSet = new Set(
+      evalRows
+        .map((r) => `${String(r.className || "").trim()}-${String(r.section || "").trim().toUpperCase()}`)
+        .filter((k) => k !== "-"),
+    );
+
+    // Admin-managed tables are preferred, but never show 0 when live data exists.
+    const rosterStudents = managedStudentsTotal > 0 ? managedStudentsTotal : directStudents;
+    const rosterTeachers = managedTeachersTotal > 0 ? managedTeachersTotal : directTeachers;
+    const totalStudentsCount = Math.max(rosterStudents, evalStudentSet.size);
+    const totalTeachersCount = Math.max(rosterTeachers, evalTeacherSet.size);
+    const activeClassesCount = Math.max(classSectionsTotal > 0 ? classSectionsTotal : classSet.size, evalClassSet.size);
 
     return {
       totalStudents: totalStudentsCount,
