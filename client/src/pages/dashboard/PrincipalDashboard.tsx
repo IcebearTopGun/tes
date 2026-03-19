@@ -575,7 +575,13 @@ export default function PrincipalDashboard() {
                       {si.topStudents.map((s: any, i: number) => (
                         <div key={i} className="sf-exam-item" style={{ cursor: "default" }}>
                           <div className="sf-exam-subj" style={{ background: "var(--green-bg)", color: "var(--green)", fontSize: 11 }}>#{i + 1}</div>
-                          <div className="sf-exam-info"><div className="sf-exam-name">{s.admission}</div></div>
+                          <div className="sf-exam-info">
+                            <div className="sf-exam-name">{s.studentName || s.admission}</div>
+                            <div className="sf-exam-meta">
+                              Class {s.className || "-"}, Section {s.section || "-"}
+                            </div>
+                            <div className="sf-exam-meta">Adm No: {s.admission}</div>
+                          </div>
                           <span className="sf-exam-status sf-es-done">{s.avg}%</span>
                         </div>
                       ))}
@@ -599,7 +605,13 @@ export default function PrincipalDashboard() {
                       {si.bottomStudents.map((s: any, i: number) => (
                         <div key={i} className="sf-exam-item" style={{ cursor: "default" }}>
                           <div className="sf-exam-subj" style={{ background: "#fff0f0", color: "var(--red)", fontSize: 11 }}>⚠</div>
-                          <div className="sf-exam-info"><div className="sf-exam-name">{s.admission}</div></div>
+                          <div className="sf-exam-info">
+                            <div className="sf-exam-name">{s.studentName || s.admission}</div>
+                            <div className="sf-exam-meta">
+                              Class {s.className || "-"}, Section {s.section || "-"}
+                            </div>
+                            <div className="sf-exam-meta">Adm No: {s.admission}</div>
+                          </div>
                           <span className="sf-exam-status sf-es-draft">{s.avg}%</span>
                         </div>
                       ))}

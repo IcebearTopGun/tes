@@ -5561,9 +5561,17 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       const allEvals = await storage.getAllEvaluations?.() || [];
       const allSheets = await storage.getAllAnswerSheets?.() || [];
       const allExams = await storage.getAllExams?.() || [];
+      const allStudents = await storage.getAllStudents?.() || [];
 
       const examMap = new Map(allExams.map((e: any) => [e.id, e]));
       const sheetMap = new Map(allSheets.map((s: any) => [s.id, s]));
+      const studentMap = new Map(
+        allStudents.map((s: any) => [
+          String(s.admissionNumber || "").trim().toUpperCase(),
+          { name: s.name, className: s.studentClass, section: s.section },
+        ]),
+      );
+      const evalMetaByAdmission = new Map<string, { studentName: string; className: string; section: string }>();
 
       // Subject strength/weakness
       const subjectData: Record<string, number[]> = {};
@@ -5586,8 +5594,17 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
         subjectData[exam.subject].push(pct);
         evalsBySubject[exam.subject] = (evalsBySubject[exam.subject] || 0) + 1;
         evalsByClass[exam.className] = (evalsByClass[exam.className] || 0) + 1;
-        if (!allStudentScores[ev.admissionNumber]) allStudentScores[ev.admissionNumber] = [];
-        allStudentScores[ev.admissionNumber].push(pct);
+        const admissionKey = String(ev.admissionNumber || "").trim().toUpperCase();
+        if (!admissionKey) continue;
+        if (!allStudentScores[admissionKey]) allStudentScores[admissionKey] = [];
+        allStudentScores[admissionKey].push(pct);
+        if (!evalMetaByAdmission.has(admissionKey)) {
+          evalMetaByAdmission.set(admissionKey, {
+            studentName: String(ev.studentName || "").trim(),
+            className: String(exam.className || "").trim(),
+            section: String(exam.section || "").trim().toUpperCase(),
+          });
+        }
       }
 
       const subjectStrengths = Object.entries(subjectData).map(([subject, scores]) => ({
@@ -5597,10 +5614,21 @@ Analyse the question paper against the NCERT curriculum depth and return ONLY va
       })).sort((a, b) => b.avgScore - a.avgScore);
 
       // Top/bottom 10%
-      const studentAvgs = Object.entries(allStudentScores).map(([admission, scores]) => ({
-        admission,
-        avg: scores.reduce((a, b) => a + b, 0) / scores.length,
-      })).sort((a, b) => b.avg - a.avg);
+      const studentAvgs = Object.entries(allStudentScores)
+        .map(([admission, scores]) => {
+          const key = String(admission || "").trim().toUpperCase();
+          const roster = studentMap.get(key);
+          const evalMeta = evalMetaByAdmission.get(key);
+          const resolvedName = String(roster?.name || evalMeta?.studentName || key).trim();
+          return {
+            admission: key,
+            studentName: resolvedName.toLowerCase() === "name" ? key : resolvedName,
+            className: String(roster?.className || evalMeta?.className || "").trim(),
+            section: String(roster?.section || evalMeta?.section || "").trim().toUpperCase(),
+            avg: scores.reduce((a, b) => a + b, 0) / scores.length,
+          };
+        })
+        .sort((a, b) => b.avg - a.avg);
       const topN = Math.max(1, Math.ceil(studentAvgs.length * 0.1));
       const topStudents = studentAvgs.slice(0, topN);
       const bottomStudents = studentAvgs.slice(-topN);
