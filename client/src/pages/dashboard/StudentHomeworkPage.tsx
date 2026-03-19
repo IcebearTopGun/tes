@@ -214,11 +214,11 @@ export default function StudentHomeworkPage() {
                             <span className={`sf-exam-status ${statusClass}`} style={{ flexShrink: 0 }}>
                               {statusLabel}
                             </span>
-                            {(!submission || isEditable) && (
+                            {!isDuePassed && (!submission || isEditable) && (
                               <Button
                                 size="sm"
                                 className="rounded-xl gap-1"
-                                disabled={isUploading}
+                                disabled={isUploading || isDuePassed}
                                 onClick={() => {
                                   setPendingHwId(homework.id);
                                   hwFileRef.current?.click();
@@ -246,6 +246,12 @@ export default function StudentHomeworkPage() {
                           {!isEditable && submission && (
                             <div style={{ fontSize: 12, color: "var(--mid)" }}>
                               Submission is locked after the due date.
+                            </div>
+                          )}
+
+                          {isDuePassed && !submission && (
+                            <div style={{ fontSize: 12, color: "var(--mid)" }}>
+                              Upload is locked because the due date has passed.
                             </div>
                           )}
 

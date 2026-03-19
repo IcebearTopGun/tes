@@ -182,6 +182,234 @@ Return ONLY corrected JSON in same schema:
   });
   return JSON.parse(response.choices[0].message.content || "{}");
 }
+
+type GeneratedMarkingComponent = {
+  name: string;
+  marks: number;
+  criteria: string;
+  expected_elements?: string[];
+  partial_marking: boolean;
+  diagram_required?: boolean;
+  deductions: string[];
+  keywords?: string[];
+  step_marking?: boolean;
+  rubric?: {
+    excellent: { marks: number; description: string };
+    good: { marks: number; description: string };
+    average: { marks: number; description: string };
+    poor: { marks: number; description: string };
+  };
+  common_mistakes?: string[];
+  deduction_rules?: string[];
+};
+
+type GeneratedQuestionScheme = {
+  question_number: number;
+  question: string;
+  question_type?: string;
+  exam_type?: string;
+  total_marks: number;
+  components: GeneratedMarkingComponent[];
+  general_guidelines: string[];
+  diagram_rules?: {
+    marks_allocated: number;
+    criteria: string;
+  };
+  ncert_alignment?: string;
+};
+
+type GeneratedMarkingScheme = {
+  subject: string;
+  class_name: string;
+  total_marks: number;
+  questions: GeneratedQuestionScheme[];
+  general_guidelines: string[];
+  evaluation_strictness?: "low" | "medium" | "high";
+  confidence_factors?: string[];
+};
+
+function parseQuestionTextForScheme(questionText: string, fallbackTotalMarks: number): Array<{ question_number: number; question: string; total_marks: number }> {
+  const lines = String(questionText || "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const out: Array<{ question_number: number; question: string; total_marks: number }> = [];
+  const re = /^Q\s*([0-9]+)\s*(?:\(\s*([0-9]+)\s*marks?\s*\))?\s*:\s*(.*)$/i;
+  for (const line of lines) {
+    const m = line.match(re);
+    if (!m) continue;
+    out.push({
+      question_number: Number(m[1]),
+      total_marks: Number(m[2] || 0),
+      question: String(m[3] || "").trim(),
+    });
+  }
+  if (out.length === 0) {
+    return [{ question_number: 1, question: String(questionText || "Question 1").trim(), total_marks: Math.max(1, fallbackTotalMarks || 1) }];
+  }
+  const explicit = out.reduce((s, q) => s + (q.total_marks || 0), 0);
+  if (explicit <= 0) {
+    const per = Math.max(1, Math.round((fallbackTotalMarks || out.length) / out.length));
+    for (const q of out) q.total_marks = per;
+  }
+  return out;
+}
+
+function extractModelAnswerKeyPoints(answerText: string, maxPoints = 5): string[] {
+  const raw = String(answerText || "").trim();
+  if (!raw) return [];
+  const splitByBullets = raw
+    .split(/\n+|;+/)
+    .map((s) => s.replace(/^\s*[-*•\d.)]+\s*/, "").trim())
+    .filter(Boolean);
+  const parts = splitByBullets.length > 1 ? splitByBullets : raw.split(/[.?!]\s+/).map((s) => s.trim()).filter(Boolean);
+  return parts
+    .map((p) => p.replace(/\s+/g, " ").trim())
+    .filter((p) => p.length >= 6)
+    .slice(0, maxPoints);
+}
+
+function looksGenericComponentName(name: string): boolean {
+  const n = String(name || "").toLowerCase();
+  return [
+    "concept explanation",
+    "content accuracy",
+    "explanation",
+    "presentation",
+    "grammar",
+    "structure",
+    "formula / approach",
+    "stepwise working",
+    "final answer",
+  ].some((g) => n.includes(g));
+}
+
+function buildLocalMarkingScheme(params: {
+  subject: string;
+  className: string;
+  totalMarks: number;
+  questionText: string;
+  modelAnswerText: string;
+  examType?: string;
+  questionType?: string;
+  ncertReference?: string;
+  useNcert?: boolean;
+  strictness?: "lenient" | "balanced" | "strict";
+}): GeneratedMarkingScheme {
+  const questions = parseQuestionTextForScheme(params.questionText, params.totalMarks);
+  const isMath = /math|mathematics/i.test(params.subject);
+  const isLanguage = /english|hindi|language|literature/i.test(params.subject);
+  const strictness = params.strictness || "balanced";
+  const parsedModelAnswers = parseModelAnswers(params.modelAnswerText || "", params.totalMarks);
+  const modelByQuestion = new Map<number, { answer: string; maxMarks: number }>();
+  for (const item of parsedModelAnswers) modelByQuestion.set(item.qNum, { answer: item.answer, maxMarks: item.maxMarks });
+  const defaultGuidelines = [
+    strictness === "lenient"
+      ? "Be lenient with wording; reward conceptual understanding and attempt quality."
+      : strictness === "strict"
+        ? "Apply deductions strictly when key points/steps/components are missing."
+        : "Use balanced judgement between conceptual correctness and rubric compliance.",
+    "Award partial marks for partially correct responses.",
+    "Use deductions consistently across all answer sheets.",
+    params.useNcert ? "Where relevant, align accepted concepts/keywords with NCERT chapter coverage." : "Evaluate primarily using question intent and model answer alignment.",
+  ];
+
+  return {
+    subject: params.subject,
+    class_name: params.className,
+    total_marks: params.totalMarks,
+    general_guidelines: defaultGuidelines,
+    questions: questions.map((q) => {
+      const modelAnswer = modelByQuestion.get(q.question_number)?.answer || "";
+      const keyPoints = extractModelAnswerKeyPoints(modelAnswer, Math.min(5, Math.max(2, Math.round(q.total_marks / 2))));
+      const pointMarks = keyPoints.length > 0
+        ? keyPoints.map(() => Math.floor(q.total_marks / keyPoints.length))
+        : [];
+      if (pointMarks.length > 0) {
+        pointMarks[pointMarks.length - 1] += q.total_marks - pointMarks.reduce((s, m) => s + m, 0);
+      }
+
+      let components: GeneratedMarkingComponent[] = keyPoints.map((kp, idx) => ({
+        name: `Key Point ${idx + 1}`,
+        marks: Math.max(1, pointMarks[idx] || 1),
+        criteria: `Covers: ${kp}`,
+        expected_elements: [kp],
+        partial_marking: true,
+        diagram_required: /diagram|label|draw|sketch/i.test(kp),
+        deductions: [
+          strictness === "strict" ? "Missing this point: full component deduction" : "Missing major part of this point (-1 or proportional deduction)",
+        ],
+        keywords: kp.split(/\s+/).filter((w) => w.length > 3).slice(0, 4),
+        step_marking: /step|therefore|hence|first|second|then/i.test(kp),
+        rubric: {
+          excellent: { marks: Math.max(0, Math.round((Math.max(1, pointMarks[idx] || 1)) * 100) / 100), description: "Complete and accurate coverage of the expected point." },
+          good: { marks: Math.max(0, Math.round((Math.max(1, pointMarks[idx] || 1) * 0.75) * 100) / 100), description: "Mostly correct with minor omission." },
+          average: { marks: Math.max(0, Math.round((Math.max(1, pointMarks[idx] || 1) * 0.5) * 100) / 100), description: "Partial understanding with key gaps." },
+          poor: { marks: Math.max(0, Math.round((Math.max(1, pointMarks[idx] || 1) * 0.25) * 100) / 100), description: "Very limited or incorrect attempt." },
+        },
+        common_mistakes: [
+          "Missing core idea from model answer",
+          "Vague or incomplete explanation",
+        ],
+        deduction_rules: [
+          strictness === "strict" ? "Missing mandatory keyword/point: deduct full component marks" : "Missing mandatory keyword/point: deduct proportionally",
+        ],
+      }));
+
+      if (components.length === 0) {
+        components = isMath
+          ? [
+              { name: "Formula / Approach", marks: Math.max(1, Math.round(q.total_marks * 0.3)), criteria: "Chooses correct formula or method.", partial_marking: true, deductions: ["Wrong formula or approach (-1 to -2)"] },
+              { name: "Stepwise Working", marks: Math.max(1, Math.round(q.total_marks * 0.4)), criteria: "Shows logical intermediate steps.", partial_marking: true, deductions: ["Missing key steps (-1)", "Major calculation gap (-1 to -2)"] },
+              { name: "Final Answer", marks: Math.max(1, q.total_marks - Math.max(1, Math.round(q.total_marks * 0.3)) - Math.max(1, Math.round(q.total_marks * 0.4))), criteria: "Final answer is correct with units where applicable.", partial_marking: true, deductions: ["Incorrect final answer (-1)"] },
+            ]
+          : isLanguage
+            ? [
+                { name: "Content Accuracy", marks: Math.max(1, Math.round(q.total_marks * 0.4)), criteria: "Response addresses the question with relevant points.", partial_marking: true, deductions: ["Irrelevant points (-1)"] },
+                { name: "Structure & Coherence", marks: Math.max(1, Math.round(q.total_marks * 0.3)), criteria: "Well organized and logically connected response.", partial_marking: true, deductions: ["Poor organization (-1)"] },
+                { name: "Grammar & Vocabulary", marks: Math.max(1, q.total_marks - Math.max(1, Math.round(q.total_marks * 0.4)) - Math.max(1, Math.round(q.total_marks * 0.3))), criteria: "Appropriate grammar and vocabulary.", partial_marking: true, deductions: ["Frequent grammar errors affecting meaning (-1)"] },
+              ]
+            : [
+                { name: "Conceptual Correctness", marks: Math.max(1, Math.round(q.total_marks * 0.5)), criteria: "Core concept is accurate and complete.", partial_marking: true, deductions: ["Missing core concept (-1 to -2)"] },
+                { name: "Explanation / Keywords", marks: Math.max(1, Math.round(q.total_marks * 0.3)), criteria: "Uses correct terminology and explanation.", partial_marking: true, deductions: ["Missing key term(s) (-1)"] },
+                { name: "Presentation", marks: Math.max(1, q.total_marks - Math.max(1, Math.round(q.total_marks * 0.5)) - Math.max(1, Math.round(q.total_marks * 0.3))), criteria: "Neat and logically presented answer.", partial_marking: true, deductions: ["Unclear presentation (-1)"] },
+              ];
+      }
+
+      const compTotal = components.reduce((s, c) => s + c.marks, 0);
+      if (compTotal !== q.total_marks && components.length > 0) {
+        components[components.length - 1].marks += q.total_marks - compTotal;
+      }
+      return {
+        question_number: q.question_number,
+        question: q.question,
+        question_type: params.questionType || "mixed",
+        exam_type: params.examType || "school test",
+        total_marks: q.total_marks,
+        components,
+        diagram_rules: {
+          marks_allocated: /diagram|label|draw|sketch/i.test(`${q.question} ${modelAnswer}`) ? Math.min(2, Math.max(1, Math.round(q.total_marks * 0.15))) : 0,
+          criteria: /diagram|label|draw|sketch/i.test(`${q.question} ${modelAnswer}`)
+            ? "Award marks for presence of diagram, correct labels, and clarity."
+            : "No dedicated diagram marks for this question.",
+        },
+        general_guidelines: [
+          "Apply component-wise marking consistently.",
+          "Award step/method marks before final-answer marks where applicable.",
+          "Do not deduct twice for the same conceptual error.",
+        ],
+        ncert_alignment: params.useNcert
+          ? (params.ncertReference?.trim() || "Use standard NCERT terminology and explanations where applicable.")
+          : "Model-answer-first evaluation; NCERT alignment optional.",
+      };
+    }),
+    evaluation_strictness: strictness === "lenient" ? "low" : strictness === "strict" ? "high" : "medium",
+    confidence_factors: [
+      "Clarity of student response",
+      "Completeness of required points/steps",
+      "Presence of mandatory terms/keywords",
+      "Ambiguity due to handwriting/OCR quality",
+      params.useNcert ? "Alignment with NCERT concepts for the class/subject" : "Model answer alignment",
+    ],
+  };
+}
 async function extractDocumentText(dataUrl: string, label: string): Promise<string> {
   const mimeMatch = dataUrl.match(/^data:([^;]+);base64,(.+)$/s);
   if (!mimeMatch) return "";
@@ -289,6 +517,129 @@ function splitOcrAnswerIntoQuestions(answers: Array<{ question_number?: number; 
 function answerStartsWithExplicitMarker(text: string): boolean {
   const firstLine = String(text || "").split(/\r?\n/)[0] || "";
   return detectQuestionMarker(firstLine.trim()) !== null;
+}
+
+function reconcileQuestionMarksToExamTotal(rawQuestions: any[], examTotalMarks: number): any[] {
+  const questions = (Array.isArray(rawQuestions) ? rawQuestions : [])
+    .map((q: any, idx: number) => ({
+      ...q,
+      question_number: Number(q?.question_number ?? idx + 1) || idx + 1,
+      max_marks: Math.max(0, Math.round(Number(q?.max_marks ?? 0))),
+      marks_awarded: Math.max(0, Number(q?.marks_awarded ?? 0)),
+    }))
+    .sort((a, b) => a.question_number - b.question_number);
+
+  if (questions.length === 0) return [];
+
+  let maxSum = questions.reduce((s, q) => s + q.max_marks, 0);
+  if (maxSum === 0) {
+    const per = Math.floor(examTotalMarks / questions.length);
+    questions.forEach((q, i) => { q.max_marks = per + (i === questions.length - 1 ? examTotalMarks - per * questions.length : 0); });
+    maxSum = examTotalMarks;
+  }
+
+  if (maxSum !== examTotalMarks) {
+    let targetIdx = 0;
+    for (let i = 1; i < questions.length; i++) {
+      if (questions[i].max_marks > questions[targetIdx].max_marks) targetIdx = i;
+    }
+    const diff = examTotalMarks - maxSum;
+    questions[targetIdx].max_marks = Math.max(0, questions[targetIdx].max_marks + diff);
+  }
+
+  for (const q of questions) {
+    q.marks_awarded = Math.max(0, Math.min(Number(q.marks_awarded || 0), Number(q.max_marks || 0)));
+    if (!Number.isFinite(q.marks_awarded)) q.marks_awarded = 0;
+  }
+  return questions;
+}
+
+function validateExamDistributionTotals(input: {
+  totalMarks: number;
+  questionText?: string | null;
+  markingSchemeText?: string | null;
+}): string | null {
+  const total = Number(input.totalMarks || 0);
+  if (!Number.isFinite(total) || total <= 0) return "Total marks must be a positive number.";
+
+  // 1) Validate question paper distribution when explicit marks are present in question text.
+  const parsedQuestions = parseQuestionTextForScheme(String(input.questionText || ""), total);
+  const hasExplicitQuestionMarks = /^\s*Q\s*\d+\s*\(\s*\d+\s*marks?\s*\)\s*:/im.test(String(input.questionText || ""));
+  if (hasExplicitQuestionMarks) {
+    const questionTotal = parsedQuestions.reduce((s, q) => s + Number(q.total_marks || 0), 0);
+    if (questionTotal !== total) {
+      return `Question-wise marks total (${questionTotal}) does not match exam total (${total}).`;
+    }
+  }
+
+  // 2) Validate marking scheme distribution if JSON scheme is provided.
+  const rawScheme = String(input.markingSchemeText || "").trim();
+  if (!rawScheme) return null;
+  try {
+    const scheme = JSON.parse(rawScheme);
+    const qArr = Array.isArray(scheme?.questions) ? scheme.questions : [];
+    if (qArr.length === 0) return null;
+
+    const schemeQuestionTotal = qArr.reduce((s: number, q: any) => s + Number(q?.total_marks ?? q?.max_marks ?? 0), 0);
+    if (schemeQuestionTotal !== total) {
+      return `Marking scheme question total (${schemeQuestionTotal}) does not match exam total (${total}).`;
+    }
+
+    for (const q of qArr) {
+      const qTotal = Number(q?.total_marks ?? q?.max_marks ?? 0);
+      const comps = Array.isArray(q?.components) ? q.components : [];
+      if (comps.length === 0) continue;
+      const compTotal = comps.reduce((s: number, c: any) => s + Number(c?.marks ?? c?.max_marks ?? 0), 0);
+      if (compTotal !== qTotal) {
+        return `Marking scheme mismatch in Q${q?.question_number ?? "?"}: component marks (${compTotal}) do not match question total (${qTotal}).`;
+      }
+    }
+  } catch {
+    // If teacher writes free text (non-JSON), skip strict scheme math validation.
+    return null;
+  }
+
+  return null;
+}
+
+function parseExplicitQuestionMarks(text: string): Array<{ qNum: number; marks: number }> {
+  const lines = String(text || "").split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const out: Array<{ qNum: number; marks: number }> = [];
+  const re = /^Q\s*([0-9]+)\s*\(\s*([0-9]+)\s*marks?\s*\)\s*:/i;
+  for (const line of lines) {
+    const m = line.match(re);
+    if (!m) continue;
+    out.push({ qNum: Number(m[1]), marks: Number(m[2]) });
+  }
+  return out;
+}
+
+function validateHomeworkDistributionConsistency(input: {
+  questionsText?: string | null;
+  modelSolutionText?: string | null;
+}): string | null {
+  const qMarks = parseExplicitQuestionMarks(String(input.questionsText || ""));
+  const aMarks = parseExplicitQuestionMarks(String(input.modelSolutionText || ""));
+
+  // Only enforce when explicit marks are provided on both sides.
+  if (qMarks.length === 0 || aMarks.length === 0) return null;
+
+  const qSum = qMarks.reduce((s, q) => s + q.marks, 0);
+  const aSum = aMarks.reduce((s, q) => s + q.marks, 0);
+  if (qSum !== aSum) {
+    return `Homework marks mismatch: Questions total is ${qSum}, but Model Solution total is ${aSum}.`;
+  }
+
+  const byQ = new Map<number, number>();
+  for (const q of qMarks) byQ.set(q.qNum, q.marks);
+  for (const a of aMarks) {
+    if (!byQ.has(a.qNum)) continue;
+    const expected = byQ.get(a.qNum)!;
+    if (expected !== a.marks) {
+      return `Homework marks mismatch for Q${a.qNum}: Questions has ${expected}, Model Solution has ${a.marks}.`;
+    }
+  }
+  return null;
 }
 
 // Deterministic pseudo-random 0-1 from integer seed
@@ -806,6 +1157,162 @@ export async function registerRoutes(
     showResultsToStudents: z.coerce.number().int().min(0).max(1).optional(),
   });
 
+  app.post("/api/exams/generate-marking-scheme", authMiddleware, async (req: AuthRequest, res) => {
+    if (req.user?.role !== "teacher") return res.status(401).json({ message: "Unauthorized" });
+    const inputSchema = z.object({
+      subject: z.string().min(1),
+      className: z.string().min(1),
+      examType: z.string().optional().default("school test"),
+      questionType: z.string().optional().default("mixed"),
+      questionText: z.string().min(1),
+      modelAnswerText: z.string().min(1),
+      ncertReference: z.string().optional().default(""),
+      totalMarks: z.coerce.number().int().min(1),
+      useNcert: z.coerce.boolean().optional().default(false),
+      strictness: z.enum(["lenient", "balanced", "strict"]).optional().default("balanced"),
+    });
+    try {
+      const input = inputSchema.parse(req.body || {});
+      let ncertContext = "";
+      if (input.useNcert) {
+        try {
+          const chapters = await storage.getNcertChaptersByClassAndSubject(input.className, input.subject);
+          if (Array.isArray(chapters) && chapters.length > 0) {
+            ncertContext = chapters
+              .map((c: any) => `Chapter: ${c.chapterName}\nContent: ${c.chapterContent}`)
+              .join("\n\n");
+          }
+        } catch (err) {
+          console.warn("[MARKING-SCHEME] Failed to load NCERT context:", err);
+        }
+      }
+      const hasApiKey = !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY);
+      if (!hasApiKey) {
+        return res.json(buildLocalMarkingScheme(input));
+      }
+
+      const prompt = `You are a highly experienced CBSE/ICSE-style examiner responsible for designing fair, consistent, and board-level marking schemes.
+Generate a detailed rubric-based marking scheme in valid JSON only.
+
+=== INPUT ===
+Subject: ${input.subject}
+Class: ${input.className}
+Exam Type: ${input.examType}
+Question Type: ${input.questionType}
+Total Marks: ${input.totalMarks}
+Strictness Preset: ${input.strictness}
+NCERT Reference Enabled: ${input.useNcert ? "Yes" : "No"}
+Question Paper:
+${input.questionText}
+
+Model Answer:
+${input.modelAnswerText}
+
+${input.ncertReference ? `Reference Source:\n${input.ncertReference}\n` : ""}
+${input.useNcert && ncertContext ? `NCERT Chapter Context:\n${ncertContext}\n` : ""}
+
+=== INSTRUCTIONS ===
+Think step-by-step like an examiner internally, but output JSON only.
+1) Analyze each question and break the model answer into logical scoring components.
+2) Components must be derived from that question's model answer content, not generic labels.
+3) For each component include:
+   - marks
+   - criteria/description
+   - expected_elements
+   - keywords
+   - step_marking flag
+   - diagram_required flag
+   - rubric levels: excellent, good, average, poor
+   - common_mistakes
+   - deduction_rules
+4) Subject-aware adaptation:
+   - Mathematics: formula, method steps, calculations, final answer
+   - Science: concept correctness, terminology, diagrams/labels if needed, explanation clarity
+   - Language: content relevance, grammar/syntax, vocabulary, coherence
+   - Social studies: facts, keywords, logical explanation, map/diagram relevance
+5) Sum of component marks must exactly equal each question's total_marks.
+6) Support partial marking and method marks where applicable.
+7) Do not penalize the same mistake multiple times.
+8) Accept equivalent wording when meaning is correct.
+9) Add general evaluation guidelines and confidence factors.
+10) Keep this board-practical for handwritten answers.
+11) Apply strictness preset:
+   - lenient: award more partial credit for near-correct reasoning; lighter deductions for minor misses.
+   - balanced: normal board-style marking with fair partial credit and fair deductions.
+   - strict: enforce component completion tightly; stronger deductions for missing mandatory points/steps.
+12) The generated scheme must be editable by teacher before evaluation.
+13) If NCERT Reference Enabled is Yes, align expected points/keywords with NCERT chapter concepts (without ignoring the model answer).
+14) Model answer remains the primary source of expected answer structure; NCERT should strengthen conceptual coverage and terminology.
+
+Return JSON in this exact shape:
+{
+  "subject": "<string>",
+  "class_name": "<string>",
+  "total_marks": <number>,
+  "evaluation_strictness": "low|medium|high",
+  "questions": [
+    {
+      "question_number": <number>,
+      "question": "<string>",
+      "question_type": "<string>",
+      "exam_type": "<string>",
+      "total_marks": <number>,
+      "components": [
+        {
+          "name": "<string>",
+          "marks": <number>,
+          "criteria": "<string>",
+          "expected_elements": ["<string>"],
+          "partial_marking": <boolean>,
+          "keywords": ["<string>"],
+          "step_marking": <boolean>,
+          "diagram_required": <boolean>,
+          "rubric": {
+            "excellent": { "marks": <number>, "description": "<string>" },
+            "good": { "marks": <number>, "description": "<string>" },
+            "average": { "marks": <number>, "description": "<string>" },
+            "poor": { "marks": <number>, "description": "<string>" }
+          },
+          "common_mistakes": ["<string>"],
+          "deduction_rules": ["<string>"],
+          "deductions": ["<string>"]
+        }
+      ],
+      "diagram_rules": { "marks_allocated": <number>, "criteria": "<string>" },
+      "general_guidelines": ["<string>"],
+      "ncert_alignment": "<string>"
+    }
+  ],
+  "general_guidelines": ["<string>"],
+  "confidence_factors": ["<string>"]
+}`;
+
+      const response = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+      });
+      const parsed = JSON.parse(response.choices[0]?.message?.content || "{}");
+      const maybeQuestions = Array.isArray(parsed?.questions) ? parsed.questions : [];
+      const genericRatio = maybeQuestions.length > 0
+        ? maybeQuestions
+            .map((q: any) => Array.isArray(q?.components) ? q.components : [])
+            .flat()
+            .filter((c: any) => looksGenericComponentName(String(c?.name || ""))).length
+          / Math.max(1, maybeQuestions.map((q: any) => Array.isArray(q?.components) ? q.components.length : 0).reduce((a: number, b: number) => a + b, 0))
+        : 1;
+
+      // If AI output is too generic, fallback to deterministic model-answer-derived scheme.
+      if (!Array.isArray(parsed?.questions) || genericRatio > 0.6) {
+        return res.json(buildLocalMarkingScheme(input));
+      }
+      res.json(parsed);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0]?.message || "Invalid input" });
+      res.status(500).json({ message: "Failed to generate marking scheme" });
+    }
+  });
+
   app.post(api.exams.create.path, authMiddleware, async (req: AuthRequest, res) => {
     if (req.user?.role !== "teacher") {
       return res.status(401).json({ message: "Unauthorized" });
@@ -815,6 +1322,14 @@ export async function registerRoutes(
         ...req.body,
         teacherId: req.user.id
       });
+      const distributionError = validateExamDistributionTotals({
+        totalMarks: Number(input.totalMarks || 0),
+        questionText: (input as any).questionText ?? null,
+        markingSchemeText: (input as any).markingSchemeText ?? null,
+      });
+      if (distributionError) {
+        return res.status(400).json({ message: distributionError });
+      }
       const exam = await storage.createExam(input);
       res.status(201).json(exam);
     } catch (err) {
@@ -1281,8 +1796,10 @@ Return ONLY valid JSON with this exact structure:
         studentAnswers: ocrData.answers ?? [],
         initialEvaluation: evalData,
       });
-      const normalizedQuestions = Array.isArray(refinedEval?.questions) ? refinedEval.questions : (Array.isArray(evalData.questions) ? evalData.questions : []);
-      const normalizedTotal = Math.max(0, Math.min(exam.totalMarks, Number(refinedEval?.total_marks ?? evalData.total_marks ?? 0)));
+      const rawQuestions = Array.isArray(refinedEval?.questions) ? refinedEval.questions : (Array.isArray(evalData.questions) ? evalData.questions : []);
+      const normalizedQuestions = reconcileQuestionMarksToExamTotal(rawQuestions, exam.totalMarks);
+      const recomputedTotal = normalizedQuestions.reduce((s: number, q: any) => s + Number(q?.marks_awarded ?? 0), 0);
+      const normalizedTotal = Math.max(0, Math.min(exam.totalMarks, Number(recomputedTotal)));
 
       const evaluation = await storage.createEvaluation({
         answerSheetId,
@@ -1989,8 +2506,10 @@ Return ONLY valid JSON:
         studentAnswers: mergedAnswers,
         initialEvaluation: evalData,
       });
-      const normalizedQuestions = Array.isArray(refinedEval?.questions) ? refinedEval.questions : (Array.isArray(evalData.questions) ? evalData.questions : []);
-      const normalizedTotal = Math.max(0, Math.min(exam.totalMarks, Number(refinedEval?.total_marks ?? evalData.total_marks ?? 0)));
+      const rawQuestions = Array.isArray(refinedEval?.questions) ? refinedEval.questions : (Array.isArray(evalData.questions) ? evalData.questions : []);
+      const normalizedQuestions = reconcileQuestionMarksToExamTotal(rawQuestions, exam.totalMarks);
+      const recomputedTotal = normalizedQuestions.reduce((s: number, q: any) => s + Number(q?.marks_awarded ?? 0), 0);
+      const normalizedTotal = Math.max(0, Math.min(exam.totalMarks, Number(recomputedTotal)));
       console.log(`[BULK-EVAL] Eval done - student: ${refinedEval?.student_name || evalData.student_name}, marks: ${normalizedTotal}`);
 
       // Find or create answer sheet record for this student
@@ -2118,14 +2637,12 @@ Return ONLY valid JSON:
       // Check if already submitted
       const existing = await storage.getHomeworkSubmission(homeworkId, req.user.id);
 
-      // Determine on-time
-      const now = new Date();
-      const due = new Date(hw.dueDate);
-      const isOnTime = now <= due ? 1 : 0;
-
-      // Allow late first submission, but lock edits after due date
-      if (existing && now > due) {
-        return res.status(400).json({ message: "Homework cannot be edited after due date." });
+      // Determine on-time and enforce hard due-date lock (no uploads after due date)
+      const todayStr = new Date().toISOString().split("T")[0];
+      const isPastDue = String(hw.dueDate || "") < todayStr;
+      const isOnTime = isPastDue ? 0 : 1;
+      if (isPastDue) {
+        return res.status(400).json({ message: "Homework submission is locked because due date has passed." });
       }
 
       // OCR extraction from all uploaded pages/files

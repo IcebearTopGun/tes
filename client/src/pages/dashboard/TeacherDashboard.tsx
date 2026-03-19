@@ -47,6 +47,38 @@ import { BAR_COLORS, EXAM_CATEGORIES, EXAMPLE_QUESTIONS } from "./teacher/consta
 import type { AnalyticsData, ClassSection, OcrResult, ScriptEntry, StructuredSubject } from "./teacher/types";
 import { pctColor, readFileAsDataUrl } from "./teacher/utils";
 
+type SchemeComponent = {
+  name: string;
+  marks: number;
+  criteria: string;
+  partial_marking: boolean;
+  deductions: string[];
+  rubric?: {
+    excellent: { marks: number; description: string };
+    good: { marks: number; description: string };
+    average: { marks: number; description: string };
+    poor: { marks: number; description: string };
+  };
+};
+
+type SchemeQuestion = {
+  question_number: number;
+  question: string;
+  total_marks: number;
+  components: SchemeComponent[];
+  general_guidelines?: string[];
+};
+
+type MarkingScheme = {
+  subject?: string;
+  class_name?: string;
+  total_marks: number;
+  questions: SchemeQuestion[];
+  general_guidelines?: string[];
+};
+
+type SchemeStrictness = "lenient" | "balanced" | "strict";
+
 function compareAdmissionNumbers(a: string, b: string): number {
   return String(a || "").localeCompare(String(b || ""), "en", { numeric: true, sensitivity: "base" });
 }
@@ -2196,6 +2228,10 @@ export default function TeacherDashboard() {
   const [modelAnswerImages, setModelAnswerImages] = useState<string[]>([]);
   const [isUploadingQImg, setIsUploadingQImg] = useState(false);
   const [isUploadingAImg, setIsUploadingAImg] = useState(false);
+  const [isGeneratingScheme, setIsGeneratingScheme] = useState(false);
+  const [schemeError, setSchemeError] = useState("");
+  const [markingSchemeDraft, setMarkingSchemeDraft] = useState<MarkingScheme | null>(null);
+  const [schemeStrictness, setSchemeStrictness] = useState<SchemeStrictness>("balanced");
   const questionImgRef = useRef<HTMLInputElement>(null);
   const modelAnswerImgRef = useRef<HTMLInputElement>(null);
   // Results view
@@ -2491,6 +2527,9 @@ export default function TeacherDashboard() {
     setExamDate("");
     setQuestionImages([]);
     setModelAnswerImages([]);
+    setMarkingSchemeDraft(null);
+    setSchemeError("");
+    setSchemeStrictness("balanced");
     setEditingExam(null);
   };
 
@@ -2513,7 +2552,69 @@ export default function TeacherDashboard() {
     setExamDate(exam.examDate || "");
     setQuestionImages(parseImageArray(exam.questionImages));
     setModelAnswerImages(parseImageArray(exam.modelAnswerImages));
+    try {
+      const parsed = exam.markingSchemeText ? JSON.parse(exam.markingSchemeText) : null;
+      if (parsed && Array.isArray(parsed.questions)) {
+        setMarkingSchemeDraft(parsed as MarkingScheme);
+        setSchemeError("");
+      } else {
+        setMarkingSchemeDraft(null);
+      }
+    } catch {
+      setMarkingSchemeDraft(null);
+    }
     setIsDialogOpen(true);
+  };
+
+
+  const syncDraftToForm = (next: MarkingScheme | null) => {
+    setMarkingSchemeDraft(next);
+    if (!next) return;
+    form.setValue("markingSchemeText", JSON.stringify(next, null, 2), { shouldDirty: true });
+  };
+
+  const parseSchemeFromText = (text: string) => {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && Array.isArray(parsed.questions)) {
+        setMarkingSchemeDraft(parsed as MarkingScheme);
+        setSchemeError("");
+      }
+    } catch {
+      // keep last valid object while raw JSON is being edited
+    }
+  };
+
+  const generateMarkingScheme = async () => {
+    const subject = String(form.getValues("subject") || "").trim();
+    const className = String(form.getValues("className") || "").trim();
+    const questionText = String(form.getValues("questionText") || "").trim();
+    const modelAnswerText = String(form.getValues("modelAnswerText") || "").trim();
+    const totalMarks = Number(form.getValues("totalMarks") || 0);
+
+    if (!subject || !className || !questionText || !modelAnswerText || !totalMarks) {
+      setSchemeError("Please fill Subject, Class, Total Marks, Questions, and Model Answer first.");
+      return;
+    }
+
+    setIsGeneratingScheme(true);
+    setSchemeError("");
+    try {
+      const res = await fetchWithAuth("/api/exams/generate-marking-scheme", {
+        method: "POST",
+        body: JSON.stringify({ subject, className, questionText, modelAnswerText, totalMarks, strictness: schemeStrictness, useNcert }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || "Failed to generate marking scheme");
+      if (!data || !Array.isArray(data.questions)) throw new Error("Invalid marking scheme format received");
+      syncDraftToForm(data as MarkingScheme);
+      toast({ title: "Marking scheme generated", description: "Review and edit question-wise components before saving exam." });
+    } catch (err: any) {
+      setSchemeError(err?.message || "Could not generate marking scheme");
+      toast({ title: "Generation failed", description: err?.message || "Could not generate marking scheme", variant: "destructive" });
+    } finally {
+      setIsGeneratingScheme(false);
+    }
   };
 
   const onSubmit = async (values: any) => {
@@ -2523,7 +2624,7 @@ export default function TeacherDashboard() {
         examName: editingExam?.examName || generatedExamName,
         questionText: values.questionText || null,
         modelAnswerText: values.modelAnswerText || null,
-        markingSchemeText: values.markingSchemeText || null,
+        markingSchemeText: markingSchemeDraft ? JSON.stringify(markingSchemeDraft, null, 2) : (values.markingSchemeText || null),
         questionImages: questionImages.length > 0 ? JSON.stringify(questionImages) : null,
         modelAnswerImages: modelAnswerImages.length > 0 ? JSON.stringify(modelAnswerImages) : null,
         section: examSection || null,
@@ -4338,10 +4439,200 @@ export default function TeacherDashboard() {
                   ))}
                 </div>
               </div>
+              <div className="space-y-3 rounded-xl border border-border/40 p-3 bg-muted/10">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <div className="text-sm font-semibold">Marking Scheme</div>
+                    <div className="text-xs text-muted-foreground">Generate from questions + model answer, then edit per question.</div>
+                    <div className="text-[11px] text-muted-foreground">NCERT reference for generation: {useNcert ? "ON" : "OFF"}</div>
+                    <div className="mt-2">
+                      <Select value={schemeStrictness} onValueChange={(val: SchemeStrictness) => setSchemeStrictness(val)}>
+                        <SelectTrigger className="h-8 w-[132px] rounded-lg">
+                          <SelectValue placeholder="Strictness" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="lenient">Lenient</SelectItem>
+                          <SelectItem value="balanced">Balanced</SelectItem>
+                          <SelectItem value="strict">Strict</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <Button type="button" variant="secondary" size="sm" className="rounded-lg" onClick={generateMarkingScheme} disabled={isGeneratingScheme}>
+                    {isGeneratingScheme ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Generating…</> : "Generate Marking Scheme"}
+                  </Button>
+                </div>
 
-              <FormField control={form.control} name="markingSchemeText" render={({ field }) => (
-                <FormItem><FormLabel>Marking Scheme <span className="text-muted-foreground font-normal">(optional)</span></FormLabel><FormControl><Textarea placeholder={"Award full marks for complete accurate answers.\nPartial marks for partial answers."} className="rounded-xl min-h-[60px] text-sm" data-testid="input-marking-scheme-text" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
+                {schemeError && <div className="text-xs text-red-600">{schemeError}</div>}
+
+                {markingSchemeDraft?.questions?.map((q, qIdx) => {
+                  const componentTotal = (q.components || []).reduce((sum, c) => sum + Number(c.marks || 0), 0);
+                  return (
+                    <div key={`scheme-q-${q.question_number}-${qIdx}`} className="rounded-lg border border-border/40 bg-white p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm font-semibold">Q{q.question_number}: {q.question || `Question ${q.question_number}`}</div>
+                        <div className="text-xs text-muted-foreground">{componentTotal}/{q.total_marks} marks</div>
+                      </div>
+                      {componentTotal !== Number(q.total_marks || 0) && (
+                        <div className="text-xs text-amber-700">Component marks do not match total marks for this question.</div>
+                      )}
+
+                      {(q.components || []).map((c, cIdx) => (
+                        <div key={`scheme-c-${cIdx}`} className="grid grid-cols-12 gap-2 rounded-md border border-border/30 p-2">
+                          <Input
+                            className="col-span-4 h-8"
+                            placeholder="Component"
+                            value={c.name || ""}
+                            onChange={(e) => {
+                              const next = JSON.parse(JSON.stringify(markingSchemeDraft)) as MarkingScheme;
+                              next.questions[qIdx].components[cIdx].name = e.target.value;
+                              syncDraftToForm(next);
+                            }}
+                          />
+                          <Input
+                            className="col-span-2 h-8"
+                            type="number"
+                            min={0}
+                            value={Number(c.marks || 0)}
+                            onChange={(e) => {
+                              const next = JSON.parse(JSON.stringify(markingSchemeDraft)) as MarkingScheme;
+                              next.questions[qIdx].components[cIdx].marks = Math.max(0, Number(e.target.value || 0));
+                              syncDraftToForm(next);
+                            }}
+                          />
+                          <Input
+                            className="col-span-6 h-8"
+                            placeholder="Criteria"
+                            value={c.criteria || ""}
+                            onChange={(e) => {
+                              const next = JSON.parse(JSON.stringify(markingSchemeDraft)) as MarkingScheme;
+                              next.questions[qIdx].components[cIdx].criteria = e.target.value;
+                              syncDraftToForm(next);
+                            }}
+                          />
+                          <Textarea
+                            className="col-span-10 min-h-[54px] text-xs"
+                            placeholder="Deductions (one per line)"
+                            value={(c.deductions || []).join("\n")}
+                            onChange={(e) => {
+                              const next = JSON.parse(JSON.stringify(markingSchemeDraft)) as MarkingScheme;
+                              next.questions[qIdx].components[cIdx].deductions = e.target.value.split("\n").map((d) => d.trim()).filter(Boolean);
+                              syncDraftToForm(next);
+                            }}
+                          />
+                          <div className="col-span-12 rounded-md border border-border/30 p-2 bg-muted/10">
+                            <div className="text-xs font-semibold mb-2">Rubric Levels</div>
+                            {(["excellent", "good", "average", "poor"] as const).map((level) => {
+                              const r = c.rubric?.[level] || { marks: 0, description: "" };
+                              return (
+                                <div key={level} className="grid grid-cols-12 gap-2 mb-2">
+                                  <div className="col-span-2 text-xs capitalize self-center">{level}</div>
+                                  <Input
+                                    className="col-span-2 h-8"
+                                    type="number"
+                                    min={0}
+                                    step="0.25"
+                                    value={Number(r.marks || 0)}
+                                    onChange={(e) => {
+                                      const next = JSON.parse(JSON.stringify(markingSchemeDraft)) as MarkingScheme;
+                                      const comp = next.questions[qIdx].components[cIdx] as SchemeComponent;
+                                      if (!comp.rubric) {
+                                        comp.rubric = {
+                                          excellent: { marks: 0, description: "" },
+                                          good: { marks: 0, description: "" },
+                                          average: { marks: 0, description: "" },
+                                          poor: { marks: 0, description: "" },
+                                        };
+                                      }
+                                      comp.rubric[level].marks = Math.max(0, Number(e.target.value || 0));
+                                      syncDraftToForm(next);
+                                    }}
+                                  />
+                                  <Input
+                                    className="col-span-8 h-8"
+                                    placeholder="Description"
+                                    value={r.description || ""}
+                                    onChange={(e) => {
+                                      const next = JSON.parse(JSON.stringify(markingSchemeDraft)) as MarkingScheme;
+                                      const comp = next.questions[qIdx].components[cIdx] as SchemeComponent;
+                                      if (!comp.rubric) {
+                                        comp.rubric = {
+                                          excellent: { marks: 0, description: "" },
+                                          good: { marks: 0, description: "" },
+                                          average: { marks: 0, description: "" },
+                                          poor: { marks: 0, description: "" },
+                                        };
+                                      }
+                                      comp.rubric[level].description = e.target.value;
+                                      syncDraftToForm(next);
+                                    }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="col-span-2 h-8"
+                            onClick={() => {
+                              const next = JSON.parse(JSON.stringify(markingSchemeDraft)) as MarkingScheme;
+                              next.questions[qIdx].components.splice(cIdx, 1);
+                              syncDraftToForm(next);
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const next = JSON.parse(JSON.stringify(markingSchemeDraft)) as MarkingScheme;
+                          next.questions[qIdx].components.push({
+                            name: "New Component",
+                            marks: 0,
+                            criteria: "",
+                            partial_marking: true,
+                            deductions: [],
+                            rubric: {
+                              excellent: { marks: 0, description: "" },
+                              good: { marks: 0, description: "" },
+                              average: { marks: 0, description: "" },
+                              poor: { marks: 0, description: "" },
+                            },
+                          });
+                          syncDraftToForm(next);
+                        }}
+                      >
+                        Add Component
+                      </Button>
+                    </div>
+                  );
+                })}
+
+                <FormField control={form.control} name="markingSchemeText" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Raw Scheme JSON <span className="text-muted-foreground font-normal">(advanced)</span></FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder={"Generated scheme JSON will appear here"}
+                        className="rounded-xl min-h-[120px] text-xs font-mono"
+                        data-testid="input-marking-scheme-text"
+                        {...field}
+                        onChange={(e) => {
+                          field.onChange(e);
+                          parseSchemeFromText(e.target.value || "");
+                        }}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
 
               {/* NCERT checkbox */}
               <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/20">
@@ -4499,39 +4790,6 @@ Notes:
 This file was extracted from a large file during refactoring to improve maintainability.
 No business logic was modified.
 */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

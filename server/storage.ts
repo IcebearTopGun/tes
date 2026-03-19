@@ -865,15 +865,49 @@ export class DatabaseStorage implements IStorage {
       examCount: d.count,
     }));
 
-    // Student performance (last 15)
-    const studentPerformance = filtered.slice(0, 15).map(r => ({
-      studentName: r.studentName.split(" ")[0],
-      totalMarks: r.totalMarks,
-      maxMarks: r.maxMarks,
-      examName: r.examName,
-      subject: r.subject,
-      pct: Math.round((r.totalMarks / r.maxMarks) * 100),
-    }));
+    // Student performance (one record per student across exams)
+    const studentMap = new Map<string, {
+      studentName: string;
+      totalMarksSum: number;
+      maxMarksSum: number;
+      latestExamName: string;
+      latestSubject: string;
+      latestEvalId: number;
+    }>();
+    for (const r of filtered) {
+      const key = String(r.admissionNumber || "").trim().toUpperCase() || `EVAL-${r.evalId}`;
+      const cur = studentMap.get(key);
+      if (!cur) {
+        studentMap.set(key, {
+          studentName: r.studentName,
+          totalMarksSum: r.totalMarks,
+          maxMarksSum: r.maxMarks,
+          latestExamName: r.examName,
+          latestSubject: r.subject,
+          latestEvalId: r.evalId,
+        });
+        continue;
+      }
+      cur.totalMarksSum += r.totalMarks;
+      cur.maxMarksSum += r.maxMarks;
+      if (r.evalId > cur.latestEvalId) {
+        cur.latestEvalId = r.evalId;
+        cur.latestExamName = r.examName;
+        cur.latestSubject = r.subject;
+      }
+      studentMap.set(key, cur);
+    }
+    const studentPerformance = Array.from(studentMap.values())
+      .map((s) => ({
+        studentName: s.studentName.split(" ")[0],
+        totalMarks: s.totalMarksSum,
+        maxMarks: s.maxMarksSum,
+        examName: s.latestExamName,
+        subject: s.latestSubject,
+        pct: s.maxMarksSum > 0 ? Math.round((s.totalMarksSum / s.maxMarksSum) * 100) : 0,
+      }))
+      .sort((a, b) => b.pct - a.pct)
+      .slice(0, 15);
 
     // Marks distribution
     const buckets = [
